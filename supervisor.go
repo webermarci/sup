@@ -23,17 +23,75 @@ const (
 	Temporary                      // Never restart
 )
 
+// Option configures a Supervisor.
+type SupervisorOption func(*Supervisor)
+
+// WithPolicy sets the restart policy.
+func WithPolicy(p RestartPolicy) SupervisorOption {
+	return func(s *Supervisor) {
+		s.policy = p
+	}
+}
+
+// WithRestartDelay sets the delay between restarts.
+func WithRestartDelay(d time.Duration) SupervisorOption {
+	return func(s *Supervisor) {
+		s.restartDelay = d
+	}
+}
+
+// WithRestartLimit sets the maximum number of restarts allowed within a window.
+// Both maxRestarts and window must be positive; otherwise NewSupervisor panics.
+func WithRestartLimit(maxRestarts int, window time.Duration) SupervisorOption {
+	return func(s *Supervisor) {
+		s.maxRestarts = maxRestarts
+		s.restartWindow = window
+	}
+}
+
+// WithOnError sets a callback invoked when an actor returns an error or panics.
+func WithOnError(fn func(error)) SupervisorOption {
+	return func(s *Supervisor) {
+		s.onError = fn
+	}
+}
+
+// WithOnRestart sets a callback invoked just before an actor is restarted.
+func WithOnRestart(fn func()) SupervisorOption {
+	return func(s *Supervisor) {
+		s.onRestart = fn
+	}
+}
+
 // Supervisor manages the lifecycle of actor Run loops.
 type Supervisor struct {
-	Policy        RestartPolicy
-	RestartDelay  time.Duration
-	MaxRestarts   int
-	RestartWindow time.Duration
-	OnError       func(error)
-	OnRestart     func()
+	policy        RestartPolicy
+	restartDelay  time.Duration
+	maxRestarts   int
+	restartWindow time.Duration
+	onError       func(error)
+	onRestart     func()
+	wg            sync.WaitGroup
+	running       atomic.Int32
+}
 
-	wg      sync.WaitGroup
-	running atomic.Int32
+// NewSupervisor creates a new Supervisor with the given options.
+// Panics if the provided options are invalid.
+func NewSupervisor(opts ...SupervisorOption) *Supervisor {
+	s := &Supervisor{
+		policy:       Permanent,
+		restartDelay: time.Second,
+	}
+
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	if (s.maxRestarts > 0) != (s.restartWindow > 0) {
+		panic("sup: WithRestartLimit requires both maxRestarts and window to be positive")
+	}
+
+	return s
 }
 
 // Go starts the actor's run function in a background goroutine and supervises it.
@@ -45,7 +103,7 @@ func (s *Supervisor) Go(ctx context.Context, fn func(context.Context) error) {
 
 		var (
 			restarts []time.Time
-			maxCap   = s.MaxRestarts + 1
+			maxCap   = s.maxRestarts + 1
 		)
 
 		if maxCap > 1 {
@@ -59,45 +117,45 @@ func (s *Supervisor) Go(ctx context.Context, fn func(context.Context) error) {
 				return
 			}
 
-			if err != nil && s.OnError != nil {
-				s.OnError(err)
+			if err != nil && s.onError != nil {
+				s.onError(err)
 			}
 
-			if s.Policy == Temporary {
+			if s.policy == Temporary {
 				return
 			}
 
-			if s.Policy == Transient && err == nil {
+			if s.policy == Transient && err == nil {
 				return
 			}
 
-			if s.MaxRestarts > 0 && s.RestartWindow > 0 {
+			if s.maxRestarts > 0 && s.restartWindow > 0 {
 				now := time.Now()
 
 				n := 0
 				for _, t := range restarts {
-					if now.Sub(t) <= s.RestartWindow {
+					if now.Sub(t) <= s.restartWindow {
 						restarts[n] = t
 						n++
 					}
 				}
 				restarts = append(restarts[:n], now)
 
-				if len(restarts) > s.MaxRestarts {
-					if s.OnError != nil {
-						s.OnError(errors.Join(ErrMaxRestartsExceeded, err))
+				if len(restarts) > s.maxRestarts {
+					if s.onError != nil {
+						s.onError(ErrMaxRestartsExceeded)
 					}
 					return
 				}
 			}
 
-			if s.OnRestart != nil {
-				s.OnRestart()
-			}
-
-			delay := s.RestartDelay
+			delay := s.restartDelay
 			if delay == 0 {
 				delay = time.Second
+			}
+
+			if s.onRestart != nil {
+				s.onRestart()
 			}
 
 			timer := time.NewTimer(delay)

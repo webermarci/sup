@@ -331,9 +331,9 @@ func TestSupervisor_Temporary(t *testing.T) {
 		panic("fatal error")
 	}
 
-	supervisor := &sup.Supervisor{
-		Policy: sup.Temporary,
-	}
+	supervisor := sup.NewSupervisor(
+		sup.WithPolicy(sup.Temporary),
+	)
 
 	if supervisor.Running() != 0 {
 		t.Fatalf("expected 0 running actors, got %d", supervisor.Running())
@@ -364,10 +364,10 @@ func TestSupervisor_Transient(t *testing.T) {
 		return nil
 	}
 
-	supervisor := &sup.Supervisor{
-		Policy:       sup.Transient,
-		RestartDelay: 5 * time.Millisecond,
-	}
+	supervisor := sup.NewSupervisor(
+		sup.WithPolicy(sup.Transient),
+		sup.WithRestartDelay(5*time.Millisecond),
+	)
 
 	supervisor.Go(ctx, actorFn)
 	supervisor.Wait()
@@ -393,10 +393,10 @@ func TestSupervisor_PermanentAndPanicRecovery(t *testing.T) {
 		return actorCtx.Err()
 	}
 
-	supervisor := &sup.Supervisor{
-		Policy:       sup.Permanent,
-		RestartDelay: 5 * time.Millisecond,
-	}
+	supervisor := sup.NewSupervisor(
+		sup.WithPolicy(sup.Permanent),
+		sup.WithRestartDelay(5*time.Millisecond),
+	)
 
 	supervisor.Go(ctx, actorFn)
 
@@ -423,11 +423,13 @@ func TestSupervisor_OnRestart(t *testing.T) {
 		return nil
 	}
 
-	supervisor := &sup.Supervisor{
-		Policy:       sup.Transient,
-		RestartDelay: 5 * time.Millisecond,
-		OnRestart:    func() { restarts.Add(1) },
-	}
+	supervisor := sup.NewSupervisor(
+		sup.WithPolicy(sup.Transient),
+		sup.WithRestartDelay(5*time.Millisecond),
+		sup.WithOnRestart(func() {
+			restarts.Add(1)
+		}),
+	)
 
 	supervisor.Go(ctx, actorFn)
 	supervisor.Wait()
@@ -448,18 +450,17 @@ func TestSupervisor_MaxRestarts(t *testing.T) {
 		return errors.New("continuous failure")
 	}
 
-	supervisor := &sup.Supervisor{
-		Policy:        sup.Permanent,
-		RestartDelay:  2 * time.Millisecond,
-		MaxRestarts:   3,
-		RestartWindow: 1 * time.Second,
-		OnError: func(err error) {
+	supervisor := sup.NewSupervisor(
+		sup.WithPolicy(sup.Permanent),
+		sup.WithRestartDelay(2*time.Millisecond),
+		sup.WithRestartLimit(3, time.Second),
+		sup.WithOnError(func(err error) {
 			errorCount.Add(1)
 			if errors.Is(err, sup.ErrMaxRestartsExceeded) {
 				maxRestartsReported.Store(true)
 			}
-		},
-	}
+		}),
+	)
 
 	supervisor.Go(ctx, actorFn)
 	supervisor.Wait()
@@ -483,10 +484,12 @@ func TestSupervisor_OnError_NotCalledOnCleanExit(t *testing.T) {
 
 	var called atomic.Bool
 
-	supervisor := &sup.Supervisor{
-		Policy:  sup.Transient,
-		OnError: func(err error) { called.Store(true) },
-	}
+	supervisor := sup.NewSupervisor(
+		sup.WithPolicy(sup.Transient),
+		sup.WithOnError(func(err error) {
+			called.Store(true)
+		}),
+	)
 
 	supervisor.Go(ctx, func(ctx context.Context) error { return nil })
 	supervisor.Wait()
@@ -506,7 +509,9 @@ func TestSupervisor_NoGoroutineLeaks(t *testing.T) {
 		return actorCtx.Err()
 	}
 
-	supervisor := &sup.Supervisor{Policy: sup.Permanent}
+	supervisor := sup.NewSupervisor(
+		sup.WithPolicy(sup.Permanent),
+	)
 
 	for range 100 {
 		supervisor.Go(ctx, actorFn)
@@ -538,10 +543,12 @@ func TestSupervisor_PanicIncludesStackTrace(t *testing.T) {
 		panic("something exploded")
 	}
 
-	supervisor := &sup.Supervisor{
-		Policy:  sup.Temporary,
-		OnError: func(err error) { capturedErr.Store(err) },
-	}
+	supervisor := sup.NewSupervisor(
+		sup.WithPolicy(sup.Temporary),
+		sup.WithOnError(func(err error) {
+			capturedErr.Store(err)
+		}),
+	)
 
 	supervisor.Go(ctx, actorFn)
 	supervisor.Wait()
@@ -567,7 +574,9 @@ func TestSupervisor_Running_ReflectsActiveCount(t *testing.T) {
 
 	ready := make(chan struct{})
 
-	supervisor := &sup.Supervisor{Policy: sup.Permanent}
+	supervisor := sup.NewSupervisor(
+		sup.WithPolicy(sup.Permanent),
+	)
 
 	for range 3 {
 		supervisor.Go(ctx, func(ctx context.Context) error {
@@ -911,7 +920,9 @@ func Benchmark_PingPong_Cast(b *testing.B) {
 	actorA := &CastPingActor{Mailbox: sup.NewMailbox(1)}
 	actorB := &CastPingActor{Mailbox: sup.NewMailbox(1)}
 
-	supervisor := &sup.Supervisor{Policy: sup.Temporary}
+	supervisor := sup.NewSupervisor(
+		sup.WithPolicy(sup.Temporary),
+	)
 	supervisor.Go(ctx, actorA.Run)
 	supervisor.Go(ctx, actorB.Run)
 
@@ -936,7 +947,9 @@ func Benchmark_PingPong_CastContext(b *testing.B) {
 	actorA := &CastContextPingActor{Mailbox: sup.NewMailbox(1)}
 	actorB := &CastContextPingActor{Mailbox: sup.NewMailbox(1)}
 
-	supervisor := &sup.Supervisor{Policy: sup.Temporary}
+	supervisor := sup.NewSupervisor(
+		sup.WithPolicy(sup.Temporary),
+	)
 	supervisor.Go(ctx, actorA.Run)
 	supervisor.Go(ctx, actorB.Run)
 
@@ -961,7 +974,9 @@ func Benchmark_PingPong_TryCast(b *testing.B) {
 	actorA := &TryCastPingActor{Mailbox: sup.NewMailbox(1)}
 	actorB := &TryCastPingActor{Mailbox: sup.NewMailbox(1)}
 
-	supervisor := &sup.Supervisor{Policy: sup.Temporary}
+	supervisor := sup.NewSupervisor(
+		sup.WithPolicy(sup.Temporary),
+	)
 	supervisor.Go(ctx, actorA.Run)
 	supervisor.Go(ctx, actorB.Run)
 
@@ -980,12 +995,13 @@ func Benchmark_PingPong_TryCast(b *testing.B) {
 }
 
 func Benchmark_Supervisor_SpawnAndExit(b *testing.B) {
-	ctx := b.Context()
-	supervisor := &sup.Supervisor{Policy: sup.Temporary}
+	supervisor := sup.NewSupervisor(
+		sup.WithPolicy(sup.Temporary),
+	)
 
 	b.ResetTimer()
 	for b.Loop() {
-		supervisor.Go(ctx, func(c context.Context) error {
+		supervisor.Go(b.Context(), func(c context.Context) error {
 			return nil
 		})
 	}

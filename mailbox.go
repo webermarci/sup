@@ -114,8 +114,12 @@ type Request[Req any, Res any] struct {
 }
 
 // Reply sends the response back to the caller.
-func (r *Request[Req, Res]) Reply(value Res, err error) {
-	r.replyTo <- result[Res]{value: value, err: err}
+func (r *Request[Req, Res]) Reply(val Res, err error) {
+	select {
+	case r.replyTo <- result[Res]{value: val, err: err}:
+	default:
+		panic("sup: Reply called more than once on the same Request")
+	}
 }
 
 // poolKey is used as a type-keyed identity for sync.Pool lookup.
