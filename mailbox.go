@@ -141,10 +141,6 @@ func getPool[Res any]() *sync.Pool {
 }
 
 func putReplyCh[Res any](pool *sync.Pool, ch chan result[Res]) {
-	select {
-	case <-ch:
-	default:
-	}
 	pool.Put(ch)
 }
 
@@ -175,8 +171,6 @@ func CallContext[Req any, Res any](ctx context.Context, mb *Mailbox[any], msg Re
 		putReplyCh(pool, replyCh)
 		return res.val, res.err
 	case <-ctx.Done():
-		// Do not return replyCh to the pool here.
-		// The actor may still reply later.
 		return zero, ctx.Err()
 	}
 }

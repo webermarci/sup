@@ -113,7 +113,23 @@ goos: darwin
 goarch: arm64
 pkg: github.com/webermarci/sup
 cpu: Apple M5
-BenchmarkMailbox_TryCast-10             568021905     3.86 ns/op    0 B/op   0 allocs/op
-BenchmarkMailbox_ConcurrentTryCast-10   130512900    11.19 ns/op    0 B/op   0 allocs/op
-BenchmarkActor_PingPongTryCast-10         7121670   173.82 ns/op    0 B/op   0 allocs/op
+Benchmark_Cast-10                     17480271    68.2 ns/op   0 B/op    0 allocs/op
+Benchmark_Cast_Concurrent-10           7740297   157.2 ns/op   0 B/op    0 allocs/op
+Benchmark_CastContext-10              14155596    84.6 ns/op   0 B/op    0 allocs/op
+Benchmark_CastContext_Concurrent-10   10956897   109.0 ns/op   0 B/op    0 allocs/op
+Benchmark_CastContext_Expired-10      16905138    71.3 ns/op   0 B/op    0 allocs/op
+Benchmark_TryCast-10                 182979547     6.5 ns/op   0 B/op    0 allocs/op
+Benchmark_TryCast_Concurrent-10       95225186    14.5 ns/op   0 B/op    0 allocs/op
+Benchmark_TryCast_Full-10            320133992     3.7 ns/op   0 B/op    0 allocs/op
+Benchmark_Call-10                      3024328   399.2 ns/op   16 B/op   1 allocs/op
+Benchmark_Call_Concurrent-10           2388732   533.6 ns/op   16 B/op   1 allocs/op
+Benchmark_CallContext-10               2599174   456.8 ns/op   16 B/op   1 allocs/op
+Benchmark_CallContext_Concurrent-10    1266787   942.5 ns/op   16 B/op   1 allocs/op
+Benchmark_CallContext_Expired-10      21574293    55.3 ns/op   16 B/op   1 allocs/op
+Benchmark_TryCall-10                   3363795   355.1 ns/op   16 B/op   1 allocs/op
+Benchmark_TryCall_Concurrent-10        3085782   449.6 ns/op   16 B/op   1 allocs/op
+Benchmark_PingPong_Cast-10             6305118   204.9 ns/op   0 B/op    0 allocs/op
+Benchmark_PingPong_CastContext-10      5457997   212.4 ns/op   0 B/op    0 allocs/op
+Benchmark_PingPong_TryCast-10          6858592   184.6 ns/op   0 B/op    0 allocs/op
+Benchmark_Supervisor_SpawnAndExit-10   4646894   258.9 ns/op   72 B/op   2 allocs/op
 ```
