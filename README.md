@@ -53,7 +53,7 @@ func (c *Counter) Increment(amount int) {
 	_ = c.Cast(incrementMsg{amount: amount})
 }
 
-func (c *Counter) Get(ctx context.Context) (int, error) {
+func (c *Counter) Get() (int, error) {
 	// Synchronous request-reply
 	return sup.Call[getCountMsg, int](ctx, c.Mailbox, getCountMsg{})
 }
@@ -91,7 +91,7 @@ func main() {
 	counter.Increment(10)
 	counter.Increment(32)
 
-	count, err := counter.Get(ctx)
+	count, err := counter.Get()
 	if err != nil {
 		panic(err)
 	}
@@ -113,7 +113,7 @@ goos: darwin
 goarch: arm64
 pkg: github.com/webermarci/sup
 cpu: Apple M5
-BenchmarkMailbox_Cast-10             568021905     1.86 ns/op    0 B/op   0 allocs/op
-BenchmarkMailbox_ConcurrentCast-10   130512900     8.81 ns/op    0 B/op   0 allocs/op
-BenchmarkActor_PingPongCast-10         7121670   169.93 ns/op    0 B/op   0 allocs/op
+BenchmarkMailbox_TryCast-10             568021905     3.86 ns/op    0 B/op   0 allocs/op
+BenchmarkMailbox_ConcurrentTryCast-10   130512900    11.19 ns/op    0 B/op   0 allocs/op
+BenchmarkActor_PingPongTryCast-10         7121670   173.82 ns/op    0 B/op   0 allocs/op
 ```
