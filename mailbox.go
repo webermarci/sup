@@ -31,6 +31,16 @@ func NewMailbox[T any](size int) *Mailbox[T] {
 	}
 }
 
+// Len returns the current number of messages in the mailbox buffer.
+func (m *Mailbox[T]) Len() int {
+	return len(m.ch)
+}
+
+// Cap returns the total capacity of the mailbox buffer.
+func (m *Mailbox[T]) Cap() int {
+	return cap(m.ch)
+}
+
 // Cast sends a message, waiting until it can be enqueued or the mailbox is closed.
 func (m *Mailbox[T]) Cast(msg T) error {
 	return m.CastContext(context.Background(), msg)

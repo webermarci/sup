@@ -14,9 +14,18 @@ import (
 func TestMailbox_TryCastAndClose(t *testing.T) {
 	mb := sup.NewMailbox[int](2)
 
+	if mb.Len() != 0 {
+		t.Fatalf("expected mailbox length 0, got %d", mb.Len())
+	}
+
+	if mb.Cap() != 2 {
+		t.Fatalf("expected mailbox capacity 2, got %d", mb.Cap())
+	}
+
 	if err := mb.TryCast(1); err != nil {
 		t.Fatalf("expected TryCast to succeed, got %v", err)
 	}
+
 	if err := mb.TryCast(2); err != nil {
 		t.Fatalf("expected TryCast to succeed, got %v", err)
 	}
@@ -38,6 +47,7 @@ func TestMailbox_TryCastAndClose(t *testing.T) {
 	if val := <-mb.Receive(); val != 2 {
 		t.Fatalf("expected 2, got %d", val)
 	}
+
 	if _, ok := <-mb.Receive(); ok {
 		t.Fatal("expected channel to be closed")
 	}
@@ -127,6 +137,7 @@ func TestCall_SuccessAndError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
+
 	if res != 5 {
 		t.Fatalf("expected 5, got %d", res)
 	}
@@ -204,6 +215,7 @@ func TestTryCall_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
+
 	if res != 4 {
 		t.Fatalf("expected 4, got %d", res)
 	}
@@ -258,6 +270,7 @@ func TestCallContext_LateReplyDoesNotCorruptNextCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
+
 	if res != 222 {
 		t.Fatalf("expected 222, got %d", res)
 	}
