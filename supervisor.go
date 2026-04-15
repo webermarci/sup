@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -23,12 +24,16 @@ type Supervisor struct {
 	RestartWindow time.Duration
 	OnError       func(error)
 
-	wg sync.WaitGroup
+	wg      sync.WaitGroup
+	running atomic.Int32
 }
 
 // Go starts the actor's Run function in a background goroutine and supervises it.
 func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) {
 	s.wg.Go(func() {
+		s.running.Add(1)
+		defer s.running.Add(-1)
+
 		var restarts []time.Time
 
 		for {
@@ -87,10 +92,15 @@ func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) 
 func (s *Supervisor) executeSafe(ctx context.Context, fn func(context.Context) error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("actor paniced: %v", r)
+			err = fmt.Errorf("actor panicked: %v", r)
 		}
 	}()
 	return fn(ctx)
+}
+
+// Running returns the number of currently running actors under supervision.
+func (s *Supervisor) Running() int {
+	return int(s.running.Load())
 }
 
 // Wait blocks until all actors managed by this supervisor have stopped.

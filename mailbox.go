@@ -41,6 +41,11 @@ func (m *Mailbox[T]) Cap() int {
 	return cap(m.ch)
 }
 
+// IsClosed checks if the mailbox has been closed.
+func (m *Mailbox[T]) IsClosed() bool {
+	return m.closed.Load()
+}
+
 // Cast sends a message, waiting until it can be enqueued or the mailbox is closed.
 func (m *Mailbox[T]) Cast(msg T) error {
 	return m.CastContext(context.Background(), msg)

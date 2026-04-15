@@ -22,6 +22,10 @@ func TestMailbox_TryCastAndClose(t *testing.T) {
 		t.Fatalf("expected mailbox capacity 2, got %d", mb.Cap())
 	}
 
+	if mb.IsClosed() {
+		t.Fatal("expected mailbox to be open")
+	}
+
 	if err := mb.TryCast(1); err != nil {
 		t.Fatalf("expected TryCast to succeed, got %v", err)
 	}
@@ -290,8 +294,16 @@ func TestSupervisor_Temporary(t *testing.T) {
 		Policy: sup.Temporary,
 	}
 
+	if supervisor.Running() != 0 {
+		t.Fatalf("expected 0 running actors, got %d", supervisor.Running())
+	}
+
 	supervisor.Go(ctx, actorFn)
 	supervisor.Wait()
+
+	if supervisor.Running() != 0 {
+		t.Fatalf("expected 0 running actors after wait, got %d", supervisor.Running())
+	}
 
 	if runs.Load() != 1 {
 		t.Fatalf("expected 1 run, got %d", runs.Load())
