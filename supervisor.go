@@ -43,7 +43,14 @@ func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) 
 	s.wg.Go(func() {
 		defer s.running.Add(-1)
 
-		var restarts []time.Time
+		var (
+			restarts []time.Time
+			maxCap   = s.MaxRestarts + 1
+		)
+
+		if maxCap > 1 {
+			restarts = make([]time.Time, 0, maxCap)
+		}
 
 		for {
 			err := s.executeSafe(ctx, runFn)
@@ -66,15 +73,15 @@ func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) 
 
 			if s.MaxRestarts > 0 && s.RestartWindow > 0 {
 				now := time.Now()
-				var recent []time.Time
 
+				n := 0
 				for _, t := range restarts {
 					if now.Sub(t) <= s.RestartWindow {
-						recent = append(recent, t)
+						restarts[n] = t
+						n++
 					}
 				}
-				recent = append(recent, now)
-				restarts = recent
+				restarts = append(restarts[:n], now)
 
 				if len(restarts) > s.MaxRestarts {
 					if s.OnError != nil {
@@ -93,10 +100,12 @@ func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) 
 				delay = time.Second
 			}
 
+			timer := time.NewTimer(delay)
 			select {
 			case <-ctx.Done():
+				timer.Stop()
 				return
-			case <-time.After(delay):
+			case <-timer.C:
 			}
 		}
 	})
