@@ -3,263 +3,336 @@ package sup_test
 import (
 	"context"
 	"errors"
-	"sync"
+	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/webermarci/sup"
 )
 
-type Increment struct{ Amount int }
-type PanicCmd struct{}
-type StopCmd struct{}
-type GetCount struct{}
+func TestMailbox_CastAndClose(t *testing.T) {
+	mb := sup.NewMailbox[int](2)
 
-type CounterState struct {
-	Total int
-}
+	// Test successful casts
+	if err := mb.Cast(1); err != nil {
+		t.Fatalf("expected Cast to succeed, got %v", err)
+	}
+	if err := mb.Cast(2); err != nil {
+		t.Fatalf("expected Cast to succeed, got %v", err)
+	}
 
-type CounterActor struct {
-	sup.BaseActor[string, any, GetCount, CounterState]
-	count int
-}
+	// Test backpressure (mailbox is full)
+	if err := mb.Cast(3); !errors.Is(err, sup.ErrMailboxFull) {
+		t.Fatalf("expected ErrMailboxFull, got %v", err)
+	}
 
-func (c *CounterActor) ReceiveCast(ctx context.Context, msg any) {
-	switch m := msg.(type) {
-	case Increment:
-		c.count += m.Amount
-	case PanicCmd:
-		panic("simulated fatal error")
-	case StopCmd:
-		c.Stop()
+	// Test receiving
+	if val := <-mb.Receive(); val != 1 {
+		t.Fatalf("expected 1, got %d", val)
+	}
+
+	// Test closing
+	mb.Close()
+	if err := mb.Cast(4); !errors.Is(err, sup.ErrMailboxClosed) {
+		t.Fatalf("expected ErrMailboxClosed, got %v", err)
+	}
+
+	// Channel should be cleanly closed (draining still works)
+	if val := <-mb.Receive(); val != 2 {
+		t.Fatalf("expected 2, got %d", val)
+	}
+	if _, ok := <-mb.Receive(); ok {
+		t.Fatal("expected channel to be closed")
 	}
 }
 
-func (c *CounterActor) ReceiveCall(ctx context.Context, msg GetCount) (CounterState, error) {
-	return CounterState{Total: c.count}, nil
+type MathReq struct{ A, B int }
+
+type MathActor struct {
+	*sup.Mailbox[any]
 }
 
-func NewCounter(id string) sup.Producer[string, any, GetCount, CounterState] {
-	return func() sup.Actor[string, any, GetCount, CounterState] {
-		return &CounterActor{
-			BaseActor: sup.BaseActor[string, any, GetCount, CounterState]{ID: id},
-			count:     0,
+func (a *MathActor) Run(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case msg := <-a.Receive():
+			switch m := msg.(type) {
+			case sup.Request[MathReq, int]:
+				if m.Msg.B == 0 {
+					m.Reply(0, errors.New("division by zero"))
+					continue
+				}
+				m.Reply(m.Msg.A/m.Msg.B, nil)
+			}
 		}
 	}
 }
 
-func TestActor_CastAndCall(t *testing.T) {
+func TestCall_SuccessAndError(t *testing.T) {
 	ctx := t.Context()
 
-	sys := sup.NewSystem(ctx)
-	ref := sup.Spawn(sys, NewCounter("counter-1"))
+	actor := &MathActor{Mailbox: sup.NewMailbox[any](10)}
 
-	state, err := ref.Call(ctx, GetCount{})
+	// Start actor manually for this simple test
+	go actor.Run(ctx)
+
+	// Test successful call
+	res, err := sup.Call[MathReq, int](ctx, actor.Mailbox, MathReq{10, 2})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
-
-	if state.Total != 0 {
-		t.Fatalf("expected count 0, got %d", state.Total)
+	if res != 5 {
+		t.Fatalf("expected 5, got %d", res)
 	}
 
-	ref.Cast(Increment{Amount: 5})
-	ref.Cast(Increment{Amount: 10})
-
-	time.Sleep(10 * time.Millisecond)
-
-	state, err = ref.Call(ctx, GetCount{})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-
-	if state.Total != 15 {
-		t.Fatalf("expected count 15, got %d", state.Total)
+	// Test domain error
+	_, err = sup.Call[MathReq, int](ctx, actor.Mailbox, MathReq{10, 0})
+	if err == nil || err.Error() != "division by zero" {
+		t.Fatalf("expected division by zero error, got %v", err)
 	}
 }
 
-func TestActor_CrashRecovery(t *testing.T) {
+func TestCall_MailboxFull(t *testing.T) {
 	ctx := t.Context()
 
-	sys := sup.NewSystem(ctx)
-	ref := sup.Spawn(sys, NewCounter("counter-recover"))
+	// Mailbox with size 0 ensures the Cast blocks/fails instantly if not read
+	mb := sup.NewMailbox[any](0)
 
-	ref.Cast(Increment{Amount: 42})
-	time.Sleep(10 * time.Millisecond)
+	timeoutCtx, timeoutCancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer timeoutCancel()
 
-	ref.Cast(PanicCmd{})
-
-	time.Sleep(1200 * time.Millisecond)
-
-	state, err := ref.Call(ctx, GetCount{})
-	if err != nil {
-		t.Fatalf("expected actor to be alive, but got error: %v", err)
-	}
-
-	if state.Total != 0 {
-		t.Fatalf("expected state to be reset to 0 after crash, got %d", state.Total)
-	}
-
-	ref.Cast(Increment{Amount: 100})
-	time.Sleep(10 * time.Millisecond)
-
-	state, _ = ref.Call(ctx, GetCount{})
-	if state.Total != 100 {
-		t.Fatalf("expected recovered actor to process new messages, got %d", state.Total)
+	// Call will fail instantly because mailbox is full/unbuffered
+	_, err := sup.Call[MathReq, int](timeoutCtx, mb, MathReq{1, 1})
+	if !errors.Is(err, sup.ErrMailboxFull) {
+		t.Fatalf("expected ErrMailboxFull, got %v", err)
 	}
 }
 
-func TestActor_GracefulStop(t *testing.T) {
+func TestSupervisor_Temporary(t *testing.T) {
 	ctx := t.Context()
 
-	sys := sup.NewSystem(ctx)
-	ref := sup.Spawn(sys, NewCounter("counter-graceful-stop"))
+	var runs atomic.Int32
 
-	_, err := ref.Call(ctx, GetCount{})
-	if err != nil {
-		t.Fatalf("actor should be alive: %v", err)
+	actorFn := func(ctx context.Context) error {
+		runs.Add(1)
+		panic("fatal error") // Crash immediately
 	}
 
-	ref.Cast(StopCmd{})
+	supervisor := &sup.Supervisor{
+		Policy: sup.Temporary, // Should NEVER restart
+	}
 
-	time.Sleep(50 * time.Millisecond)
+	supervisor.Go(ctx, actorFn)
+	supervisor.Wait() // Will unblock because actor dies and is not restarted
 
-	ctx2, cancel2 := context.WithTimeout(t.Context(), 100*time.Millisecond)
-	defer cancel2()
-
-	_, err = ref.Call(ctx2, GetCount{})
-	if !errors.Is(err, sup.ErrProcessNotFound) {
-		t.Fatalf("expected ProcessNotFound for normally stopped actor, got %v", err)
+	if runs.Load() != 1 {
+		t.Fatalf("expected 1 run, got %d", runs.Load())
 	}
 }
 
-func TestSystem_GracefulShutdown(t *testing.T) {
+func TestSupervisor_Transient(t *testing.T) {
+	ctx := t.Context()
+
+	var runs atomic.Int32
+
+	actorFn := func(ctx context.Context) error {
+		count := runs.Add(1)
+		if count == 1 {
+			return errors.New("abnormal exit") // Should restart
+		}
+		return nil // Clean exit, should NOT restart
+	}
+
+	supervisor := &sup.Supervisor{
+		Policy:       sup.Transient,
+		RestartDelay: 5 * time.Millisecond,
+	}
+
+	supervisor.Go(ctx, actorFn)
+	supervisor.Wait() // Unblocks after the clean exit
+
+	if runs.Load() != 2 {
+		t.Fatalf("expected 2 runs, got %d", runs.Load())
+	}
+}
+
+func TestSupervisor_PermanentAndPanicRecovery(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	var runs atomic.Int32
+
+	actorFn := func(actorCtx context.Context) error {
+		count := runs.Add(1)
+		if count < 3 {
+			panic("simulated panic") // Should recover and restart
+		}
+
+		// 3rd run stays alive until context is canceled
+		<-actorCtx.Done()
+		return actorCtx.Err()
+	}
+
+	supervisor := &sup.Supervisor{
+		Policy:       sup.Permanent,
+		RestartDelay: 5 * time.Millisecond,
+	}
+
+	supervisor.Go(ctx, actorFn)
+
+	// Wait a moment for restarts to happen
+	time.Sleep(30 * time.Millisecond)
+
+	// Shut down the system
+	cancel()
+	supervisor.Wait()
+
+	if runs.Load() != 3 {
+		t.Fatalf("expected 3 runs before shutdown, got %d", runs.Load())
+	}
+}
+
+func TestSupervisor_MaxRestarts(t *testing.T) {
+	ctx := t.Context()
+
+	var runs atomic.Int32
+	var errReported atomic.Bool
+
+	actorFn := func(ctx context.Context) error {
+		runs.Add(1)
+		return errors.New("continuous failure")
+	}
+
+	supervisor := &sup.Supervisor{
+		Policy:        sup.Permanent,
+		RestartDelay:  2 * time.Millisecond,
+		MaxRestarts:   3,
+		RestartWindow: 1 * time.Second,
+		OnError: func(err error) {
+			errReported.Store(true)
+		},
+	}
+
+	supervisor.Go(ctx, actorFn)
+	supervisor.Wait() // Should unblock when MaxRestarts is hit
+
+	// Initial boot + 3 restarts = 4 runs total
+	if runs.Load() != 4 {
+		t.Fatalf("expected exactly 4 runs, got %d", runs.Load())
+	}
+
+	if !errReported.Load() {
+		t.Fatal("expected OnError to be called after max restarts")
+	}
+}
+
+func TestSupervisor_NoGoroutineLeaks(t *testing.T) {
+	initialGoroutines := runtime.NumGoroutine()
+
 	ctx, cancel := context.WithCancel(t.Context())
 
-	sys := sup.NewSystem(ctx)
-	ref := sup.Spawn(sys, NewCounter("counter-shutdown"))
+	actorFn := func(actorCtx context.Context) error {
+		<-actorCtx.Done()
+		return actorCtx.Err()
+	}
 
-	_, err := ref.Call(ctx, GetCount{})
-	if err != nil {
-		t.Fatalf("actor should be alive: %v", err)
+	supervisor := &sup.Supervisor{Policy: sup.Permanent}
+
+	for range 100 {
+		supervisor.Go(ctx, actorFn)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+	if runtime.NumGoroutine() <= initialGoroutines {
+		t.Fatal("expected goroutines to increase")
 	}
 
 	cancel()
+	supervisor.Wait()
 
-	time.Sleep(50 * time.Millisecond)
+	time.Sleep(10 * time.Millisecond)
 
-	ctx2, cancel2 := context.WithTimeout(t.Context(), 100*time.Millisecond)
-	defer cancel2()
+	finalGoroutines := runtime.NumGoroutine()
 
-	_, err = ref.Call(ctx2, GetCount{})
-	if err == nil {
-		t.Fatal("expected error calling dead actor, got nil")
-	}
-
-	if !errors.Is(err, sup.ErrProcessNotFound) && !errors.Is(err, context.Canceled) {
-		t.Fatalf("expected ProcessNotFound or Canceled, got %v", err)
+	if finalGoroutines > initialGoroutines+5 {
+		t.Fatalf("goroutine leak detected! Started with %d, ended with %d", initialGoroutines, finalGoroutines)
 	}
 }
 
-func TestActor_HighConcurrency(t *testing.T) {
-	ctx := t.Context()
-
-	sys := sup.NewSystem(ctx)
-	ref := sup.Spawn(sys, NewCounter("counter-stress"))
-
-	const numGoroutines = 100
-	const incrementsPerGoroutine = 1000
-	const expectedTotal = numGoroutines * incrementsPerGoroutine
-
-	var wg sync.WaitGroup
-
-	for range numGoroutines {
-		wg.Go(func() {
-			for range incrementsPerGoroutine {
-				ref.Cast(Increment{Amount: 1})
-			}
-		})
+func BenchmarkMailbox_Cast(b *testing.B) {
+	mb := sup.NewMailbox[int](b.N + 1)
+	b.ResetTimer()
+	for b.Loop() {
+		_ = mb.Cast(1)
 	}
+}
 
-	wg.Wait()
+func BenchmarkMailbox_ConcurrentCast(b *testing.B) {
+	mb := sup.NewMailbox[int](b.N + 1000)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			_ = mb.Cast(1)
+		}
+	})
+}
 
-	timeout := time.After(2 * time.Second)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
+type PingMsg struct {
+	Remaining int
+	ReplyTo   *sup.Mailbox[PingMsg]
+	Done      chan struct{}
+}
 
-	var finalState CounterState
-	var err error
+type AsyncPingActor struct {
+	*sup.Mailbox[PingMsg]
+}
 
+func (p *AsyncPingActor) Run(ctx context.Context) error {
 	for {
 		select {
-		case <-timeout:
-			t.Fatalf("timed out waiting for actor to process all messages. got %d, expected %d", finalState.Total, expectedTotal)
-		case <-ticker.C:
-			finalState, err = ref.Call(ctx, GetCount{})
-			if err != nil {
-				t.Fatalf("failed to call actor: %v", err)
+		case <-ctx.Done():
+			return ctx.Err()
+		case msg := <-p.Receive():
+			if msg.Remaining == 0 {
+				close(msg.Done)
+				return nil
 			}
 
-			if finalState.Total == expectedTotal {
-				return
-			}
+			_ = msg.ReplyTo.Cast(PingMsg{
+				Remaining: msg.Remaining - 1,
+				ReplyTo:   p.Mailbox,
+				Done:      msg.Done,
+			})
 		}
 	}
 }
 
-func BenchmarkActor_Cast(b *testing.B) {
-	ctx := b.Context()
+func BenchmarkActor_PingPongCast(b *testing.B) {
+	ctx, cancel := context.WithCancel(b.Context())
+	defer cancel()
 
-	sys := sup.NewSystem(ctx)
-	ref := sup.Spawn(sys, NewCounter("bench-cast"))
+	actorA := &AsyncPingActor{Mailbox: sup.NewMailbox[PingMsg](1)}
+	actorB := &AsyncPingActor{Mailbox: sup.NewMailbox[PingMsg](1)}
 
-	msg := Increment{Amount: 1}
+	supervisor := &sup.Supervisor{Policy: sup.Temporary}
+	supervisor.Go(ctx, actorA.Run)
+	supervisor.Go(ctx, actorB.Run)
 
-	b.ResetTimer()
-	for b.Loop() {
-		ref.Cast(msg)
-	}
-}
-
-func BenchmarkActor_Call(b *testing.B) {
-	ctx := b.Context()
-
-	sys := sup.NewSystem(ctx)
-	ref := sup.Spawn(sys, NewCounter("bench-call"))
-	msg := GetCount{}
+	done := make(chan struct{})
 
 	b.ResetTimer()
-	for b.Loop() {
-		_, _ = ref.Call(ctx, msg)
-	}
-}
 
-func BenchmarkActor_ConcurrentCast(b *testing.B) {
-	ctx := b.Context()
-
-	sys := sup.NewSystem(ctx)
-	ref := sup.Spawn(sys, NewCounter("bench-concurrent-cast"))
-	msg := Increment{Amount: 1}
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			ref.Cast(msg)
-		}
+	_ = actorA.Cast(PingMsg{
+		Remaining: b.N,
+		ReplyTo:   actorB.Mailbox,
+		Done:      done,
 	})
-}
 
-func BenchmarkActor_ConcurrentCall(b *testing.B) {
-	ctx := b.Context()
+	<-done
 
-	sys := sup.NewSystem(ctx)
-	ref := sup.Spawn(sys, NewCounter("bench-concurrent-call"))
-	msg := GetCount{}
-
-	b.ResetTimer()
-	b.RunParallel(func(pb *testing.PB) {
-		for pb.Next() {
-			_, _ = ref.Call(ctx, msg)
-		}
-	})
+	cancel()
+	supervisor.Wait()
 }
