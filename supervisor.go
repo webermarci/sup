@@ -111,7 +111,6 @@ func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) 
 	})
 }
 
-// executeSafe runs the function and converts panics into standard errors.
 func (s *Supervisor) executeSafe(ctx context.Context, fn func(context.Context) error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
