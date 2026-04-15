@@ -15,46 +15,46 @@ var (
 )
 
 type result[Res any] struct {
-	val Res
-	err error
+	value Res
+	err   error
 }
 
-// Mailbox is a generic, thread-safe message queue for actors.
-type Mailbox[T any] struct {
-	ch     chan T
+// Mailbox is a thread-safe message queue for actors.
+type Mailbox struct {
+	ch     chan any
 	closed atomic.Bool
 }
 
 // NewMailbox creates a new mailbox with the specified buffer size.
 // A size of 0 means unbuffered.
-func NewMailbox[T any](size int) *Mailbox[T] {
-	return &Mailbox[T]{
-		ch: make(chan T, size),
+func NewMailbox(size int) *Mailbox {
+	return &Mailbox{
+		ch: make(chan any, size),
 	}
 }
 
 // Len returns the current number of messages in the mailbox buffer.
-func (m *Mailbox[T]) Len() int {
+func (m *Mailbox) Len() int {
 	return len(m.ch)
 }
 
 // Cap returns the total capacity of the mailbox buffer.
-func (m *Mailbox[T]) Cap() int {
+func (m *Mailbox) Cap() int {
 	return cap(m.ch)
 }
 
 // IsClosed checks if the mailbox has been closed.
-func (m *Mailbox[T]) IsClosed() bool {
+func (m *Mailbox) IsClosed() bool {
 	return m.closed.Load()
 }
 
 // Cast sends a message, waiting until it can be enqueued or the mailbox is closed.
-func (m *Mailbox[T]) Cast(msg T) error {
-	return m.CastContext(context.Background(), msg)
+func (m *Mailbox) Cast(message any) error {
+	return m.CastContext(context.Background(), message)
 }
 
 // CastContext sends a message with context support for cancellation and timeouts.
-func (m *Mailbox[T]) CastContext(ctx context.Context, msg T) (err error) {
+func (m *Mailbox) CastContext(ctx context.Context, message any) (err error) {
 	if m.closed.Load() {
 		return ErrMailboxClosed
 	}
@@ -66,7 +66,7 @@ func (m *Mailbox[T]) CastContext(ctx context.Context, msg T) (err error) {
 	}()
 
 	select {
-	case m.ch <- msg:
+	case m.ch <- message:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -75,7 +75,7 @@ func (m *Mailbox[T]) CastContext(ctx context.Context, msg T) (err error) {
 
 // TryCast attempts to send a message without blocking.
 // It returns ErrMailboxFull immediately if the mailbox buffer is full.
-func (m *Mailbox[T]) TryCast(msg T) (err error) {
+func (m *Mailbox) TryCast(message any) (err error) {
 	if m.closed.Load() {
 		return ErrMailboxClosed
 	}
@@ -87,7 +87,7 @@ func (m *Mailbox[T]) TryCast(msg T) (err error) {
 	}()
 
 	select {
-	case m.ch <- msg:
+	case m.ch <- message:
 		return nil
 	default:
 		return ErrMailboxFull
@@ -95,30 +95,32 @@ func (m *Mailbox[T]) TryCast(msg T) (err error) {
 }
 
 // Receive returns the read-only channel to consume messages.
-func (m *Mailbox[T]) Receive() <-chan T {
+func (m *Mailbox) Receive() <-chan any {
 	return m.ch
 }
 
 // Close safely closes the mailbox. Subsequent sends fail.
-func (m *Mailbox[T]) Close() {
+func (m *Mailbox) Close() {
 	if m.closed.CompareAndSwap(false, true) {
 		close(m.ch)
 	}
 }
 
 // Request wraps a message with a reply channel for synchronous calls.
+// replyTo is always set when constructed via Call or TryCall.
 type Request[Req any, Res any] struct {
-	Msg     Req
+	Message Req
 	replyTo chan result[Res]
 }
 
 // Reply sends the response back to the caller.
-func (r *Request[Req, Res]) Reply(val Res, err error) {
-	if r.replyTo != nil {
-		r.replyTo <- result[Res]{val: val, err: err}
-	}
+func (r *Request[Req, Res]) Reply(value Res, err error) {
+	r.replyTo <- result[Res]{value: value, err: err}
 }
 
+// poolKey is used as a type-keyed identity for sync.Pool lookup.
+// A nil pointer of a generic type is a valid comparable value in Go,
+// making (*poolKey[T])(nil) a unique key per type T in a sync.Map.
 type poolKey[Res any] struct{}
 
 var globalPools sync.Map
@@ -145,23 +147,23 @@ func putReplyCh[Res any](pool *sync.Pool, ch chan result[Res]) {
 }
 
 // Call sends a message to an actor and waits indefinitely for a reply.
-func Call[Req any, Res any](mb *Mailbox[any], msg Req) (Res, error) {
-	return CallContext[Req, Res](context.Background(), mb, msg)
+func Call[Req any, Res any](mb *Mailbox, message Req) (Res, error) {
+	return CallContext[Req, Res](context.Background(), mb, message)
 }
 
 // CallContext sends a message to an actor and waits for a reply until the context expires.
-func CallContext[Req any, Res any](ctx context.Context, mb *Mailbox[any], msg Req) (Res, error) {
+func CallContext[Req any, Res any](ctx context.Context, mb *Mailbox, message Req) (Res, error) {
 	var zero Res
 
 	pool := getPool[Res]()
 	replyCh := pool.Get().(chan result[Res])
 
 	req := Request[Req, Res]{
-		Msg:     msg,
+		Message: message,
 		replyTo: replyCh,
 	}
 
-	if err := mb.CastContext(ctx, any(req)); err != nil {
+	if err := mb.CastContext(ctx, req); err != nil {
 		putReplyCh(pool, replyCh)
 		return zero, err
 	}
@@ -169,31 +171,52 @@ func CallContext[Req any, Res any](ctx context.Context, mb *Mailbox[any], msg Re
 	select {
 	case res := <-replyCh:
 		putReplyCh(pool, replyCh)
-		return res.val, res.err
+		return res.value, res.err
 	case <-ctx.Done():
+		// The actor may still call Reply() after the context expires.
+		// Drain the channel in a goroutine so the actor never blocks.
+		go func() {
+			<-replyCh
+			putReplyCh(pool, replyCh)
+		}()
 		return zero, ctx.Err()
 	}
 }
 
-// TryCall attempts to enqueue a request immediately.
-// If enqueue succeeds, it waits indefinitely for the reply.
-func TryCall[Req any, Res any](mb *Mailbox[any], msg Req) (Res, error) {
+// TryCall attempts to enqueue a request without blocking.
+// If the enqueue succeeds, it waits indefinitely for the reply.
+// Use TryCallContext if an escape hatch is needed while waiting for the reply.
+func TryCall[Req any, Res any](mb *Mailbox, message Req) (Res, error) {
+	return TryCallContext[Req, Res](context.Background(), mb, message)
+}
+
+// TryCallContext attempts to enqueue a request without blocking.
+// If the enqueue succeeds, it waits for a reply until the context expires.
+func TryCallContext[Req any, Res any](ctx context.Context, mb *Mailbox, message Req) (Res, error) {
 	var zero Res
 
 	pool := getPool[Res]()
 	replyCh := pool.Get().(chan result[Res])
 
 	req := Request[Req, Res]{
-		Msg:     msg,
+		Message: message,
 		replyTo: replyCh,
 	}
 
-	if err := mb.TryCast(any(req)); err != nil {
+	if err := mb.TryCast(req); err != nil {
 		putReplyCh(pool, replyCh)
 		return zero, err
 	}
 
-	res := <-replyCh
-	putReplyCh(pool, replyCh)
-	return res.val, res.err
+	select {
+	case res := <-replyCh:
+		putReplyCh(pool, replyCh)
+		return res.value, res.err
+	case <-ctx.Done():
+		go func() {
+			<-replyCh
+			putReplyCh(pool, replyCh)
+		}()
+		return zero, ctx.Err()
+	}
 }

@@ -35,13 +35,13 @@ type getCountMsg struct{}
 // 2. Define your Actor
 type Counter struct {
 	// Embed the Mailbox.
-	*sup.Mailbox[any]
+	*sup.Mailbox
 	count int
 }
 
 func NewCounter() *Counter {
 	return &Counter{
-		Mailbox: sup.NewMailbox[any](10),
+		Mailbox: sup.NewMailbox(10),
 	}
 }
 

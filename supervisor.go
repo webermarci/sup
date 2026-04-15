@@ -36,8 +36,8 @@ type Supervisor struct {
 	running atomic.Int32
 }
 
-// Go starts the actor's Run function in a background goroutine and supervises it.
-func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) {
+// Go starts the actor's run function in a background goroutine and supervises it.
+func (s *Supervisor) Go(ctx context.Context, fn func(context.Context) error) {
 	s.running.Add(1)
 
 	s.wg.Go(func() {
@@ -53,7 +53,7 @@ func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) 
 		}
 
 		for {
-			err := s.executeSafe(ctx, runFn)
+			err := s.executeSafe(ctx, fn)
 
 			if ctx.Err() != nil {
 				return
