@@ -8,7 +8,9 @@ import (
 )
 
 var (
-	ErrMailboxFull   = errors.New("mailbox is full")
+	// ErrMailboxFull is returned by TryCast when the mailbox buffer is full.
+	ErrMailboxFull = errors.New("mailbox is full")
+	// ErrMailboxClosed is returned when trying to send to a closed mailbox.
 	ErrMailboxClosed = errors.New("mailbox is closed")
 )
 

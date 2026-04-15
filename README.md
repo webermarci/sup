@@ -55,7 +55,7 @@ func (c *Counter) Increment(amount int) {
 
 func (c *Counter) Get() (int, error) {
 	// Synchronous request-reply
-	return sup.Call[getCountMsg, int](ctx, c.Mailbox, getCountMsg{})
+	return sup.Call[getCountMsg, int](c.Mailbox, getCountMsg{})
 }
 
 // 4. The Actor's Run loop is just a standard Go select statement

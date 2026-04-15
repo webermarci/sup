@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"runtime"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -43,6 +44,10 @@ func TestMailbox_TryCastAndClose(t *testing.T) {
 	}
 
 	mb.Close()
+
+	if !mb.IsClosed() {
+		t.Fatal("expected mailbox to be closed")
+	}
 
 	if err := mb.TryCast(4); !errors.Is(err, sup.ErrMailboxClosed) {
 		t.Fatalf("expected ErrMailboxClosed, got %v", err)
@@ -100,6 +105,42 @@ func TestMailbox_Cast_BlocksUntilReceiverReady(t *testing.T) {
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("cast did not complete after receiver read")
+	}
+}
+
+func TestMailbox_Cast_OnClosedMailbox(t *testing.T) {
+	mb := sup.NewMailbox[int](1)
+	mb.Close()
+
+	if err := mb.Cast(1); !errors.Is(err, sup.ErrMailboxClosed) {
+		t.Fatalf("expected ErrMailboxClosed from Cast, got %v", err)
+	}
+
+	if err := mb.CastContext(t.Context(), 1); !errors.Is(err, sup.ErrMailboxClosed) {
+		t.Fatalf("expected ErrMailboxClosed from CastContext, got %v", err)
+	}
+}
+
+func TestMailbox_Close_Idempotent(t *testing.T) {
+	mb := sup.NewMailbox[int](1)
+	mb.Close()
+	mb.Close() // must not panic
+}
+
+func TestMailbox_Len(t *testing.T) {
+	mb := sup.NewMailbox[int](3)
+
+	_ = mb.TryCast(1)
+	_ = mb.TryCast(2)
+
+	if mb.Len() != 2 {
+		t.Fatalf("expected Len 2, got %d", mb.Len())
+	}
+
+	<-mb.Receive()
+
+	if mb.Len() != 1 {
+		t.Fatalf("expected Len 1, got %d", mb.Len())
 	}
 }
 
@@ -369,11 +410,38 @@ func TestSupervisor_PermanentAndPanicRecovery(t *testing.T) {
 	}
 }
 
+func TestSupervisor_OnRestart(t *testing.T) {
+	ctx := t.Context()
+
+	var runs, restarts atomic.Int32
+
+	actorFn := func(ctx context.Context) error {
+		count := runs.Add(1)
+		if count < 3 {
+			return errors.New("failure")
+		}
+		return nil
+	}
+
+	supervisor := &sup.Supervisor{
+		Policy:       sup.Transient,
+		RestartDelay: 5 * time.Millisecond,
+		OnRestart:    func() { restarts.Add(1) },
+	}
+
+	supervisor.Go(ctx, actorFn)
+	supervisor.Wait()
+
+	if restarts.Load() != 2 {
+		t.Fatalf("expected 2 restarts, got %d", restarts.Load())
+	}
+}
+
 func TestSupervisor_MaxRestarts(t *testing.T) {
 	ctx := t.Context()
 
-	var runs atomic.Int32
-	var errReported atomic.Bool
+	var runs, errorCount atomic.Int32
+	var maxRestartsReported atomic.Bool
 
 	actorFn := func(ctx context.Context) error {
 		runs.Add(1)
@@ -386,19 +454,45 @@ func TestSupervisor_MaxRestarts(t *testing.T) {
 		MaxRestarts:   3,
 		RestartWindow: 1 * time.Second,
 		OnError: func(err error) {
-			errReported.Store(true)
+			errorCount.Add(1)
+			if errors.Is(err, sup.ErrMaxRestartsExceeded) {
+				maxRestartsReported.Store(true)
+			}
 		},
 	}
 
 	supervisor.Go(ctx, actorFn)
 	supervisor.Wait()
 
+	// 4 runs → 4 individual OnError calls + 1 ErrMaxRestartsExceeded = 5 total
 	if runs.Load() != 4 {
 		t.Fatalf("expected exactly 4 runs, got %d", runs.Load())
 	}
 
-	if !errReported.Load() {
-		t.Fatal("expected OnError to be called after max restarts")
+	if errorCount.Load() != 5 {
+		t.Fatalf("expected 5 OnError calls, got %d", errorCount.Load())
+	}
+
+	if !maxRestartsReported.Load() {
+		t.Fatal("expected OnError to be called with ErrMaxRestartsExceeded")
+	}
+}
+
+func TestSupervisor_OnError_NotCalledOnCleanExit(t *testing.T) {
+	ctx := t.Context()
+
+	var called atomic.Bool
+
+	supervisor := &sup.Supervisor{
+		Policy:  sup.Transient,
+		OnError: func(err error) { called.Store(true) },
+	}
+
+	supervisor.Go(ctx, func(ctx context.Context) error { return nil })
+	supervisor.Wait()
+
+	if called.Load() {
+		t.Fatal("OnError should not be called on clean exit")
 	}
 }
 
@@ -432,6 +526,63 @@ func TestSupervisor_NoGoroutineLeaks(t *testing.T) {
 
 	if finalGoroutines > initialGoroutines+5 {
 		t.Fatalf("goroutine leak detected! started with %d, ended with %d", initialGoroutines, finalGoroutines)
+	}
+}
+
+func TestSupervisor_PanicIncludesStackTrace(t *testing.T) {
+	ctx := t.Context()
+
+	var capturedErr atomic.Value
+
+	actorFn := func(ctx context.Context) error {
+		panic("something exploded")
+	}
+
+	supervisor := &sup.Supervisor{
+		Policy:  sup.Temporary,
+		OnError: func(err error) { capturedErr.Store(err) },
+	}
+
+	supervisor.Go(ctx, actorFn)
+	supervisor.Wait()
+
+	err, ok := capturedErr.Load().(error)
+	if !ok || err == nil {
+		t.Fatal("expected OnError to be called with a non-nil error")
+	}
+
+	msg := err.Error()
+	if !strings.Contains(msg, "something exploded") {
+		t.Fatalf("expected panic value in error, got: %s", msg)
+	}
+
+	if !strings.Contains(msg, "goroutine") {
+		t.Fatalf("expected stack trace in error, got: %s", msg)
+	}
+}
+
+func TestSupervisor_Running_ReflectsActiveCount(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	ready := make(chan struct{})
+
+	supervisor := &sup.Supervisor{Policy: sup.Permanent}
+
+	for range 3 {
+		supervisor.Go(ctx, func(ctx context.Context) error {
+			ready <- struct{}{}
+			<-ctx.Done()
+			return ctx.Err()
+		})
+	}
+
+	for range 3 {
+		<-ready
+	}
+
+	if supervisor.Running() != 3 {
+		t.Fatalf("expected 3 running, got %d", supervisor.Running())
 	}
 }
 

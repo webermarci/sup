@@ -2,10 +2,17 @@ package sup
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"sync/atomic"
 	"time"
+)
+
+var (
+	// ErrMaxRestartsExceeded is returned when the maximum number of restarts is exceeded within the restart window.
+	ErrMaxRestartsExceeded = errors.New("max restarts exceeded")
 )
 
 type RestartPolicy uint8
@@ -23,6 +30,7 @@ type Supervisor struct {
 	MaxRestarts   int
 	RestartWindow time.Duration
 	OnError       func(error)
+	OnRestart     func()
 
 	wg      sync.WaitGroup
 	running atomic.Int32
@@ -30,8 +38,9 @@ type Supervisor struct {
 
 // Go starts the actor's Run function in a background goroutine and supervises it.
 func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) {
+	s.running.Add(1)
+
 	s.wg.Go(func() {
-		s.running.Add(1)
 		defer s.running.Add(-1)
 
 		var restarts []time.Time
@@ -43,10 +52,11 @@ func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) 
 				return
 			}
 
+			if err != nil && s.OnError != nil {
+				s.OnError(err)
+			}
+
 			if s.Policy == Temporary {
-				if err != nil && s.OnError != nil {
-					s.OnError(err)
-				}
 				return
 			}
 
@@ -68,10 +78,14 @@ func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) 
 
 				if len(restarts) > s.MaxRestarts {
 					if s.OnError != nil {
-						s.OnError(fmt.Errorf("max restarts exceeded: %v", err))
+						s.OnError(errors.Join(ErrMaxRestartsExceeded, err))
 					}
 					return
 				}
+			}
+
+			if s.OnRestart != nil {
+				s.OnRestart()
 			}
 
 			delay := s.RestartDelay
@@ -92,7 +106,7 @@ func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) 
 func (s *Supervisor) executeSafe(ctx context.Context, fn func(context.Context) error) (err error) {
 	defer func() {
 		if r := recover(); r != nil {
-			err = fmt.Errorf("actor panicked: %v", r)
+			err = fmt.Errorf("actor panicked: %v\n%s", r, debug.Stack())
 		}
 	}()
 	return fn(ctx)
