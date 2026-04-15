@@ -21,7 +21,7 @@ type Supervisor struct {
 	RestartDelay  time.Duration
 	MaxRestarts   int
 	RestartWindow time.Duration
-	OnError       func(error) // Hook to trigger escalation (e.g., One-For-All)
+	OnError       func(error)
 
 	wg sync.WaitGroup
 }
@@ -32,15 +32,12 @@ func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) 
 		var restarts []time.Time
 
 		for {
-			// 1. Execute the actor and catch any panics safely
 			err := s.executeSafe(ctx, runFn)
 
-			// 2. If the parent context was canceled, shut down cleanly
 			if ctx.Err() != nil {
 				return
 			}
 
-			// 3. Evaluate the Restart Policy
 			if s.Policy == Temporary {
 				if err != nil && s.OnError != nil {
 					s.OnError(err)
@@ -49,15 +46,13 @@ func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) 
 			}
 
 			if s.Policy == Transient && err == nil {
-				return // Clean exit, do not restart
+				return
 			}
 
-			// 4. Evaluate Restart Intensity (MaxRestarts in RestartWindow)
 			if s.MaxRestarts > 0 && s.RestartWindow > 0 {
 				now := time.Now()
 				var recent []time.Time
 
-				// Keep only restarts within the window
 				for _, t := range restarts {
 					if now.Sub(t) <= s.RestartWindow {
 						recent = append(recent, t)
@@ -70,21 +65,19 @@ func (s *Supervisor) Go(ctx context.Context, runFn func(context.Context) error) 
 					if s.OnError != nil {
 						s.OnError(fmt.Errorf("max restarts exceeded: %v", err))
 					}
-					return // Give up on this actor
+					return
 				}
 			}
 
-			// 5. Wait before restarting to prevent tight spin loops
 			delay := s.RestartDelay
 			if delay == 0 {
-				delay = time.Second // Default fallback
+				delay = time.Second
 			}
 
 			select {
 			case <-ctx.Done():
 				return
 			case <-time.After(delay):
-				// Loop and restart!
 			}
 		}
 	})
