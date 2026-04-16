@@ -49,11 +49,25 @@ func (m *Mailbox) IsClosed() bool {
 }
 
 // Cast sends a message, waiting until it can be enqueued or the mailbox is closed.
-func (m *Mailbox) Cast(message any) error {
-	return m.CastContext(context.Background(), message)
+// It returns ErrMailboxClosed if the mailbox is closed, or ctx.Err() if the context expires before the message is enqueued.
+func (m *Mailbox) Cast(message any) (err error) {
+	if m.closed.Load() {
+		return ErrMailboxClosed
+	}
+
+	defer func() {
+		if recover() != nil {
+			err = ErrMailboxClosed
+		}
+	}()
+
+	m.ch <- message
+	return nil
 }
 
 // CastContext sends a message with context support for cancellation and timeouts.
+// It returns ErrMailboxClosed if the mailbox is closed, or ctx.Err() if the context expires before the message is enqueued.
+// The context is only used to detect cancellation while trying to enqueue, not for the entire duration of the send operation.
 func (m *Mailbox) CastContext(ctx context.Context, message any) (err error) {
 	if m.closed.Load() {
 		return ErrMailboxClosed
@@ -89,6 +103,30 @@ func (m *Mailbox) TryCast(message any) (err error) {
 	select {
 	case m.ch <- message:
 		return nil
+	default:
+		return ErrMailboxFull
+	}
+}
+
+// TryCastContext attempts to send a message without blocking.
+// It returns ErrMailboxFull immediately if the mailbox buffer is full.
+// The context is only used to detect cancellation while trying to enqueue, not for the entire duration of the send operation.
+func (m *Mailbox) TryCastContext(ctx context.Context, message any) (err error) {
+	if m.closed.Load() {
+		return ErrMailboxClosed
+	}
+
+	defer func() {
+		if recover() != nil {
+			err = ErrMailboxClosed
+		}
+	}()
+
+	select {
+	case m.ch <- message:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	default:
 		return ErrMailboxFull
 	}
@@ -152,7 +190,24 @@ func putReplyCh[Res any](pool *sync.Pool, ch chan result[Res]) {
 
 // Call sends a message to an actor and waits indefinitely for a reply.
 func Call[Req any, Res any](mb *Mailbox, message Req) (Res, error) {
-	return CallContext[Req, Res](context.Background(), mb, message)
+	var zero Res
+
+	pool := getPool[Res]()
+	replyCh := pool.Get().(chan result[Res])
+
+	req := Request[Req, Res]{
+		Message: message,
+		replyTo: replyCh,
+	}
+
+	if err := mb.Cast(req); err != nil {
+		putReplyCh(pool, replyCh)
+		return zero, err
+	}
+
+	res := <-replyCh
+	putReplyCh(pool, replyCh)
+	return res.value, res.err
 }
 
 // CallContext sends a message to an actor and waits for a reply until the context expires.
@@ -191,7 +246,24 @@ func CallContext[Req any, Res any](ctx context.Context, mb *Mailbox, message Req
 // If the enqueue succeeds, it waits indefinitely for the reply.
 // Use TryCallContext if an escape hatch is needed while waiting for the reply.
 func TryCall[Req any, Res any](mb *Mailbox, message Req) (Res, error) {
-	return TryCallContext[Req, Res](context.Background(), mb, message)
+	var zero Res
+
+	pool := getPool[Res]()
+	replyCh := pool.Get().(chan result[Res])
+
+	req := Request[Req, Res]{
+		Message: message,
+		replyTo: replyCh,
+	}
+
+	if err := mb.TryCast(req); err != nil {
+		putReplyCh(pool, replyCh)
+		return zero, err
+	}
+
+	res := <-replyCh
+	putReplyCh(pool, replyCh)
+	return res.value, res.err
 }
 
 // TryCallContext attempts to enqueue a request without blocking.
