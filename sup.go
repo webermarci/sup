@@ -1,112 +1,113 @@
 package sup
 
-import "context"
+import (
+	"context"
+)
+
+// Cast sends an asynchronous typed envelope, waiting until it can be enqueued or the mailbox is closed.
+// It returns ErrMailboxClosed if the mailbox is closed.
+func Cast[T any](mb *Mailbox, payload T) error {
+	return enqueue(mb, CastRequest[T]{payload: payload})
+}
+
+// CastContext sends an asynchronous typed envelope with context for enqueue cancellation.
+// It returns ErrMailboxClosed if the mailbox is closed, or ctx.Err() if the context expires before the message is enqueued.
+func CastContext[T any](ctx context.Context, mb *Mailbox, payload T) error {
+	return enqueueContext(ctx, mb, CastRequest[T]{payload: payload})
+}
+
+// TryCast attempts to send an envelope without blocking.
+// It returns ErrMailboxClosed if the mailbox is closed, or ErrMailboxFull immediately if the mailbox buffer is full.
+func TryCast[T any](mb *Mailbox, payload T) error {
+	return tryEnqueue(mb, CastRequest[T]{payload: payload})
+}
+
+// TryCastContext attempts to send an envelope without blocking, but returns ctx.Err() if ctx is done.
+// It returns ErrMailboxClosed if the mailbox is closed, or ErrMailboxFull immediately if the mailbox buffer is full.
+func TryCastContext[T any](ctx context.Context, mb *Mailbox, payload T) error {
+	return tryEnqueueContext(ctx, mb, CastRequest[T]{payload: payload})
+}
 
 // Call sends a message to an actor and waits indefinitely for a reply.
-func Call[T any, R any](mb *Mailbox, message T) (R, error) {
+func Call[T any, R any](mb *Mailbox, payload T) (R, error) {
 	var zero R
 
-	pool := getPool[R]()
-	replyCh := pool.Get().(chan result[R])
+	replyCh := make(chan result[R], 1)
 
 	req := CallRequest[T, R]{
-		Message: message,
+		payload: payload,
 		replyTo: replyCh,
 	}
 
-	if err := mb.Cast(req); err != nil {
-		putReplyCh(pool, replyCh)
+	if err := enqueue(mb, req); err != nil {
 		return zero, err
 	}
 
 	res := <-replyCh
-	putReplyCh(pool, replyCh)
 	return res.value, res.err
 }
 
 // CallContext sends a message to an actor and waits for a reply until the context expires.
-func CallContext[T any, R any](ctx context.Context, mb *Mailbox, message T) (R, error) {
+func CallContext[T any, R any](ctx context.Context, mb *Mailbox, payload T) (R, error) {
 	var zero R
 
-	pool := getPool[R]()
-	replyCh := pool.Get().(chan result[R])
+	replyCh := make(chan result[R], 1)
 
 	req := CallRequest[T, R]{
-		Message: message,
+		payload: payload,
 		replyTo: replyCh,
 	}
 
-	if err := mb.CastContext(ctx, req); err != nil {
-		putReplyCh(pool, replyCh)
+	if err := enqueueContext(ctx, mb, req); err != nil {
 		return zero, err
 	}
 
 	select {
 	case res := <-replyCh:
-		putReplyCh(pool, replyCh)
 		return res.value, res.err
 	case <-ctx.Done():
-		// The actor may still call Reply() after the context expires.
-		// Drain the channel in a goroutine so the actor never blocks.
-		go func() {
-			<-replyCh
-			putReplyCh(pool, replyCh)
-		}()
 		return zero, ctx.Err()
 	}
 }
 
 // TryCall attempts to enqueue a request without blocking.
-// If the enqueue succeeds, it waits indefinitely for the reply.
-// Use TryCallContext if an escape hatch is needed while waiting for the reply.
-func TryCall[T any, R any](mb *Mailbox, message T) (R, error) {
+func TryCall[T any, R any](mb *Mailbox, payload T) (R, error) {
 	var zero R
 
-	pool := getPool[R]()
-	replyCh := pool.Get().(chan result[R])
+	replyCh := make(chan result[R], 1)
 
 	req := CallRequest[T, R]{
-		Message: message,
+		payload: payload,
 		replyTo: replyCh,
 	}
 
-	if err := mb.TryCast(req); err != nil {
-		putReplyCh(pool, replyCh)
+	if err := tryEnqueue(mb, req); err != nil {
 		return zero, err
 	}
 
 	res := <-replyCh
-	putReplyCh(pool, replyCh)
 	return res.value, res.err
 }
 
-// TryCallContext attempts to enqueue a request without blocking.
-// If the enqueue succeeds, it waits for a reply until the context expires.
-func TryCallContext[T any, R any](ctx context.Context, mb *Mailbox, message T) (R, error) {
+// TryCallContext attempts to enqueue a request without blocking and waits for reply until ctx expires.
+func TryCallContext[T any, R any](ctx context.Context, mb *Mailbox, payload T) (R, error) {
 	var zero R
 
-	pool := getPool[R]()
-	replyCh := pool.Get().(chan result[R])
+	replyCh := make(chan result[R], 1)
 
 	req := CallRequest[T, R]{
-		Message: message,
+		payload: payload,
 		replyTo: replyCh,
 	}
 
-	if err := mb.TryCast(req); err != nil {
-		putReplyCh(pool, replyCh)
+	if err := tryEnqueueContext(ctx, mb, req); err != nil {
 		return zero, err
 	}
 
 	select {
 	case res := <-replyCh:
-		putReplyCh(pool, replyCh)
 		return res.value, res.err
 	case <-ctx.Done():
-		go func() {
-			<-replyCh
-			putReplyCh(pool, replyCh)
-		}()
 		return zero, ctx.Err()
 	}
 }

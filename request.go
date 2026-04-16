@@ -5,11 +5,24 @@ type result[R any] struct {
 	err   error
 }
 
-// Request wraps a message with a reply channel for synchronous calls.
+// CastRequest wraps a payload for asynchronous calls without expecting a reply.
+type CastRequest[T any] struct {
+	payload T
+}
+
+func (r *CastRequest[T]) Payload() T {
+	return r.payload
+}
+
+// CallRequest wraps a payload with a reply channel for synchronous calls.
 // replyTo is always set when constructed via Call or TryCall.
 type CallRequest[T any, R any] struct {
-	Message T
+	payload T
 	replyTo chan result[R]
+}
+
+func (r *CallRequest[T, R]) Payload() T {
+	return r.payload
 }
 
 // Reply sends the response back to the caller.

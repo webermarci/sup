@@ -27,20 +27,27 @@ func TestMailbox_TryCastAndClose(t *testing.T) {
 		t.Fatal("expected mailbox to be open")
 	}
 
-	if err := mb.TryCast(1); err != nil {
+	if err := sup.TryCast(mb, 1); err != nil {
 		t.Fatalf("expected TryCast to succeed, got %v", err)
 	}
 
-	if err := mb.TryCast(2); err != nil {
+	if err := sup.TryCast(mb, 2); err != nil {
 		t.Fatalf("expected TryCast to succeed, got %v", err)
 	}
 
-	if err := mb.TryCast(3); !errors.Is(err, sup.ErrMailboxFull) {
+	if err := sup.TryCast(mb, 3); !errors.Is(err, sup.ErrMailboxFull) {
 		t.Fatalf("expected ErrMailboxFull, got %v", err)
 	}
 
-	if val := <-mb.Receive(); val != 1 {
-		t.Fatalf("expected 1, got %d", val)
+	val := <-mb.Receive()
+
+	switch v := val.(type) {
+	case sup.CastRequest[int]:
+		if v.Payload() != 1 {
+			t.Fatalf("expected message 1, got %d", v.Payload())
+		}
+	default:
+		t.Fatalf("expected CastRequest[int], got %T", val)
 	}
 
 	mb.Close()
@@ -49,12 +56,19 @@ func TestMailbox_TryCastAndClose(t *testing.T) {
 		t.Fatal("expected mailbox to be closed")
 	}
 
-	if err := mb.TryCast(4); !errors.Is(err, sup.ErrMailboxClosed) {
+	if err := sup.TryCast(mb, 4); !errors.Is(err, sup.ErrMailboxClosed) {
 		t.Fatalf("expected ErrMailboxClosed, got %v", err)
 	}
 
-	if val := <-mb.Receive(); val != 2 {
-		t.Fatalf("expected 2, got %d", val)
+	val = <-mb.Receive()
+
+	switch v := val.(type) {
+	case sup.CastRequest[int]:
+		if v.Payload() != 2 {
+			t.Fatalf("expected message 2, got %d", v.Payload())
+		}
+	default:
+		t.Fatalf("expected CastRequest[int], got %T", val)
 	}
 
 	if _, ok := <-mb.Receive(); ok {
@@ -68,7 +82,7 @@ func TestMailbox_CastContext_Timeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 	defer cancel()
 
-	err := mb.CastContext(ctx, 1)
+	err := sup.CastContext(ctx, mb, 1)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected DeadlineExceeded, got %v", err)
 	}
@@ -80,7 +94,7 @@ func TestMailbox_Cast_BlocksUntilReceiverReady(t *testing.T) {
 	done := make(chan error, 1)
 
 	go func() {
-		done <- mb.Cast(42)
+		done <- sup.Cast(mb, 42)
 	}()
 
 	select {
@@ -91,8 +105,14 @@ func TestMailbox_Cast_BlocksUntilReceiverReady(t *testing.T) {
 
 	select {
 	case v := <-mb.Receive():
-		if v != 42 {
-			t.Fatalf("expected 42, got %d", v)
+		switch msg := v.(type) {
+		case sup.CastRequest[int]:
+			v = msg.Payload()
+			if v != 42 {
+				t.Fatalf("expected 42, got %d", v)
+			}
+		default:
+			t.Fatalf("expected CastRequest[int], got %T", v)
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("timed out waiting for message")
@@ -112,11 +132,11 @@ func TestMailbox_Cast_OnClosedMailbox(t *testing.T) {
 	mb := sup.NewMailbox(1)
 	mb.Close()
 
-	if err := mb.Cast(1); !errors.Is(err, sup.ErrMailboxClosed) {
+	if err := sup.Cast(mb, 1); !errors.Is(err, sup.ErrMailboxClosed) {
 		t.Fatalf("expected ErrMailboxClosed from Cast, got %v", err)
 	}
 
-	if err := mb.CastContext(t.Context(), 1); !errors.Is(err, sup.ErrMailboxClosed) {
+	if err := sup.CastContext(t.Context(), mb, 1); !errors.Is(err, sup.ErrMailboxClosed) {
 		t.Fatalf("expected ErrMailboxClosed from CastContext, got %v", err)
 	}
 }
@@ -130,8 +150,8 @@ func TestMailbox_Close_Idempotent(t *testing.T) {
 func TestMailbox_Len(t *testing.T) {
 	mb := sup.NewMailbox(3)
 
-	_ = mb.TryCast(1)
-	_ = mb.TryCast(2)
+	_ = sup.TryCast(mb, 1)
+	_ = sup.TryCast(mb, 2)
 
 	if mb.Len() != 2 {
 		t.Fatalf("expected Len 2, got %d", mb.Len())
@@ -162,11 +182,11 @@ func (a *MathActor) Run(ctx context.Context) error {
 
 			switch m := msg.(type) {
 			case sup.CallRequest[MathReq, int]:
-				if m.Message.B == 0 {
+				if m.Payload().B == 0 {
 					m.Reply(0, errors.New("division by zero"))
 					continue
 				}
-				m.Reply(m.Message.A/m.Message.B, nil)
+				m.Reply(m.Payload().A/m.Payload().B, nil)
 			}
 		}
 	}
@@ -611,7 +631,7 @@ func (a *BenchmarkActor) Run(ctx context.Context) error {
 
 			switch m := msg.(type) {
 			case sup.CallRequest[int, int]:
-				m.Reply(m.Message, nil)
+				m.Reply(m.Payload(), nil)
 			}
 		}
 	}
@@ -623,7 +643,7 @@ func Benchmark_Cast(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		_ = actor.Mailbox.Cast(1)
+		_ = sup.Cast(actor.Mailbox, 1)
 	}
 	b.StopTimer()
 }
@@ -635,7 +655,7 @@ func Benchmark_Cast_Concurrent(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_ = actor.Mailbox.Cast(1)
+			_ = sup.Cast(actor.Mailbox, 1)
 		}
 	})
 	b.StopTimer()
@@ -647,7 +667,7 @@ func Benchmark_CastContext(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		_ = actor.Mailbox.CastContext(b.Context(), 1)
+		_ = sup.CastContext(b.Context(), actor.Mailbox, 1)
 	}
 	b.StopTimer()
 }
@@ -659,7 +679,7 @@ func Benchmark_CastContext_Concurrent(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_ = actor.Mailbox.CastContext(b.Context(), 1)
+			_ = sup.CastContext(b.Context(), actor.Mailbox, 1)
 		}
 	})
 	b.StopTimer()
@@ -674,7 +694,7 @@ func Benchmark_CastContext_Expired(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		_ = actor.Mailbox.CastContext(ctx, 1)
+		_ = sup.CastContext(ctx, actor.Mailbox, 1)
 	}
 	b.StopTimer()
 }
@@ -685,7 +705,7 @@ func Benchmark_TryCast(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		_ = actor.Mailbox.TryCast(1)
+		_ = sup.TryCast(actor.Mailbox, 1)
 	}
 	b.StopTimer()
 }
@@ -697,7 +717,7 @@ func Benchmark_TryCast_Concurrent(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			_ = actor.Mailbox.TryCast(1)
+			_ = sup.TryCast(actor.Mailbox, 1)
 		}
 	})
 	b.StopTimer()
@@ -705,11 +725,11 @@ func Benchmark_TryCast_Concurrent(b *testing.B) {
 
 func Benchmark_TryCast_Full(b *testing.B) {
 	mb := sup.NewMailbox(1)
-	_ = mb.TryCast(1)
+	_ = sup.TryCast(mb, 1)
 
 	b.ResetTimer()
 	for b.Loop() {
-		_ = mb.TryCast(2)
+		_ = sup.TryCast(mb, 1)
 	}
 }
 
@@ -836,16 +856,27 @@ func (p *CastPingActor) Run(ctx context.Context) error {
 				return nil
 			}
 
-			switch msg := msg.(type) {
+			switch m := msg.(type) {
 			case PingPongMsg:
-				if msg.Remaining == 0 {
-					close(msg.Done)
+				if m.Remaining == 0 {
+					close(m.Done)
 					return nil
 				}
-				_ = msg.ReplyTo.Cast(PingPongMsg{
-					Remaining: msg.Remaining - 1,
+				_ = sup.Cast(m.ReplyTo, PingPongMsg{
+					Remaining: m.Remaining - 1,
 					ReplyTo:   p.Mailbox,
-					Done:      msg.Done,
+					Done:      m.Done,
+				})
+			case sup.CastRequest[PingPongMsg]:
+				m2 := m.Payload()
+				if m2.Remaining == 0 {
+					close(m2.Done)
+					return nil
+				}
+				_ = sup.Cast(m2.ReplyTo, PingPongMsg{
+					Remaining: m2.Remaining - 1,
+					ReplyTo:   p.Mailbox,
+					Done:      m2.Done,
 				})
 			}
 		}
@@ -866,16 +897,27 @@ func (p *CastContextPingActor) Run(ctx context.Context) error {
 				return nil
 			}
 
-			switch msg := msg.(type) {
+			switch m := msg.(type) {
 			case PingPongMsg:
-				if msg.Remaining == 0 {
-					close(msg.Done)
+				if m.Remaining == 0 {
+					close(m.Done)
 					return nil
 				}
-				_ = msg.ReplyTo.CastContext(ctx, PingPongMsg{
-					Remaining: msg.Remaining - 1,
+				_ = sup.CastContext(ctx, m.ReplyTo, PingPongMsg{
+					Remaining: m.Remaining - 1,
 					ReplyTo:   p.Mailbox,
-					Done:      msg.Done,
+					Done:      m.Done,
+				})
+			case sup.CastRequest[PingPongMsg]:
+				m2 := m.Payload()
+				if m2.Remaining == 0 {
+					close(m2.Done)
+					return nil
+				}
+				_ = sup.CastContext(ctx, m2.ReplyTo, PingPongMsg{
+					Remaining: m2.Remaining - 1,
+					ReplyTo:   p.Mailbox,
+					Done:      m2.Done,
 				})
 			}
 		}
@@ -896,17 +938,27 @@ func (p *TryCastPingActor) Run(ctx context.Context) error {
 				return nil
 			}
 
-			switch msg := msg.(type) {
+			switch m := msg.(type) {
 			case PingPongMsg:
-				if msg.Remaining == 0 {
-					close(msg.Done)
+				if m.Remaining == 0 {
+					close(m.Done)
 					return nil
 				}
-
-				_ = msg.ReplyTo.TryCast(PingPongMsg{
-					Remaining: msg.Remaining - 1,
+				_ = sup.TryCast(m.ReplyTo, PingPongMsg{
+					Remaining: m.Remaining - 1,
 					ReplyTo:   p.Mailbox,
-					Done:      msg.Done,
+					Done:      m.Done,
+				})
+			case sup.CastRequest[PingPongMsg]:
+				m2 := m.Payload()
+				if m2.Remaining == 0 {
+					close(m2.Done)
+					return nil
+				}
+				_ = sup.TryCast(m2.ReplyTo, PingPongMsg{
+					Remaining: m2.Remaining - 1,
+					ReplyTo:   p.Mailbox,
+					Done:      m2.Done,
 				})
 			}
 		}
@@ -929,7 +981,7 @@ func Benchmark_PingPong_Cast(b *testing.B) {
 	done := make(chan struct{})
 
 	b.ResetTimer()
-	_ = actorA.Cast(PingPongMsg{
+	_ = sup.Cast(actorA.Mailbox, PingPongMsg{
 		Remaining: b.N,
 		ReplyTo:   actorB.Mailbox,
 		Done:      done,
@@ -956,7 +1008,7 @@ func Benchmark_PingPong_CastContext(b *testing.B) {
 	done := make(chan struct{})
 
 	b.ResetTimer()
-	_ = actorA.CastContext(ctx, PingPongMsg{
+	_ = sup.CastContext(ctx, actorA.Mailbox, PingPongMsg{
 		Remaining: b.N,
 		ReplyTo:   actorB.Mailbox,
 		Done:      done,
@@ -983,7 +1035,7 @@ func Benchmark_PingPong_TryCast(b *testing.B) {
 	done := make(chan struct{})
 
 	b.ResetTimer()
-	_ = actorA.TryCast(PingPongMsg{
+	_ = sup.TryCast(actorA.Mailbox, PingPongMsg{
 		Remaining: b.N,
 		ReplyTo:   actorB.Mailbox,
 		Done:      done,
