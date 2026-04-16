@@ -3,7 +3,6 @@ package sup
 import (
 	"context"
 	"errors"
-	"sync"
 	"sync/atomic"
 )
 
@@ -13,11 +12,6 @@ var (
 	// ErrMailboxClosed is returned when trying to send to a closed mailbox.
 	ErrMailboxClosed = errors.New("mailbox is closed")
 )
-
-type result[Res any] struct {
-	value Res
-	err   error
-}
 
 // Mailbox is a thread-safe message queue for actors.
 type Mailbox struct {
@@ -49,7 +43,7 @@ func (m *Mailbox) IsClosed() bool {
 }
 
 // Cast sends a message, waiting until it can be enqueued or the mailbox is closed.
-// It returns ErrMailboxClosed if the mailbox is closed, or ctx.Err() if the context expires before the message is enqueued.
+// It returns ErrMailboxClosed if the mailbox is closed.
 func (m *Mailbox) Cast(message any) (err error) {
 	if m.closed.Load() {
 		return ErrMailboxClosed
@@ -141,158 +135,5 @@ func (m *Mailbox) Receive() <-chan any {
 func (m *Mailbox) Close() {
 	if m.closed.CompareAndSwap(false, true) {
 		close(m.ch)
-	}
-}
-
-// Request wraps a message with a reply channel for synchronous calls.
-// replyTo is always set when constructed via Call or TryCall.
-type Request[Req any, Res any] struct {
-	Message Req
-	replyTo chan result[Res]
-}
-
-// Reply sends the response back to the caller.
-func (r *Request[Req, Res]) Reply(value Res, err error) {
-	select {
-	case r.replyTo <- result[Res]{value: value, err: err}:
-	default:
-		panic("sup: reply called more than once on the same request")
-	}
-}
-
-// poolKey is used as a type-keyed identity for sync.Pool lookup.
-// A nil pointer of a generic type is a valid comparable value in Go,
-// making (*poolKey[T])(nil) a unique key per type T in a sync.Map.
-type poolKey[Res any] struct{}
-
-var globalPools sync.Map
-
-func getPool[Res any]() *sync.Pool {
-	key := (*poolKey[Res])(nil)
-
-	if p, ok := globalPools.Load(key); ok {
-		return p.(*sync.Pool)
-	}
-
-	p := &sync.Pool{
-		New: func() any {
-			return make(chan result[Res], 1)
-		},
-	}
-
-	actual, _ := globalPools.LoadOrStore(key, p)
-	return actual.(*sync.Pool)
-}
-
-func putReplyCh[Res any](pool *sync.Pool, ch chan result[Res]) {
-	pool.Put(ch)
-}
-
-// Call sends a message to an actor and waits indefinitely for a reply.
-func Call[Req any, Res any](mb *Mailbox, message Req) (Res, error) {
-	var zero Res
-
-	pool := getPool[Res]()
-	replyCh := pool.Get().(chan result[Res])
-
-	req := Request[Req, Res]{
-		Message: message,
-		replyTo: replyCh,
-	}
-
-	if err := mb.Cast(req); err != nil {
-		putReplyCh(pool, replyCh)
-		return zero, err
-	}
-
-	res := <-replyCh
-	putReplyCh(pool, replyCh)
-	return res.value, res.err
-}
-
-// CallContext sends a message to an actor and waits for a reply until the context expires.
-func CallContext[Req any, Res any](ctx context.Context, mb *Mailbox, message Req) (Res, error) {
-	var zero Res
-
-	pool := getPool[Res]()
-	replyCh := pool.Get().(chan result[Res])
-
-	req := Request[Req, Res]{
-		Message: message,
-		replyTo: replyCh,
-	}
-
-	if err := mb.CastContext(ctx, req); err != nil {
-		putReplyCh(pool, replyCh)
-		return zero, err
-	}
-
-	select {
-	case res := <-replyCh:
-		putReplyCh(pool, replyCh)
-		return res.value, res.err
-	case <-ctx.Done():
-		// The actor may still call Reply() after the context expires.
-		// Drain the channel in a goroutine so the actor never blocks.
-		go func() {
-			<-replyCh
-			putReplyCh(pool, replyCh)
-		}()
-		return zero, ctx.Err()
-	}
-}
-
-// TryCall attempts to enqueue a request without blocking.
-// If the enqueue succeeds, it waits indefinitely for the reply.
-// Use TryCallContext if an escape hatch is needed while waiting for the reply.
-func TryCall[Req any, Res any](mb *Mailbox, message Req) (Res, error) {
-	var zero Res
-
-	pool := getPool[Res]()
-	replyCh := pool.Get().(chan result[Res])
-
-	req := Request[Req, Res]{
-		Message: message,
-		replyTo: replyCh,
-	}
-
-	if err := mb.TryCast(req); err != nil {
-		putReplyCh(pool, replyCh)
-		return zero, err
-	}
-
-	res := <-replyCh
-	putReplyCh(pool, replyCh)
-	return res.value, res.err
-}
-
-// TryCallContext attempts to enqueue a request without blocking.
-// If the enqueue succeeds, it waits for a reply until the context expires.
-func TryCallContext[Req any, Res any](ctx context.Context, mb *Mailbox, message Req) (Res, error) {
-	var zero Res
-
-	pool := getPool[Res]()
-	replyCh := pool.Get().(chan result[Res])
-
-	req := Request[Req, Res]{
-		Message: message,
-		replyTo: replyCh,
-	}
-
-	if err := mb.TryCast(req); err != nil {
-		putReplyCh(pool, replyCh)
-		return zero, err
-	}
-
-	select {
-	case res := <-replyCh:
-		putReplyCh(pool, replyCh)
-		return res.value, res.err
-	case <-ctx.Done():
-		go func() {
-			<-replyCh
-			putReplyCh(pool, replyCh)
-		}()
-		return zero, ctx.Err()
 	}
 }

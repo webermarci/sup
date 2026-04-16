@@ -69,7 +69,7 @@ func (c *Counter) Run(ctx context.Context) error {
 			switch m := msg.(type) {
 			case incrementMsg:
 				c.count += m.amount
-			case sup.Request[getCountMsg, int]:
+			case sup.CallRequest[getCountMsg, int]:
 				m.Reply(c.count, nil)
 			}
 		}
