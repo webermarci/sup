@@ -7,16 +7,30 @@ import (
 	"sync/atomic"
 )
 
-var replyPools atomic.Value // stores map[reflect.Type]*sync.Pool
+var (
+	replyPools   atomic.Value // map[reflect.Type]*sync.Pool
+	requestPools sync.Map     // map[reflect.Type]*requestPool
+)
 
 func init() {
 	replyPools.Store(make(map[reflect.Type]*sync.Pool))
 }
 
+type requestPool struct {
+	pool sync.Pool
+}
+
+func (p *requestPool) Get() any {
+	return p.pool.Get()
+}
+
+func (p *requestPool) Put(x any) {
+	p.pool.Put(x)
+}
+
 func getReplyPool[R any]() *sync.Pool {
 	t := reflect.TypeFor[result[R]]()
 
-	// Optimized read path: simple map lookup from an atomic value.
 	m, _ := replyPools.Load().(map[reflect.Type]*sync.Pool)
 	if p, ok := m[t]; ok {
 		return p
@@ -31,7 +45,6 @@ func getReplyPoolSlow[R any](t reflect.Type) *sync.Pool {
 	poolMu.Lock()
 	defer poolMu.Unlock()
 
-	// Double-check under lock.
 	m, _ := replyPools.Load().(map[reflect.Type]*sync.Pool)
 	if p, ok := m[t]; ok {
 		return p
@@ -39,17 +52,30 @@ func getReplyPoolSlow[R any](t reflect.Type) *sync.Pool {
 
 	p := &sync.Pool{
 		New: func() any {
-			// Buffered channel (size 1) prevents producers from blocking
-			// if the consumer has already timed out or returned.
 			return make(chan result[R], 1)
 		},
 	}
 
-	// Copy-on-write update to ensure thread safety for readers.
 	newMap := make(map[reflect.Type]*sync.Pool, len(m)+1)
 	maps.Copy(newMap, m)
 	newMap[t] = p
 	replyPools.Store(newMap)
 
 	return p
+}
+
+func getCallRequestPool[T any, R any]() *requestPool {
+	t := reflect.TypeFor[CallRequest[T, R]]()
+	if p, ok := requestPools.Load(t); ok {
+		return p.(*requestPool)
+	}
+
+	p, _ := requestPools.LoadOrStore(t, &requestPool{
+		pool: sync.Pool{
+			New: func() any {
+				return new(CallRequest[T, R])
+			},
+		},
+	})
+	return p.(*requestPool)
 }

@@ -65,9 +65,9 @@ func (c *Counter) Run(ctx context.Context) error {
 
 		case msg := <-c.Receive():
 			switch m := msg.(type) {
-			case sup.CastRequest[incrementMsg]:
+			case *sup.CastRequest[incrementMsg]:
 				c.count += m.Payload().amount
-			case sup.CallRequest[getCountMsg, int]:
+			case *sup.CallRequest[getCountMsg, int]:
 				m.Reply(c.count, nil)
 			}
 		}

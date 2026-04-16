@@ -181,7 +181,7 @@ func (a *MathActor) Run(ctx context.Context) error {
 			}
 
 			switch m := msg.(type) {
-			case sup.CallRequest[MathReq, int]:
+			case *sup.CallRequest[MathReq, int]:
 				if m.Payload().B == 0 {
 					m.Reply(0, errors.New("division by zero"))
 					continue
@@ -240,7 +240,7 @@ func (a *NoReplyActor) Run(ctx context.Context) error {
 			}
 
 			switch msg.(type) {
-			case sup.CallRequest[MathReq, int]:
+			case *sup.CallRequest[MathReq, int]:
 			}
 		}
 	}
@@ -302,7 +302,7 @@ func (a *DelayedReplyActor) Run(ctx context.Context) error {
 			}
 
 			switch m := msg.(type) {
-			case sup.CallRequest[int, int]:
+			case *sup.CallRequest[int, int]:
 				n := a.count.Add(1)
 				if n == 1 {
 					time.Sleep(30 * time.Millisecond)
@@ -630,7 +630,7 @@ func (a *BenchmarkActor) Run(ctx context.Context) error {
 			}
 
 			switch m := msg.(type) {
-			case sup.CallRequest[int, int]:
+			case *sup.CallRequest[int, int]:
 				m.Reply(m.Payload(), nil)
 			}
 		}
@@ -834,216 +834,6 @@ func Benchmark_TryCall_Concurrent(b *testing.B) {
 		}
 	})
 	b.StopTimer()
-}
-
-type PingPongMsg struct {
-	Remaining int
-	ReplyTo   *sup.Mailbox
-	Done      chan struct{}
-}
-
-type CastPingActor struct {
-	*sup.Mailbox
-}
-
-func (p *CastPingActor) Run(ctx context.Context) error {
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case msg, ok := <-p.Receive():
-			if !ok {
-				return nil
-			}
-
-			switch m := msg.(type) {
-			case PingPongMsg:
-				if m.Remaining == 0 {
-					close(m.Done)
-					return nil
-				}
-				_ = sup.Cast(m.ReplyTo, PingPongMsg{
-					Remaining: m.Remaining - 1,
-					ReplyTo:   p.Mailbox,
-					Done:      m.Done,
-				})
-			case sup.CastRequest[PingPongMsg]:
-				m2 := m.Payload()
-				if m2.Remaining == 0 {
-					close(m2.Done)
-					return nil
-				}
-				_ = sup.Cast(m2.ReplyTo, PingPongMsg{
-					Remaining: m2.Remaining - 1,
-					ReplyTo:   p.Mailbox,
-					Done:      m2.Done,
-				})
-			}
-		}
-	}
-}
-
-type CastContextPingActor struct {
-	*sup.Mailbox
-}
-
-func (p *CastContextPingActor) Run(ctx context.Context) error {
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case msg, ok := <-p.Receive():
-			if !ok {
-				return nil
-			}
-
-			switch m := msg.(type) {
-			case PingPongMsg:
-				if m.Remaining == 0 {
-					close(m.Done)
-					return nil
-				}
-				_ = sup.CastContext(ctx, m.ReplyTo, PingPongMsg{
-					Remaining: m.Remaining - 1,
-					ReplyTo:   p.Mailbox,
-					Done:      m.Done,
-				})
-			case sup.CastRequest[PingPongMsg]:
-				m2 := m.Payload()
-				if m2.Remaining == 0 {
-					close(m2.Done)
-					return nil
-				}
-				_ = sup.CastContext(ctx, m2.ReplyTo, PingPongMsg{
-					Remaining: m2.Remaining - 1,
-					ReplyTo:   p.Mailbox,
-					Done:      m2.Done,
-				})
-			}
-		}
-	}
-}
-
-type TryCastPingActor struct {
-	*sup.Mailbox
-}
-
-func (p *TryCastPingActor) Run(ctx context.Context) error {
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case msg, ok := <-p.Receive():
-			if !ok {
-				return nil
-			}
-
-			switch m := msg.(type) {
-			case PingPongMsg:
-				if m.Remaining == 0 {
-					close(m.Done)
-					return nil
-				}
-				_ = sup.TryCast(m.ReplyTo, PingPongMsg{
-					Remaining: m.Remaining - 1,
-					ReplyTo:   p.Mailbox,
-					Done:      m.Done,
-				})
-			case sup.CastRequest[PingPongMsg]:
-				m2 := m.Payload()
-				if m2.Remaining == 0 {
-					close(m2.Done)
-					return nil
-				}
-				_ = sup.TryCast(m2.ReplyTo, PingPongMsg{
-					Remaining: m2.Remaining - 1,
-					ReplyTo:   p.Mailbox,
-					Done:      m2.Done,
-				})
-			}
-		}
-	}
-}
-
-func Benchmark_PingPong_Cast(b *testing.B) {
-	ctx, cancel := context.WithCancel(b.Context())
-	defer cancel()
-
-	actorA := &CastPingActor{Mailbox: sup.NewMailbox(1)}
-	actorB := &CastPingActor{Mailbox: sup.NewMailbox(1)}
-
-	supervisor := sup.NewSupervisor(
-		sup.WithPolicy(sup.Temporary),
-	)
-	supervisor.Go(ctx, actorA.Run)
-	supervisor.Go(ctx, actorB.Run)
-
-	done := make(chan struct{})
-
-	b.ResetTimer()
-	_ = sup.Cast(actorA.Mailbox, PingPongMsg{
-		Remaining: b.N,
-		ReplyTo:   actorB.Mailbox,
-		Done:      done,
-	})
-
-	<-done
-	cancel()
-	supervisor.Wait()
-}
-
-func Benchmark_PingPong_CastContext(b *testing.B) {
-	ctx, cancel := context.WithCancel(b.Context())
-	defer cancel()
-
-	actorA := &CastContextPingActor{Mailbox: sup.NewMailbox(1)}
-	actorB := &CastContextPingActor{Mailbox: sup.NewMailbox(1)}
-
-	supervisor := sup.NewSupervisor(
-		sup.WithPolicy(sup.Temporary),
-	)
-	supervisor.Go(ctx, actorA.Run)
-	supervisor.Go(ctx, actorB.Run)
-
-	done := make(chan struct{})
-
-	b.ResetTimer()
-	_ = sup.CastContext(ctx, actorA.Mailbox, PingPongMsg{
-		Remaining: b.N,
-		ReplyTo:   actorB.Mailbox,
-		Done:      done,
-	})
-
-	<-done
-	cancel()
-	supervisor.Wait()
-}
-
-func Benchmark_PingPong_TryCast(b *testing.B) {
-	ctx, cancel := context.WithCancel(b.Context())
-	defer cancel()
-
-	actorA := &TryCastPingActor{Mailbox: sup.NewMailbox(1)}
-	actorB := &TryCastPingActor{Mailbox: sup.NewMailbox(1)}
-
-	supervisor := sup.NewSupervisor(
-		sup.WithPolicy(sup.Temporary),
-	)
-	supervisor.Go(ctx, actorA.Run)
-	supervisor.Go(ctx, actorB.Run)
-
-	done := make(chan struct{})
-
-	b.ResetTimer()
-	_ = sup.TryCast(actorA.Mailbox, PingPongMsg{
-		Remaining: b.N,
-		ReplyTo:   actorB.Mailbox,
-		Done:      done,
-	})
-
-	<-done
-	cancel()
-	supervisor.Wait()
 }
 
 func Benchmark_Supervisor_SpawnAndExit(b *testing.B) {
