@@ -106,8 +106,6 @@ func main() {
 
 ## Benchmark
 
-Sup achieves extreme performance by utilizing lock-free atomic state, direct channel references, and generic `sync.Pool` channel reuse.
-
 ```bash
 goos: darwin
 goarch: arm64
