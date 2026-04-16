@@ -8,24 +8,11 @@ import (
 )
 
 var (
-	replyPools   atomic.Value // map[reflect.Type]*sync.Pool
-	requestPools sync.Map     // map[reflect.Type]*requestPool
+	replyPools atomic.Value // map[reflect.Type]*sync.Pool
 )
 
 func init() {
 	replyPools.Store(make(map[reflect.Type]*sync.Pool))
-}
-
-type requestPool struct {
-	pool sync.Pool
-}
-
-func (p *requestPool) Get() any {
-	return p.pool.Get()
-}
-
-func (p *requestPool) Put(x any) {
-	p.pool.Put(x)
 }
 
 func getReplyPool[R any]() *sync.Pool {
@@ -62,20 +49,4 @@ func getReplyPoolSlow[R any](t reflect.Type) *sync.Pool {
 	replyPools.Store(newMap)
 
 	return p
-}
-
-func getCallRequestPool[T any, R any]() *requestPool {
-	t := reflect.TypeFor[CallRequest[T, R]]()
-	if p, ok := requestPools.Load(t); ok {
-		return p.(*requestPool)
-	}
-
-	p, _ := requestPools.LoadOrStore(t, &requestPool{
-		pool: sync.Pool{
-			New: func() any {
-				return new(CallRequest[T, R])
-			},
-		},
-	})
-	return p.(*requestPool)
 }

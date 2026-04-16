@@ -31,45 +31,43 @@ func TryCastContext[T any](ctx context.Context, mb *Mailbox, payload T) error {
 // Call sends a message to an actor and waits indefinitely for a reply.
 func Call[T any, R any](mb *Mailbox, payload T) (R, error) {
 	var zero R
-	rPool := getReplyPool[R]()
-	replyCh := rPool.Get().(chan result[R])
+	pool := getReplyPool[R]()
+	replyCh := pool.Get().(chan result[R])
 
-	reqPool := getCallRequestPool[T, R]()
-	req := reqPool.Get().(*CallRequest[T, R])
-	req.payload = payload
-	req.replyTo = replyCh
+	req := CallRequest[T, R]{
+		payload: payload,
+		replyTo: replyCh,
+	}
 
 	if err := enqueue(mb, req); err != nil {
-		rPool.Put(replyCh)
-		reqPool.Put(req)
+		pool.Put(replyCh)
 		return zero, err
 	}
 
 	res := <-replyCh
-	rPool.Put(replyCh)
+	pool.Put(replyCh)
 	return res.value, res.err
 }
 
 // CallContext sends a message to an actor and waits for a reply until the context expires.
 func CallContext[T any, R any](ctx context.Context, mb *Mailbox, payload T) (R, error) {
 	var zero R
-	replayPool := getReplyPool[R]()
-	replyCh := replayPool.Get().(chan result[R])
+	pool := getReplyPool[R]()
+	replyCh := pool.Get().(chan result[R])
 
-	reqPool := getCallRequestPool[T, R]()
-	req := reqPool.Get().(*CallRequest[T, R])
-	req.payload = payload
-	req.replyTo = replyCh
+	req := CallRequest[T, R]{
+		payload: payload,
+		replyTo: replyCh,
+	}
 
 	if err := enqueueContext(ctx, mb, req); err != nil {
-		replayPool.Put(replyCh)
-		reqPool.Put(req)
+		pool.Put(replyCh)
 		return zero, err
 	}
 
 	select {
 	case res := <-replyCh:
-		replayPool.Put(replyCh)
+		pool.Put(replyCh)
 		return res.value, res.err
 	case <-ctx.Done():
 		return zero, ctx.Err()
@@ -79,45 +77,43 @@ func CallContext[T any, R any](ctx context.Context, mb *Mailbox, payload T) (R, 
 // TryCall attempts to enqueue a request without blocking.
 func TryCall[T any, R any](mb *Mailbox, payload T) (R, error) {
 	var zero R
-	replyPool := getReplyPool[R]()
-	replyCh := replyPool.Get().(chan result[R])
+	pool := getReplyPool[R]()
+	replyCh := pool.Get().(chan result[R])
 
-	reqPool := getCallRequestPool[T, R]()
-	req := reqPool.Get().(*CallRequest[T, R])
-	req.payload = payload
-	req.replyTo = replyCh
+	req := CallRequest[T, R]{
+		payload: payload,
+		replyTo: replyCh,
+	}
 
 	if err := tryEnqueue(mb, req); err != nil {
-		replyPool.Put(replyCh)
-		reqPool.Put(req)
+		pool.Put(replyCh)
 		return zero, err
 	}
 
 	res := <-replyCh
-	replyPool.Put(replyCh)
+	pool.Put(replyCh)
 	return res.value, res.err
 }
 
 // TryCallContext attempts to enqueue a request without blocking and waits for reply until ctx expires.
 func TryCallContext[T any, R any](ctx context.Context, mb *Mailbox, payload T) (R, error) {
 	var zero R
-	replyPool := getReplyPool[R]()
-	replyCh := replyPool.Get().(chan result[R])
+	pool := getReplyPool[R]()
+	replyCh := pool.Get().(chan result[R])
 
-	reqPool := getCallRequestPool[T, R]()
-	req := reqPool.Get().(*CallRequest[T, R])
-	req.payload = payload
-	req.replyTo = replyCh
+	req := CallRequest[T, R]{
+		payload: payload,
+		replyTo: replyCh,
+	}
 
 	if err := tryEnqueueContext(ctx, mb, req); err != nil {
-		replyPool.Put(replyCh)
-		reqPool.Put(req)
+		pool.Put(replyCh)
 		return zero, err
 	}
 
 	select {
 	case res := <-replyCh:
-		replyPool.Put(replyCh)
+		pool.Put(replyCh)
 		return res.value, res.err
 	case <-ctx.Done():
 		return zero, ctx.Err()

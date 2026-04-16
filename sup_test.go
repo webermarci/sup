@@ -181,7 +181,7 @@ func (a *MathActor) Run(ctx context.Context) error {
 			}
 
 			switch m := msg.(type) {
-			case *sup.CallRequest[MathReq, int]:
+			case sup.CallRequest[MathReq, int]:
 				if m.Payload().B == 0 {
 					m.Reply(0, errors.New("division by zero"))
 					continue
@@ -240,7 +240,7 @@ func (a *NoReplyActor) Run(ctx context.Context) error {
 			}
 
 			switch msg.(type) {
-			case *sup.CallRequest[MathReq, int]:
+			case sup.CallRequest[MathReq, int]:
 			}
 		}
 	}
@@ -302,7 +302,7 @@ func (a *DelayedReplyActor) Run(ctx context.Context) error {
 			}
 
 			switch m := msg.(type) {
-			case *sup.CallRequest[int, int]:
+			case sup.CallRequest[int, int]:
 				n := a.count.Add(1)
 				if n == 1 {
 					time.Sleep(30 * time.Millisecond)
@@ -630,7 +630,7 @@ func (a *BenchmarkActor) Run(ctx context.Context) error {
 			}
 
 			switch m := msg.(type) {
-			case *sup.CallRequest[int, int]:
+			case sup.CallRequest[int, int]:
 				m.Reply(m.Payload(), nil)
 			}
 		}
