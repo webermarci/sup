@@ -11,7 +11,7 @@ type CastRequest[T any] struct {
 }
 
 // Payload returns the request's payload.
-func (r *CastRequest[T]) Payload() T {
+func (r CastRequest[T]) Payload() T {
 	return r.payload
 }
 
