@@ -4,9 +4,9 @@
 [![Test](https://github.com/webermarci/sup/actions/workflows/test.yml/badge.svg)](https://github.com/webermarci/sup/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-**Sup** is a highly optimized, zero-allocation Actor Model library for Go.
+**Sup** is a high-performance, low-allocation Actor Model library for Go.
 
-It provides a robust foundation for building highly concurrent, distributed, and fault-tolerant stateful applications without the overhead of the garbage collector getting in your way. It embraces standard Go idioms (`select`, channels, and `context`) rather than hiding them behind heavy frameworks.
+It provides a robust foundation for building highly concurrent, distributed, and fault-tolerant stateful applications. It achieves zero-allocation for asynchronous messages (`Cast`) and minimizes overhead for synchronous requests (`Call`) by utilizing internal resource pooling. It embraces standard Go idioms (`select`, channels, and `context`) rather than hiding them behind heavy frameworks.
 
 ## Features
 
