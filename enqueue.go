@@ -2,17 +2,20 @@ package sup
 
 import "context"
 
+// recoverClosed catches panics from sending to a closed channel.
+func recoverClosed(err *error) {
+	if r := recover(); r != nil {
+		*err = ErrMailboxClosed
+	}
+}
+
 // enqueue sends value into mb.ch, translating a send-on-closed panic into ErrMailboxClosed.
 func enqueue(mb *Mailbox, value any) (err error) {
 	if mb.closed.Load() {
 		return ErrMailboxClosed
 	}
 
-	defer func() {
-		if recover() != nil {
-			err = ErrMailboxClosed
-		}
-	}()
+	defer recoverClosed(&err)
 
 	mb.ch <- value
 	return nil
@@ -24,20 +27,16 @@ func enqueueContext(ctx context.Context, mb *Mailbox, value any) (err error) {
 		return ErrMailboxClosed
 	}
 
-	defer func() {
-		if recover() != nil {
-			err = ErrMailboxClosed
-		}
-	}()
+	defer recoverClosed(&err)
 
-	// Fast-path: if we can send immediately, do it (avoids the select overhead).
+	// Fast-path: if we can send immediately, do it.
 	select {
 	case mb.ch <- value:
 		return nil
 	default:
 	}
 
-	// Contended path: wait either for the mailbox to accept the message or the ctx to cancel.
+	// Contended path.
 	select {
 	case mb.ch <- value:
 		return nil
@@ -46,17 +45,13 @@ func enqueueContext(ctx context.Context, mb *Mailbox, value any) (err error) {
 	}
 }
 
-// tryEnqueue attempts to send without blocking and returns ErrMailboxFull if the buffer is full.
+// tryEnqueue attempts to send without blocking.
 func tryEnqueue(mb *Mailbox, value any) (err error) {
 	if mb.closed.Load() {
 		return ErrMailboxClosed
 	}
 
-	defer func() {
-		if recover() != nil {
-			err = ErrMailboxClosed
-		}
-	}()
+	defer recoverClosed(&err)
 
 	select {
 	case mb.ch <- value:
@@ -72,13 +67,9 @@ func tryEnqueueContext(ctx context.Context, mb *Mailbox, value any) (err error) 
 		return ErrMailboxClosed
 	}
 
-	defer func() {
-		if recover() != nil {
-			err = ErrMailboxClosed
-		}
-	}()
+	defer recoverClosed(&err)
 
-	// Fast-path: if we can send immediately, do it (avoids the select overhead).
+	// Fast-path.
 	select {
 	case mb.ch <- value:
 		return nil
