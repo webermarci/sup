@@ -10,6 +10,7 @@ type CastRequest[T any] struct {
 	payload T
 }
 
+// Payload returns the request's payload.
 func (r *CastRequest[T]) Payload() T {
 	return r.payload
 }
@@ -21,6 +22,7 @@ type CallRequest[T any, R any] struct {
 	replyTo chan result[R]
 }
 
+// Payload returns the request's payload.
 func (r *CallRequest[T, R]) Payload() T {
 	return r.payload
 }
