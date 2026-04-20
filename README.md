@@ -82,7 +82,11 @@ func main() {
 	counter := NewCounter()
 
 	// Start the actor under a Supervisor
-	supervisor := &sup.Supervisor{Policy: sup.Permanent}
+	supervisor := sup.NewSupervisor(
+		sup.WithPolicy(sup.Permanent),
+		sup.WithRestartDelay(time.Second),
+		sup.WithRestartLimit(5, 10 * time.Second),
+	)
 	supervisor.Go(ctx, counter.Run)
 
 	// --- Use the clean, thread-safe API ---
