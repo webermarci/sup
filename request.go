@@ -1,5 +1,16 @@
 package sup
 
+// Request represents a message sent to an actor, containing a payload of type T.
+type Request[T any] interface {
+	Payload() T
+}
+
+// RepliableRequest extends Request by allowing the actor to send a reply back to the caller.
+type RepliableRequest[T any, R any] interface {
+	Request[T]
+	Reply(value R, err error)
+}
+
 type result[R any] struct {
 	value R
 	err   error
