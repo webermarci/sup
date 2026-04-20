@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"runtime/debug"
 	"sync"
 	"sync/atomic"
@@ -152,6 +153,16 @@ func (s *Supervisor) Go(ctx context.Context, fn func(context.Context) error) {
 			delay := s.restartDelay
 			if delay == 0 {
 				delay = time.Second
+			}
+
+			jitterRange := int64(delay) / 10
+			if jitterRange > 0 {
+				jitter := time.Duration(rand.Int64N(jitterRange))
+				if rand.N(2) == 0 {
+					delay += jitter
+				} else {
+					delay -= jitter
+				}
 			}
 
 			if s.onRestart != nil {
