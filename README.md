@@ -88,7 +88,7 @@ func main() {
 		sup.WithRestartDelay(time.Second),
 		sup.WithRestartLimit(5, 10 * time.Second),
 	)
-	supervisor.Go(ctx, counter.Run)
+	supervisor.Go(ctx, counter)
 
 	// --- Use the clean, thread-safe API ---
 	counter.Increment(10)

@@ -96,7 +96,7 @@ func NewSupervisor(opts ...SupervisorOption) *Supervisor {
 }
 
 // Go starts the actor's run function in a background goroutine and supervises it.
-func (s *Supervisor) Go(ctx context.Context, fn func(context.Context) error) {
+func (s *Supervisor) Go(ctx context.Context, actor Actor) {
 	s.running.Add(1)
 
 	s.wg.Go(func() {
@@ -112,7 +112,7 @@ func (s *Supervisor) Go(ctx context.Context, fn func(context.Context) error) {
 		}
 
 		for {
-			err := s.executeSafe(ctx, fn)
+			err := s.executeSafe(ctx, actor.Run)
 
 			if ctx.Err() != nil {
 				return

@@ -359,7 +359,7 @@ func TestSupervisor_Temporary(t *testing.T) {
 		t.Fatalf("expected 0 running actors, got %d", supervisor.Running())
 	}
 
-	supervisor.Go(ctx, actorFn)
+	supervisor.Go(ctx, sup.ActorFunc(actorFn))
 	supervisor.Wait()
 
 	if supervisor.Running() != 0 {
@@ -389,7 +389,7 @@ func TestSupervisor_Transient(t *testing.T) {
 		sup.WithRestartDelay(5*time.Millisecond),
 	)
 
-	supervisor.Go(ctx, actorFn)
+	supervisor.Go(ctx, sup.ActorFunc(actorFn))
 	supervisor.Wait()
 
 	if runs.Load() != 2 {
@@ -418,7 +418,7 @@ func TestSupervisor_PermanentAndPanicRecovery(t *testing.T) {
 		sup.WithRestartDelay(5*time.Millisecond),
 	)
 
-	supervisor.Go(ctx, actorFn)
+	supervisor.Go(ctx, sup.ActorFunc(actorFn))
 
 	time.Sleep(30 * time.Millisecond)
 
@@ -451,7 +451,7 @@ func TestSupervisor_OnRestart(t *testing.T) {
 		}),
 	)
 
-	supervisor.Go(ctx, actorFn)
+	supervisor.Go(ctx, sup.ActorFunc(actorFn))
 	supervisor.Wait()
 
 	if restarts.Load() != 2 {
@@ -482,7 +482,7 @@ func TestSupervisor_MaxRestarts(t *testing.T) {
 		}),
 	)
 
-	supervisor.Go(ctx, actorFn)
+	supervisor.Go(ctx, sup.ActorFunc(actorFn))
 	supervisor.Wait()
 
 	// 4 runs → 4 individual OnError calls + 1 ErrMaxRestartsExceeded = 5 total
@@ -511,7 +511,7 @@ func TestSupervisor_OnError_NotCalledOnCleanExit(t *testing.T) {
 		}),
 	)
 
-	supervisor.Go(ctx, func(ctx context.Context) error { return nil })
+	supervisor.Go(ctx, sup.ActorFunc(func(ctx context.Context) error { return nil }))
 	supervisor.Wait()
 
 	if called.Load() {
@@ -534,7 +534,7 @@ func TestSupervisor_NoGoroutineLeaks(t *testing.T) {
 	)
 
 	for range 100 {
-		supervisor.Go(ctx, actorFn)
+		supervisor.Go(ctx, sup.ActorFunc(actorFn))
 	}
 
 	time.Sleep(10 * time.Millisecond)
@@ -570,7 +570,7 @@ func TestSupervisor_PanicIncludesStackTrace(t *testing.T) {
 		}),
 	)
 
-	supervisor.Go(ctx, actorFn)
+	supervisor.Go(ctx, sup.ActorFunc(actorFn))
 	supervisor.Wait()
 
 	err, ok := capturedErr.Load().(error)
@@ -599,11 +599,11 @@ func TestSupervisor_Running_ReflectsActiveCount(t *testing.T) {
 	)
 
 	for range 3 {
-		supervisor.Go(ctx, func(ctx context.Context) error {
+		supervisor.Go(ctx, sup.ActorFunc(func(ctx context.Context) error {
 			ready <- struct{}{}
 			<-ctx.Done()
 			return ctx.Err()
-		})
+		}))
 	}
 
 	for range 3 {
@@ -843,9 +843,7 @@ func Benchmark_Supervisor_SpawnAndExit(b *testing.B) {
 
 	b.ResetTimer()
 	for b.Loop() {
-		supervisor.Go(b.Context(), func(c context.Context) error {
-			return nil
-		})
+		supervisor.Go(b.Context(), sup.ActorFunc(func(ctx context.Context) error { return nil }))
 	}
 	b.StopTimer()
 
