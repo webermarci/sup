@@ -27,6 +27,20 @@ const (
 // Option configures a Supervisor.
 type SupervisorOption func(*Supervisor)
 
+// WithActor adds an actor to be supervised. Can be called multiple times to add multiple actors.
+func WithActor(a Actor) SupervisorOption {
+	return func(s *Supervisor) {
+		s.actors = append(s.actors, a)
+	}
+}
+
+// WithActors adds multiple actors to be supervised.
+func WithActors(actors ...Actor) SupervisorOption {
+	return func(s *Supervisor) {
+		s.actors = append(s.actors, actors...)
+	}
+}
+
 // WithPolicy sets the restart policy.
 func WithPolicy(p RestartPolicy) SupervisorOption {
 	return func(s *Supervisor) {
@@ -66,6 +80,7 @@ func WithOnRestart(fn func()) SupervisorOption {
 
 // Supervisor manages the lifecycle of actor Run loops.
 type Supervisor struct {
+	actors        []Actor
 	policy        RestartPolicy
 	restartDelay  time.Duration
 	maxRestarts   int
@@ -95,8 +110,8 @@ func NewSupervisor(opts ...SupervisorOption) *Supervisor {
 	return s
 }
 
-// Go starts the actor's run function in a background goroutine and supervises it.
-func (s *Supervisor) Go(ctx context.Context, actor Actor) {
+// Spawn starts the given actor under supervision. It will be restarted according to the supervisor's policy if it returns an error or panics.
+func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 	s.running.Add(1)
 
 	s.wg.Go(func() {
@@ -187,6 +202,19 @@ func (s *Supervisor) executeSafe(ctx context.Context, fn func(context.Context) e
 		}
 	}()
 	return fn(ctx)
+}
+
+// Run starts all actors under supervision and blocks until the context is canceled or all actors have stopped.
+func (s *Supervisor) Run(ctx context.Context) error {
+	childCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	for _, actor := range s.actors {
+		s.Spawn(childCtx, actor)
+	}
+
+	s.Wait()
+	return ctx.Err()
 }
 
 // Running returns the number of currently running actors under supervision.

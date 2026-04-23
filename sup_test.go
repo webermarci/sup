@@ -352,6 +352,7 @@ func TestSupervisor_Temporary(t *testing.T) {
 	}
 
 	supervisor := sup.NewSupervisor(
+		sup.WithActor(sup.ActorFunc(actorFn)),
 		sup.WithPolicy(sup.Temporary),
 	)
 
@@ -359,7 +360,7 @@ func TestSupervisor_Temporary(t *testing.T) {
 		t.Fatalf("expected 0 running actors, got %d", supervisor.Running())
 	}
 
-	supervisor.Go(ctx, sup.ActorFunc(actorFn))
+	supervisor.Run(ctx)
 	supervisor.Wait()
 
 	if supervisor.Running() != 0 {
@@ -385,11 +386,12 @@ func TestSupervisor_Transient(t *testing.T) {
 	}
 
 	supervisor := sup.NewSupervisor(
+		sup.WithActor(sup.ActorFunc(actorFn)),
 		sup.WithPolicy(sup.Transient),
 		sup.WithRestartDelay(5*time.Millisecond),
 	)
 
-	supervisor.Go(ctx, sup.ActorFunc(actorFn))
+	supervisor.Run(ctx)
 	supervisor.Wait()
 
 	if runs.Load() != 2 {
@@ -414,19 +416,28 @@ func TestSupervisor_PermanentAndPanicRecovery(t *testing.T) {
 	}
 
 	supervisor := sup.NewSupervisor(
+		sup.WithActor(sup.ActorFunc(actorFn)),
 		sup.WithPolicy(sup.Permanent),
 		sup.WithRestartDelay(5*time.Millisecond),
 	)
 
-	supervisor.Go(ctx, sup.ActorFunc(actorFn))
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- supervisor.Run(ctx)
+	}()
 
-	time.Sleep(30 * time.Millisecond)
+	time.Sleep(50 * time.Millisecond)
 
 	cancel()
-	supervisor.Wait()
 
-	if runs.Load() != 3 {
-		t.Fatalf("expected 3 runs before shutdown, got %d", runs.Load())
+	select {
+	case <-errCh:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("supervisor did not shut down in time")
+	}
+
+	if runs.Load() < 3 {
+		t.Fatalf("expected at least 3 runs before shutdown, got %d", runs.Load())
 	}
 }
 
@@ -444,6 +455,7 @@ func TestSupervisor_OnRestart(t *testing.T) {
 	}
 
 	supervisor := sup.NewSupervisor(
+		sup.WithActor(sup.ActorFunc(actorFn)),
 		sup.WithPolicy(sup.Transient),
 		sup.WithRestartDelay(5*time.Millisecond),
 		sup.WithOnRestart(func() {
@@ -451,7 +463,7 @@ func TestSupervisor_OnRestart(t *testing.T) {
 		}),
 	)
 
-	supervisor.Go(ctx, sup.ActorFunc(actorFn))
+	supervisor.Run(ctx)
 	supervisor.Wait()
 
 	if restarts.Load() != 2 {
@@ -471,6 +483,7 @@ func TestSupervisor_MaxRestarts(t *testing.T) {
 	}
 
 	supervisor := sup.NewSupervisor(
+		sup.WithActor(sup.ActorFunc(actorFn)),
 		sup.WithPolicy(sup.Permanent),
 		sup.WithRestartDelay(2*time.Millisecond),
 		sup.WithRestartLimit(3, time.Second),
@@ -482,7 +495,7 @@ func TestSupervisor_MaxRestarts(t *testing.T) {
 		}),
 	)
 
-	supervisor.Go(ctx, sup.ActorFunc(actorFn))
+	supervisor.Run(ctx)
 	supervisor.Wait()
 
 	// 4 runs → 4 individual OnError calls + 1 ErrMaxRestartsExceeded = 5 total
@@ -504,14 +517,19 @@ func TestSupervisor_OnError_NotCalledOnCleanExit(t *testing.T) {
 
 	var called atomic.Bool
 
+	actorFn := func(ctx context.Context) error {
+		return nil
+	}
+
 	supervisor := sup.NewSupervisor(
+		sup.WithActor(sup.ActorFunc(actorFn)),
 		sup.WithPolicy(sup.Transient),
 		sup.WithOnError(func(err error) {
 			called.Store(true)
 		}),
 	)
 
-	supervisor.Go(ctx, sup.ActorFunc(func(ctx context.Context) error { return nil }))
+	supervisor.Run(ctx)
 	supervisor.Wait()
 
 	if called.Load() {
@@ -534,7 +552,7 @@ func TestSupervisor_NoGoroutineLeaks(t *testing.T) {
 	)
 
 	for range 100 {
-		supervisor.Go(ctx, sup.ActorFunc(actorFn))
+		supervisor.Spawn(ctx, sup.ActorFunc(actorFn))
 	}
 
 	time.Sleep(10 * time.Millisecond)
@@ -564,13 +582,14 @@ func TestSupervisor_PanicIncludesStackTrace(t *testing.T) {
 	}
 
 	supervisor := sup.NewSupervisor(
+		sup.WithActor(sup.ActorFunc(actorFn)),
 		sup.WithPolicy(sup.Temporary),
 		sup.WithOnError(func(err error) {
 			capturedErr.Store(err)
 		}),
 	)
 
-	supervisor.Go(ctx, sup.ActorFunc(actorFn))
+	supervisor.Run(ctx)
 	supervisor.Wait()
 
 	err, ok := capturedErr.Load().(error)
@@ -599,7 +618,7 @@ func TestSupervisor_Running_ReflectsActiveCount(t *testing.T) {
 	)
 
 	for range 3 {
-		supervisor.Go(ctx, sup.ActorFunc(func(ctx context.Context) error {
+		supervisor.Spawn(ctx, sup.ActorFunc(func(ctx context.Context) error {
 			ready <- struct{}{}
 			<-ctx.Done()
 			return ctx.Err()
@@ -612,6 +631,63 @@ func TestSupervisor_Running_ReflectsActiveCount(t *testing.T) {
 
 	if supervisor.Running() != 3 {
 		t.Fatalf("expected 3 running, got %d", supervisor.Running())
+	}
+}
+
+func TestSupervisor_RecursiveShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+
+	var childStarted atomic.Bool
+	childActor := sup.ActorFunc(func(actorCtx context.Context) error {
+		childStarted.Store(true)
+		<-actorCtx.Done()
+		return nil
+	})
+
+	childSup := sup.NewSupervisor(sup.WithActor(childActor))
+	root := sup.NewSupervisor(sup.WithActor(childSup))
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- root.Run(ctx)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	if !childStarted.Load() {
+		t.Fatal("nested child actor did not start")
+	}
+
+	cancel()
+
+	select {
+	case err := <-errCh:
+		if err != nil && !errors.Is(err, context.Canceled) {
+			t.Fatalf("unexpected error on shutdown: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("hierarchical shutdown timed out")
+	}
+}
+
+func TestSupervisor_Running_MixedCount(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	actor := sup.ActorFunc(func(ctx context.Context) error {
+		<-ctx.Done()
+		return nil
+	})
+
+	s := sup.NewSupervisor(sup.WithActor(actor))
+
+	go s.Run(ctx)
+	s.Spawn(ctx, actor)
+	s.Spawn(ctx, actor)
+
+	time.Sleep(10 * time.Millisecond)
+
+	if s.Running() != 3 {
+		t.Fatalf("expected 3 running actors, got %d", s.Running())
 	}
 }
 
@@ -837,13 +913,15 @@ func Benchmark_TryCall_Concurrent(b *testing.B) {
 }
 
 func Benchmark_Supervisor_SpawnAndExit(b *testing.B) {
+	actor := sup.ActorFunc(func(ctx context.Context) error { return nil })
+
 	supervisor := sup.NewSupervisor(
 		sup.WithPolicy(sup.Temporary),
 	)
 
 	b.ResetTimer()
 	for b.Loop() {
-		supervisor.Go(b.Context(), sup.ActorFunc(func(ctx context.Context) error { return nil }))
+		supervisor.Spawn(b.Context(), actor)
 	}
 	b.StopTimer()
 

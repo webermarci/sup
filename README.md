@@ -79,18 +79,17 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// Initialize the counter
 	counter := NewCounter()
 
-	// Start the actor under a Supervisor
 	supervisor := sup.NewSupervisor(
+		sup.WithActor(counter),
 		sup.WithPolicy(sup.Permanent),
 		sup.WithRestartDelay(time.Second),
 		sup.WithRestartLimit(5, 10 * time.Second),
 	)
-	supervisor.Go(ctx, counter)
+	
+	supervisor.Run(ctx)
 
-	// --- Use the clean, thread-safe API ---
 	counter.Increment(10)
 	counter.Increment(32)
 
@@ -99,9 +98,8 @@ func main() {
 		panic(err)
 	}
 
-	fmt.Printf("Final count: %d\n", count) // Output: Final count: 42
+	fmt.Printf("Final count: %d\n", count)
 	
-	// Shut down the supervisor and wait for actors to exit cleanly
 	cancel()
 	supervisor.Wait()
 }
