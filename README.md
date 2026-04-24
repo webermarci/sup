@@ -88,7 +88,7 @@ func main() {
 		sup.WithRestartLimit(5, 10 * time.Second),
 	)
 	
-	supervisor.Run(ctx)
+	go supervisor.Run(ctx)
 
 	counter.Increment(10)
 	counter.Increment(32)
