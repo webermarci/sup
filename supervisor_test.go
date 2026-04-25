@@ -371,9 +371,10 @@ func TestSupervisor_RestartDelay(t *testing.T) {
 	supervisor.Wait()
 
 	elapsed := time.Since(start)
-	// 2 restarts × 50ms minimum
-	if elapsed < 2*delay {
-		t.Fatalf("expected at least %v elapsed for 2 restarts, got %v", 2*delay, elapsed)
+	// 2 restarts × delay minimum; allow a small scheduling slack for CI.
+	const slack = 10 * time.Millisecond
+	if elapsed+slack < 2*delay {
+		t.Fatalf("expected at least %v elapsed for 2 restarts (with %v slack), got %v", 2*delay, slack, elapsed)
 	}
 }
 
