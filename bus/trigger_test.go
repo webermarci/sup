@@ -14,7 +14,7 @@ func TestTrigger_DefaultValue(t *testing.T) {
 
 	go trigger.Run(t.Context())
 
-	if v := trigger.Value(); v != 0 {
+	if v := trigger.Read(); v != 0 {
 		t.Errorf("expected zero value, got %d", v)
 	}
 }
@@ -26,7 +26,7 @@ func TestTrigger_InitialValue(t *testing.T) {
 
 	go trigger.Run(t.Context())
 
-	if v := trigger.Value(); v != 42 {
+	if v := trigger.Read(); v != 42 {
 		t.Errorf("expected 42, got %d", v)
 	}
 }
@@ -38,11 +38,11 @@ func TestTrigger_SetValue(t *testing.T) {
 
 	go trigger.Run(t.Context())
 
-	if err := trigger.SetValue(10); err != nil {
+	if err := trigger.Write(10); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if v := trigger.Value(); v != 10 {
+	if v := trigger.Read(); v != 10 {
 		t.Errorf("expected 10, got %d", v)
 	}
 }
@@ -54,11 +54,11 @@ func TestTrigger_SetValueRejected(t *testing.T) {
 
 	go trigger.Run(t.Context())
 
-	if err := trigger.SetValue(99); err == nil {
+	if err := trigger.Write(99); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 
-	if v := trigger.Value(); v != 5 {
+	if v := trigger.Read(); v != 5 {
 		t.Errorf("expected value to remain 5, got %d", v)
 	}
 }
@@ -70,7 +70,7 @@ func TestTrigger_Subscribe(t *testing.T) {
 	go trigger.Run(ctx)
 
 	ch := trigger.Subscribe(ctx)
-	trigger.SetValue(77)
+	trigger.Write(77)
 
 	select {
 	case v := <-ch:
@@ -91,7 +91,7 @@ func TestTrigger_SubscribeNotNotifiedOnError(t *testing.T) {
 	go trigger.Run(ctx)
 
 	ch := trigger.Subscribe(ctx)
-	trigger.SetValue(99)
+	trigger.Write(99)
 
 	select {
 	case v := <-ch:
@@ -108,7 +108,7 @@ func TestTrigger_MultipleSubscribers(t *testing.T) {
 
 	ch1 := trigger.Subscribe(ctx)
 	ch2 := trigger.Subscribe(ctx)
-	trigger.SetValue(55)
+	trigger.Write(55)
 
 	for i, ch := range []<-chan int{ch1, ch2} {
 		select {

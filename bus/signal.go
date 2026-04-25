@@ -61,8 +61,8 @@ func (s *Signal[V]) WithInitialNotify(enabled bool) *Signal[V] {
 	return s
 }
 
-// Value returns the current value of the Signal by sending a call message to its mailbox.
-func (s *Signal[V]) Value() V {
+// Read returns the current value of the Signal by sending a call message to its mailbox.
+func (s *Signal[V]) Read() V {
 	res, _ := sup.Call[signalGetValueMessage, V](s.mailbox, signalGetValueMessage{})
 	return res
 }

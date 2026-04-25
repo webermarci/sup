@@ -67,7 +67,7 @@ trigger := bus.NewTrigger(func(v uint16) error {
 
 go trigger.Run(ctx)
 
-if err := trigger.SetValue(42); err != nil {
+if err := trigger.Write(42); err != nil {
     log.Printf("write rejected: %v", err)
 }
 ```
@@ -121,7 +121,7 @@ func main() {
     tempCh := temp.Subscribe(ctx)
     go func() {
         for t := range tempCh {
-            if err := heater.SetValue(t < 20.0); err != nil {
+            if err := heater.Write(t < 20.0); err != nil {
                 fmt.Printf("heater control failed: %v\n", err)
             }
         }

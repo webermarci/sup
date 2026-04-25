@@ -58,14 +58,14 @@ func (t *Trigger[V]) WithInitialNotify(enabled bool) *Trigger[V] {
 	return t
 }
 
-// Value retrieves the current value of the Trigger.
-func (t *Trigger[V]) Value() V {
+// Read retrieves the current value of the Trigger.
+func (t *Trigger[V]) Read() V {
 	res, _ := sup.Call[triggerGetValueMessage, V](t.mailbox, triggerGetValueMessage{})
 	return res
 }
 
-// SetValue attempts to update the Trigger's value using the provided update function.
-func (t *Trigger[V]) SetValue(value V) error {
+// Write attempts to update the Trigger's value using the provided update function.
+func (t *Trigger[V]) Write(value V) error {
 	_, err := sup.Call[triggerSetValueMessage[V], error](t.mailbox, triggerSetValueMessage[V]{value: value})
 	return err
 }

@@ -14,7 +14,7 @@ func TestSignal_DefaultValue(t *testing.T) {
 
 	go signal.Run(t.Context())
 
-	if v := signal.Value(); v != 0 {
+	if v := signal.Read(); v != 0 {
 		t.Errorf("expected zero value, got %d", v)
 	}
 }
@@ -26,7 +26,7 @@ func TestSignal_InitialValue(t *testing.T) {
 
 	go signal.Run(t.Context())
 
-	if v := signal.Value(); v != 7 {
+	if v := signal.Read(); v != 7 {
 		t.Errorf("expected initial value 7, got %d", v)
 	}
 }
@@ -40,7 +40,7 @@ func TestSignal_Value(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	if v := signal.Value(); v != 42 {
+	if v := signal.Read(); v != 42 {
 		t.Errorf("expected 42, got %d", v)
 	}
 }
@@ -56,7 +56,7 @@ func TestSignal_ErrorSkipsUpdate(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	if v := signal.Value(); v != 5 {
+	if v := signal.Read(); v != 5 {
 		t.Errorf("expected value to stay at 5, got %d", v)
 	}
 }
