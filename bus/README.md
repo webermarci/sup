@@ -17,7 +17,7 @@ go get github.com/webermarci/sup/bus
 | Type | Direction | Use case |
 |---|---|---|
 | `Signal` | Read → broadcast | Poll a register, sensor, or API; notify subscribers on change |
-| `Target` | Write → hardware | Accept writes from callers; forward to a handler on success |
+| `Trigger` | Write → hardware | Accept writes from callers; forward to a handler on success |
 
 Both types are actors. They do nothing until `Run(ctx)` is called.
 
@@ -56,18 +56,18 @@ for v := range ch {
 - Subscribing with a canceled context is a no-op; the returned channel is closed immediately.
 - Canceling a subscriber's context closes its channel and removes it from the broadcast list.
 
-## Target
+## Trigger
 
-A `Target` accepts writes via `SetValue`, calls an update function with the new value, and — on success — updates the stored value and notifies subscribers.
+A `Trigger` accepts writes via `SetValue`, calls an update function with the new value, and — on success — updates the stored value and notifies subscribers.
 
 ```go
-target := bus.NewTarget(func(v uint16) error {
+trigger := bus.NewTrigger(func(v uint16) error {
     return modbusClient.WriteRegister(0x02, v)
 }).WithInitialValue(0)
 
-go target.Run(ctx)
+go trigger.Run(ctx)
 
-if err := target.SetValue(42); err != nil {
+if err := trigger.SetValue(42); err != nil {
     log.Printf("write rejected: %v", err)
 }
 ```
@@ -110,7 +110,7 @@ func main() {
         WithInitialNotify(true)
 
     // Control a heater relay
-    heater := bus.NewTarget(func(on bool) error {
+    heater := bus.NewTrigger(func(on bool) error {
         return setHeaterRelay(on)
     }).WithInitialValue(false)
 
@@ -133,7 +133,7 @@ func main() {
 
 ## Using with a Supervisor
 
-Both `Signal` and `Target` implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor:
+Both `Signal` and `Trigger` implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor:
 
 ```go
 supervisor := sup.NewSupervisor(

@@ -7,70 +7,70 @@ import (
 	"time"
 )
 
-func TestTarget_DefaultValue(t *testing.T) {
-	target := NewTarget(func(v int) error {
+func TestTrigger_DefaultValue(t *testing.T) {
+	trigger := NewTrigger(func(v int) error {
 		return nil
 	})
 
-	go target.Run(t.Context())
+	go trigger.Run(t.Context())
 
-	if v := target.Value(); v != 0 {
+	if v := trigger.Value(); v != 0 {
 		t.Errorf("expected zero value, got %d", v)
 	}
 }
 
-func TestTarget_InitialValue(t *testing.T) {
-	target := NewTarget(func(v int) error {
+func TestTrigger_InitialValue(t *testing.T) {
+	trigger := NewTrigger(func(v int) error {
 		return nil
 	}).WithInitialValue(42)
 
-	go target.Run(t.Context())
+	go trigger.Run(t.Context())
 
-	if v := target.Value(); v != 42 {
+	if v := trigger.Value(); v != 42 {
 		t.Errorf("expected 42, got %d", v)
 	}
 }
 
-func TestTarget_SetValue(t *testing.T) {
-	target := NewTarget(func(v int) error {
+func TestTrigger_SetValue(t *testing.T) {
+	trigger := NewTrigger(func(v int) error {
 		return nil
 	})
 
-	go target.Run(t.Context())
+	go trigger.Run(t.Context())
 
-	if err := target.SetValue(10); err != nil {
+	if err := trigger.SetValue(10); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if v := target.Value(); v != 10 {
+	if v := trigger.Value(); v != 10 {
 		t.Errorf("expected 10, got %d", v)
 	}
 }
 
-func TestTarget_SetValueRejected(t *testing.T) {
-	target := NewTarget(func(v int) error {
+func TestTrigger_SetValueRejected(t *testing.T) {
+	trigger := NewTrigger(func(v int) error {
 		return errors.New("rejected")
 	}).WithInitialValue(5)
 
-	go target.Run(t.Context())
+	go trigger.Run(t.Context())
 
-	if err := target.SetValue(99); err == nil {
+	if err := trigger.SetValue(99); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 
-	if v := target.Value(); v != 5 {
+	if v := trigger.Value(); v != 5 {
 		t.Errorf("expected value to remain 5, got %d", v)
 	}
 }
 
-func TestTarget_Subscribe(t *testing.T) {
+func TestTrigger_Subscribe(t *testing.T) {
 	ctx := t.Context()
 
-	target := NewTarget(func(v int) error { return nil })
-	go target.Run(ctx)
+	trigger := NewTrigger(func(v int) error { return nil })
+	go trigger.Run(ctx)
 
-	ch := target.Subscribe(ctx)
-	target.SetValue(77)
+	ch := trigger.Subscribe(ctx)
+	trigger.SetValue(77)
 
 	select {
 	case v := <-ch:
@@ -82,16 +82,16 @@ func TestTarget_Subscribe(t *testing.T) {
 	}
 }
 
-func TestTarget_SubscribeNotNotifiedOnError(t *testing.T) {
+func TestTrigger_SubscribeNotNotifiedOnError(t *testing.T) {
 	ctx := t.Context()
 
-	target := NewTarget(func(v int) error {
+	trigger := NewTrigger(func(v int) error {
 		return errors.New("rejected")
 	})
-	go target.Run(ctx)
+	go trigger.Run(ctx)
 
-	ch := target.Subscribe(ctx)
-	target.SetValue(99)
+	ch := trigger.Subscribe(ctx)
+	trigger.SetValue(99)
 
 	select {
 	case v := <-ch:
@@ -100,15 +100,15 @@ func TestTarget_SubscribeNotNotifiedOnError(t *testing.T) {
 	}
 }
 
-func TestTarget_MultipleSubscribers(t *testing.T) {
+func TestTrigger_MultipleSubscribers(t *testing.T) {
 	ctx := t.Context()
 
-	target := NewTarget(func(v int) error { return nil })
-	go target.Run(ctx)
+	trigger := NewTrigger(func(v int) error { return nil })
+	go trigger.Run(ctx)
 
-	ch1 := target.Subscribe(ctx)
-	ch2 := target.Subscribe(ctx)
-	target.SetValue(55)
+	ch1 := trigger.Subscribe(ctx)
+	ch2 := trigger.Subscribe(ctx)
+	trigger.SetValue(55)
 
 	for i, ch := range []<-chan int{ch1, ch2} {
 		select {
@@ -122,14 +122,14 @@ func TestTarget_MultipleSubscribers(t *testing.T) {
 	}
 }
 
-func TestTarget_UnsubscribeOnContextCancel(t *testing.T) {
+func TestTrigger_UnsubscribeOnContextCancel(t *testing.T) {
 	ctx := t.Context()
 
-	target := NewTarget(func(v int) error { return nil })
-	go target.Run(ctx)
+	trigger := NewTrigger(func(v int) error { return nil })
+	go trigger.Run(ctx)
 
 	subCtx, subCancel := context.WithCancel(ctx)
-	ch := target.Subscribe(subCtx)
+	ch := trigger.Subscribe(subCtx)
 	subCancel()
 
 	deadline := time.After(200 * time.Millisecond)
@@ -145,16 +145,16 @@ func TestTarget_UnsubscribeOnContextCancel(t *testing.T) {
 	}
 }
 
-func TestTarget_Sync(t *testing.T) {
+func TestTrigger_Sync(t *testing.T) {
 	synced := make(chan int, 1)
-	target := NewTarget(func(v int) error {
+	trigger := NewTrigger(func(v int) error {
 		synced <- v
 		return nil
 	}).WithInitialValue(3)
 
-	go target.Run(t.Context())
+	go trigger.Run(t.Context())
 
-	if err := target.Sync(); err != nil {
+	if err := trigger.Sync(); err != nil {
 		t.Fatalf("unexpected sync error: %v", err)
 	}
 
@@ -168,18 +168,18 @@ func TestTarget_Sync(t *testing.T) {
 	}
 }
 
-func TestTarget_SyncNotifiesSubscribers(t *testing.T) {
+func TestTrigger_SyncNotifiesSubscribers(t *testing.T) {
 	ctx := t.Context()
 
-	target := NewTarget(func(v int) error {
+	trigger := NewTrigger(func(v int) error {
 		return nil
 	}).WithInitialValue(3)
 
-	go target.Run(ctx)
+	go trigger.Run(ctx)
 
-	ch := target.Subscribe(ctx)
+	ch := trigger.Subscribe(ctx)
 
-	if err := target.Sync(); err != nil {
+	if err := trigger.Sync(); err != nil {
 		t.Fatalf("unexpected sync error: %v", err)
 	}
 
@@ -193,30 +193,30 @@ func TestTarget_SyncNotifiesSubscribers(t *testing.T) {
 	}
 }
 
-func TestTarget_SyncError(t *testing.T) {
-	target := NewTarget(func(v int) error {
+func TestTrigger_SyncError(t *testing.T) {
+	trigger := NewTrigger(func(v int) error {
 		return errors.New("sync failed")
 	})
 
-	go target.Run(t.Context())
+	go trigger.Run(t.Context())
 
-	if err := target.Sync(); err == nil {
+	if err := trigger.Sync(); err == nil {
 		t.Fatal("expected sync error, got nil")
 	}
 }
 
-func TestTarget_InitialNotifyEnabled(t *testing.T) {
+func TestTrigger_InitialNotifyEnabled(t *testing.T) {
 	ctx := t.Context()
 
-	target := NewTarget(func(v int) error {
+	trigger := NewTrigger(func(v int) error {
 		return nil
 	}).
 		WithInitialValue(99).
 		WithInitialNotify(true)
 
-	go target.Run(ctx)
+	go trigger.Run(ctx)
 
-	ch := target.Subscribe(ctx)
+	ch := trigger.Subscribe(ctx)
 
 	select {
 	case v := <-ch:
@@ -228,16 +228,16 @@ func TestTarget_InitialNotifyEnabled(t *testing.T) {
 	}
 }
 
-func TestTarget_InitialNotifyDisabled(t *testing.T) {
+func TestTrigger_InitialNotifyDisabled(t *testing.T) {
 	ctx := t.Context()
 
-	target := NewTarget(func(v int) error {
+	trigger := NewTrigger(func(v int) error {
 		return nil
 	}).WithInitialValue(99)
 
-	go target.Run(ctx)
+	go trigger.Run(ctx)
 
-	ch := target.Subscribe(ctx)
+	ch := trigger.Subscribe(ctx)
 
 	select {
 	case v := <-ch:
