@@ -3,11 +3,18 @@ package sup
 import "context"
 
 type Actor interface {
+	Name() string
 	Run(context.Context) error
 }
 
-type ActorFunc func(context.Context) error
+type BaseActor struct {
+	name string
+}
 
-func (f ActorFunc) Run(ctx context.Context) error {
-	return f(ctx)
+func NewBaseActor(name string) *BaseActor {
+	return &BaseActor{name: name}
+}
+
+func (a *BaseActor) Name() string {
+	return a.name
 }

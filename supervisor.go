@@ -7,13 +7,7 @@ import (
 	"math/rand/v2"
 	"runtime/debug"
 	"sync"
-	"sync/atomic"
 	"time"
-)
-
-var (
-	// ErrMaxRestartsExceeded is returned when the maximum number of restarts is exceeded within the restart window.
-	ErrMaxRestartsExceeded = errors.New("max restarts exceeded")
 )
 
 type RestartPolicy uint8
@@ -24,13 +18,13 @@ const (
 	Temporary                      // Never restart
 )
 
-// Option configures a Supervisor.
+// SupervisorOption configures a Supervisor.
 type SupervisorOption func(*Supervisor)
 
 // WithActor adds an actor to be supervised. Can be called multiple times to add multiple actors.
-func WithActor(a Actor) SupervisorOption {
+func WithActor(actor Actor) SupervisorOption {
 	return func(s *Supervisor) {
-		s.actors = append(s.actors, a)
+		s.actors = append(s.actors, actor)
 	}
 }
 
@@ -42,9 +36,9 @@ func WithActors(actors ...Actor) SupervisorOption {
 }
 
 // WithPolicy sets the restart policy.
-func WithPolicy(p RestartPolicy) SupervisorOption {
+func WithPolicy(policy RestartPolicy) SupervisorOption {
 	return func(s *Supervisor) {
-		s.policy = p
+		s.policy = policy
 	}
 }
 
@@ -64,39 +58,34 @@ func WithRestartLimit(maxRestarts int, window time.Duration) SupervisorOption {
 	}
 }
 
-// WithOnError sets a callback invoked when an actor returns an error or panics.
-func WithOnError(fn func(error)) SupervisorOption {
+// WithOnError sets a callback function that will be called whenever a supervised actor returns an error or panics. The callback receives the actor and the error as arguments.
+func WithOnError(handler func(actor Actor, err error)) SupervisorOption {
 	return func(s *Supervisor) {
-		s.onError = fn
-	}
-}
-
-// WithOnRestart sets a callback invoked just before an actor is restarted.
-func WithOnRestart(fn func()) SupervisorOption {
-	return func(s *Supervisor) {
-		s.onRestart = fn
+		s.onError = handler
 	}
 }
 
 // Supervisor manages the lifecycle of actor Run loops.
 type Supervisor struct {
-	actors        []Actor
+	*BaseActor
 	policy        RestartPolicy
+	actors        []Actor
 	restartDelay  time.Duration
 	maxRestarts   int
 	restartWindow time.Duration
-	onError       func(error)
-	onRestart     func()
 	wg            sync.WaitGroup
-	running       atomic.Int32
+	onError       func(actor Actor, err error)
+	terminalErr   chan error
 }
 
 // NewSupervisor creates a new Supervisor with the given options.
 // Panics if the provided options are invalid.
-func NewSupervisor(opts ...SupervisorOption) *Supervisor {
+func NewSupervisor(name string, opts ...SupervisorOption) *Supervisor {
 	s := &Supervisor{
-		policy:       Permanent,
+		BaseActor:    NewBaseActor(name),
+		policy:       Transient,
 		restartDelay: time.Second,
+		terminalErr:  make(chan error, 1),
 	}
 
 	for _, opt := range opts {
@@ -110,13 +99,29 @@ func NewSupervisor(opts ...SupervisorOption) *Supervisor {
 	return s
 }
 
+func (s *Supervisor) executeSafe(ctx context.Context, fn func(context.Context) error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = errors.Join(
+				fmt.Errorf("%v", r),
+				fmt.Errorf("%s", debug.Stack()),
+			)
+		}
+	}()
+	return fn(ctx)
+}
+
 // Spawn starts the given actor under supervision. It will be restarted according to the supervisor's policy if it returns an error or panics.
 func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
-	s.running.Add(1)
+	if actor == nil {
+		panic("sup: cannot spawn nil actor")
+	}
+
+	if actor.Name() == "" {
+		panic("sup: actor name cannot be empty")
+	}
 
 	s.wg.Go(func() {
-		defer s.running.Add(-1)
-
 		var (
 			restarts []time.Time
 			maxCap   = s.maxRestarts + 1
@@ -129,19 +134,15 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 		for {
 			err := s.executeSafe(ctx, actor.Run)
 
+			if err != nil && s.onError != nil {
+				s.onError(actor, err)
+			}
+
 			if ctx.Err() != nil {
 				return
 			}
 
-			if err != nil && s.onError != nil {
-				s.onError(err)
-			}
-
-			if s.policy == Temporary {
-				return
-			}
-
-			if s.policy == Transient && err == nil {
+			if s.policy == Temporary || (s.policy == Transient && err == nil) {
 				return
 			}
 
@@ -158,17 +159,15 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 				restarts = append(restarts[:n], now)
 
 				if len(restarts) > s.maxRestarts {
-					if s.onError != nil {
-						s.onError(ErrMaxRestartsExceeded)
+					select {
+					case s.terminalErr <- fmt.Errorf("actor %s exceeded max restarts", actor.Name()):
+					default:
 					}
 					return
 				}
 			}
 
 			delay := s.restartDelay
-			if delay == 0 {
-				delay = time.Second
-			}
 
 			jitterRange := int64(delay) / 10
 			if jitterRange > 0 {
@@ -178,10 +177,6 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 				} else {
 					delay -= jitter
 				}
-			}
-
-			if s.onRestart != nil {
-				s.onRestart()
 			}
 
 			timer := time.NewTimer(delay)
@@ -195,15 +190,6 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 	})
 }
 
-func (s *Supervisor) executeSafe(ctx context.Context, fn func(context.Context) error) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = fmt.Errorf("actor panicked: %v\n%s", r, debug.Stack())
-		}
-	}()
-	return fn(ctx)
-}
-
 // Run starts all actors under supervision and blocks until the context is canceled or all actors have stopped.
 func (s *Supervisor) Run(ctx context.Context) error {
 	childCtx, cancel := context.WithCancel(ctx)
@@ -213,16 +199,23 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		s.Spawn(childCtx, actor)
 	}
 
-	s.Wait()
-	return ctx.Err()
-}
+	allDone := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(allDone)
+	}()
 
-// Running returns the number of currently running actors under supervision.
-func (s *Supervisor) Running() int {
-	return int(s.running.Load())
-}
+	var runErr error
+	select {
+	case <-ctx.Done():
+		runErr = ctx.Err()
+	case err := <-s.terminalErr:
+		runErr = err
+		cancel()
+	case <-allDone:
+		return nil
+	}
 
-// Wait blocks until all actors managed by this supervisor have stopped.
-func (s *Supervisor) Wait() {
 	s.wg.Wait()
+	return runErr
 }

@@ -43,12 +43,16 @@ type getCountMsg struct{}
 
 // 2. Define your Actor
 type Counter struct {
-	*sup.Mailbox
+	*sup.BaseActor
+	mailbox *sup.Mailbox
 	count int
 }
 
 func NewCounter() *Counter {
-	return &Counter{Mailbox: sup.NewMailbox(10)}
+	return &Counter{
+		BaseActor: sup.NewBaseActor("counter"),
+		mailbox: sup.NewMailbox(10),
+	}
 }
 
 // 3. Clean public API — callers never interact with the mailbox directly
@@ -83,13 +87,14 @@ func main() {
 
 	counter := NewCounter()
 
+
 	supervisor := sup.NewSupervisor(
 		sup.WithActor(counter),
 		sup.WithPolicy(sup.Permanent),
 		sup.WithRestartDelay(time.Second),
 		sup.WithRestartLimit(5, 10*time.Second),
-		sup.WithOnError(func(err error) {
-			fmt.Printf("actor error: %v\n", err)
+		sup.WithOnError(func(actor sup.Actor, err error) {
+			fmt.Printf("Actor %s failed with error: %v\n", actor.Name(), err)
 		}),
 	)
 

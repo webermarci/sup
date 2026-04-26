@@ -16,6 +16,7 @@ type triggerSyncMessage struct{}
 
 // Trigger represents a value that can be updated by a function and subscribed to for updates.
 type Trigger[V any] struct {
+	*sup.BaseActor
 	broadcaster   broadcaster[V]
 	mailbox       *sup.Mailbox
 	value         V
@@ -23,9 +24,10 @@ type Trigger[V any] struct {
 	initialNotify bool
 }
 
-// NewTrigger creates a new Trigger with the given update function.
-func NewTrigger[V any](update func(V) error) *Trigger[V] {
+// NewTrigger creates a new Trigger with the given name and update function.
+func NewTrigger[V any](name string, update func(V) error) *Trigger[V] {
 	return &Trigger[V]{
+		BaseActor: sup.NewBaseActor(name),
 		broadcaster: broadcaster[V]{
 			buffer: 16,
 		},

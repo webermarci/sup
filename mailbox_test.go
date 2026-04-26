@@ -12,14 +12,6 @@ import (
 func TestMailbox_TryCastAndClose(t *testing.T) {
 	mb := sup.NewMailbox(2)
 
-	if mb.Len() != 0 {
-		t.Fatalf("expected mailbox length 0, got %d", mb.Len())
-	}
-
-	if mb.Cap() != 2 {
-		t.Fatalf("expected mailbox capacity 2, got %d", mb.Cap())
-	}
-
 	if mb.IsClosed() {
 		t.Fatal("expected mailbox to be open")
 	}
@@ -138,21 +130,4 @@ func TestMailbox_Close_Idempotent(t *testing.T) {
 	mb := sup.NewMailbox(1)
 	mb.Close()
 	mb.Close() // must not panic
-}
-
-func TestMailbox_Len(t *testing.T) {
-	mb := sup.NewMailbox(3)
-
-	_ = sup.TryCast(mb, 1)
-	_ = sup.TryCast(mb, 2)
-
-	if mb.Len() != 2 {
-		t.Fatalf("expected Len 2, got %d", mb.Len())
-	}
-
-	<-mb.Receive()
-
-	if mb.Len() != 1 {
-		t.Fatalf("expected Len 1, got %d", mb.Len())
-	}
 }

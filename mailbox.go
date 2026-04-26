@@ -26,16 +26,6 @@ func NewMailbox(size int) *Mailbox {
 	}
 }
 
-// Len returns the current number of messages in the mailbox buffer.
-func (m *Mailbox) Len() int {
-	return len(m.ch)
-}
-
-// Cap returns the total capacity of the mailbox buffer.
-func (m *Mailbox) Cap() int {
-	return cap(m.ch)
-}
-
 // IsClosed checks if the mailbox has been closed.
 func (m *Mailbox) IsClosed() bool {
 	return m.closed.Load()

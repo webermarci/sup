@@ -11,6 +11,7 @@ type signalGetValueMessage struct{}
 
 // Signal represents a value that is periodically updated by a function and can be subscribed to for updates.
 type Signal[V any] struct {
+	*sup.BaseActor
 	broadcaster   broadcaster[V]
 	mailbox       *sup.Mailbox
 	value         V
@@ -19,9 +20,10 @@ type Signal[V any] struct {
 	initialNotify bool
 }
 
-// NewSignal creates a new Signal with the given update function.
-func NewSignal[V any](update func() (V, error)) *Signal[V] {
+// NewSignal creates a new Signal with the given name and update function.
+func NewSignal[V any](name string, update func() (V, error)) *Signal[V] {
 	return &Signal[V]{
+		BaseActor: sup.NewBaseActor(name),
 		broadcaster: broadcaster[V]{
 			buffer: 16,
 		},

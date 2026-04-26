@@ -5,10 +5,12 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/webermarci/sup"
 )
 
 func TestTrigger_DefaultValue(t *testing.T) {
-	trigger := NewTrigger(func(v int) error {
+	trigger := NewTrigger(t.Name(), func(v int) error {
 		return nil
 	})
 
@@ -20,7 +22,7 @@ func TestTrigger_DefaultValue(t *testing.T) {
 }
 
 func TestTrigger_InitialValue(t *testing.T) {
-	trigger := NewTrigger(func(v int) error {
+	trigger := NewTrigger(t.Name(), func(v int) error {
 		return nil
 	}).WithInitialValue(42)
 
@@ -32,7 +34,7 @@ func TestTrigger_InitialValue(t *testing.T) {
 }
 
 func TestTrigger_SetValue(t *testing.T) {
-	trigger := NewTrigger(func(v int) error {
+	trigger := NewTrigger(t.Name(), func(v int) error {
 		return nil
 	})
 
@@ -48,7 +50,7 @@ func TestTrigger_SetValue(t *testing.T) {
 }
 
 func TestTrigger_SetValueRejected(t *testing.T) {
-	trigger := NewTrigger(func(v int) error {
+	trigger := NewTrigger(t.Name(), func(v int) error {
 		return errors.New("rejected")
 	}).WithInitialValue(5)
 
@@ -66,7 +68,9 @@ func TestTrigger_SetValueRejected(t *testing.T) {
 func TestTrigger_Subscribe(t *testing.T) {
 	ctx := t.Context()
 
-	trigger := NewTrigger(func(v int) error { return nil })
+	trigger := NewTrigger(t.Name(), func(v int) error {
+		return nil
+	})
 	go trigger.Run(ctx)
 
 	ch := trigger.Subscribe(ctx)
@@ -85,7 +89,7 @@ func TestTrigger_Subscribe(t *testing.T) {
 func TestTrigger_SubscribeNotNotifiedOnError(t *testing.T) {
 	ctx := t.Context()
 
-	trigger := NewTrigger(func(v int) error {
+	trigger := NewTrigger(t.Name(), func(v int) error {
 		return errors.New("rejected")
 	})
 	go trigger.Run(ctx)
@@ -103,7 +107,9 @@ func TestTrigger_SubscribeNotNotifiedOnError(t *testing.T) {
 func TestTrigger_MultipleSubscribers(t *testing.T) {
 	ctx := t.Context()
 
-	trigger := NewTrigger(func(v int) error { return nil })
+	trigger := NewTrigger(t.Name(), func(v int) error {
+		return nil
+	})
 	go trigger.Run(ctx)
 
 	ch1 := trigger.Subscribe(ctx)
@@ -125,7 +131,9 @@ func TestTrigger_MultipleSubscribers(t *testing.T) {
 func TestTrigger_UnsubscribeOnContextCancel(t *testing.T) {
 	ctx := t.Context()
 
-	trigger := NewTrigger(func(v int) error { return nil })
+	trigger := NewTrigger(t.Name(), func(v int) error {
+		return nil
+	})
 	go trigger.Run(ctx)
 
 	subCtx, subCancel := context.WithCancel(ctx)
@@ -147,7 +155,7 @@ func TestTrigger_UnsubscribeOnContextCancel(t *testing.T) {
 
 func TestTrigger_Sync(t *testing.T) {
 	synced := make(chan int, 1)
-	trigger := NewTrigger(func(v int) error {
+	trigger := NewTrigger(t.Name(), func(v int) error {
 		synced <- v
 		return nil
 	}).WithInitialValue(3)
@@ -171,7 +179,7 @@ func TestTrigger_Sync(t *testing.T) {
 func TestTrigger_SyncNotifiesSubscribers(t *testing.T) {
 	ctx := t.Context()
 
-	trigger := NewTrigger(func(v int) error {
+	trigger := NewTrigger(t.Name(), func(v int) error {
 		return nil
 	}).WithInitialValue(3)
 
@@ -194,7 +202,7 @@ func TestTrigger_SyncNotifiesSubscribers(t *testing.T) {
 }
 
 func TestTrigger_SyncError(t *testing.T) {
-	trigger := NewTrigger(func(v int) error {
+	trigger := NewTrigger(t.Name(), func(v int) error {
 		return errors.New("sync failed")
 	})
 
@@ -208,7 +216,7 @@ func TestTrigger_SyncError(t *testing.T) {
 func TestTrigger_InitialNotifyEnabled(t *testing.T) {
 	ctx := t.Context()
 
-	trigger := NewTrigger(func(v int) error {
+	trigger := NewTrigger(t.Name(), func(v int) error {
 		return nil
 	}).
 		WithInitialValue(99).
@@ -231,7 +239,7 @@ func TestTrigger_InitialNotifyEnabled(t *testing.T) {
 func TestTrigger_InitialNotifyDisabled(t *testing.T) {
 	ctx := t.Context()
 
-	trigger := NewTrigger(func(v int) error {
+	trigger := NewTrigger(t.Name(), func(v int) error {
 		return nil
 	}).WithInitialValue(99)
 
@@ -243,5 +251,15 @@ func TestTrigger_InitialNotifyDisabled(t *testing.T) {
 	case v := <-ch:
 		t.Errorf("expected no initial notification, got %d", v)
 	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestTrigger_ActorInterface(t *testing.T) {
+	trigger := NewTrigger(t.Name(), func(value int) error {
+		return nil
+	})
+
+	if _, ok := any(trigger).(sup.Actor); !ok {
+		t.Errorf("tigger does not implement sup.Actor interface")
 	}
 }

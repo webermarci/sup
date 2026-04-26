@@ -7,8 +7,41 @@ import (
 	"github.com/webermarci/sup"
 )
 
+type BenchmarkActor struct {
+	*sup.BaseActor
+	*sup.Mailbox
+}
+
+func (a *BenchmarkActor) Run(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case msg, ok := <-a.Receive():
+			if !ok {
+				return nil
+			}
+			switch m := msg.(type) {
+			case sup.CallRequest[int, int]:
+				m.Reply(m.Payload(), nil)
+			}
+		}
+	}
+}
+
+type BenchmarkNilActor struct {
+	*sup.BaseActor
+}
+
+func (a *BenchmarkNilActor) Run(ctx context.Context) error {
+	return nil
+}
+
 func Benchmark_Cast(b *testing.B) {
-	actor := &BenchmarkActor{Mailbox: sup.NewMailbox(1000)}
+	actor := &BenchmarkActor{
+		BaseActor: sup.NewBaseActor(b.Name()),
+		Mailbox:   sup.NewMailbox(1000),
+	}
 	go actor.Run(b.Context())
 
 	b.ResetTimer()
@@ -18,7 +51,10 @@ func Benchmark_Cast(b *testing.B) {
 }
 
 func Benchmark_Cast_Concurrent(b *testing.B) {
-	actor := &BenchmarkActor{Mailbox: sup.NewMailbox(1000)}
+	actor := &BenchmarkActor{
+		BaseActor: sup.NewBaseActor(b.Name()),
+		Mailbox:   sup.NewMailbox(1000),
+	}
 	go actor.Run(b.Context())
 
 	b.ResetTimer()
@@ -30,7 +66,10 @@ func Benchmark_Cast_Concurrent(b *testing.B) {
 }
 
 func Benchmark_CastContext(b *testing.B) {
-	actor := &BenchmarkActor{Mailbox: sup.NewMailbox(1000)}
+	actor := &BenchmarkActor{
+		BaseActor: sup.NewBaseActor(b.Name()),
+		Mailbox:   sup.NewMailbox(1000),
+	}
 	go actor.Run(b.Context())
 
 	b.ResetTimer()
@@ -40,7 +79,10 @@ func Benchmark_CastContext(b *testing.B) {
 }
 
 func Benchmark_CastContext_Concurrent(b *testing.B) {
-	actor := &BenchmarkActor{Mailbox: sup.NewMailbox(1000)}
+	actor := &BenchmarkActor{
+		BaseActor: sup.NewBaseActor(b.Name()),
+		Mailbox:   sup.NewMailbox(1000),
+	}
 	go actor.Run(b.Context())
 
 	b.ResetTimer()
@@ -52,7 +94,10 @@ func Benchmark_CastContext_Concurrent(b *testing.B) {
 }
 
 func Benchmark_CastContext_Expired(b *testing.B) {
-	actor := &BenchmarkActor{Mailbox: sup.NewMailbox(1000)}
+	actor := &BenchmarkActor{
+		BaseActor: sup.NewBaseActor(b.Name()),
+		Mailbox:   sup.NewMailbox(1000),
+	}
 	go actor.Run(b.Context())
 
 	ctx, cancel := context.WithCancel(b.Context())
@@ -65,7 +110,10 @@ func Benchmark_CastContext_Expired(b *testing.B) {
 }
 
 func Benchmark_TryCast(b *testing.B) {
-	actor := &BenchmarkActor{Mailbox: sup.NewMailbox(b.N)}
+	actor := &BenchmarkActor{
+		BaseActor: sup.NewBaseActor(b.Name()),
+		Mailbox:   sup.NewMailbox(b.N),
+	}
 	go actor.Run(b.Context())
 
 	b.ResetTimer()
@@ -75,7 +123,10 @@ func Benchmark_TryCast(b *testing.B) {
 }
 
 func Benchmark_TryCast_Concurrent(b *testing.B) {
-	actor := &BenchmarkActor{Mailbox: sup.NewMailbox(b.N)}
+	actor := &BenchmarkActor{
+		BaseActor: sup.NewBaseActor(b.Name()),
+		Mailbox:   sup.NewMailbox(b.N),
+	}
 	go actor.Run(b.Context())
 
 	b.ResetTimer()
@@ -97,7 +148,10 @@ func Benchmark_TryCast_Full(b *testing.B) {
 }
 
 func Benchmark_Call(b *testing.B) {
-	actor := &BenchmarkActor{Mailbox: sup.NewMailbox(1000)}
+	actor := &BenchmarkActor{
+		BaseActor: sup.NewBaseActor(b.Name()),
+		Mailbox:   sup.NewMailbox(1000),
+	}
 	go actor.Run(b.Context())
 
 	b.ResetTimer()
@@ -109,7 +163,10 @@ func Benchmark_Call(b *testing.B) {
 }
 
 func Benchmark_Call_Concurrent(b *testing.B) {
-	actor := &BenchmarkActor{Mailbox: sup.NewMailbox(1000)}
+	actor := &BenchmarkActor{
+		BaseActor: sup.NewBaseActor(b.Name()),
+		Mailbox:   sup.NewMailbox(1000),
+	}
 	go actor.Run(b.Context())
 
 	b.ResetTimer()
@@ -123,7 +180,10 @@ func Benchmark_Call_Concurrent(b *testing.B) {
 }
 
 func Benchmark_CallContext(b *testing.B) {
-	actor := &BenchmarkActor{Mailbox: sup.NewMailbox(1000)}
+	actor := &BenchmarkActor{
+		BaseActor: sup.NewBaseActor(b.Name()),
+		Mailbox:   sup.NewMailbox(1000),
+	}
 	go actor.Run(b.Context())
 
 	b.ResetTimer()
@@ -135,7 +195,10 @@ func Benchmark_CallContext(b *testing.B) {
 }
 
 func Benchmark_CallContext_Concurrent(b *testing.B) {
-	actor := &BenchmarkActor{Mailbox: sup.NewMailbox(1000)}
+	actor := &BenchmarkActor{
+		BaseActor: sup.NewBaseActor(b.Name()),
+		Mailbox:   sup.NewMailbox(1000),
+	}
 	go actor.Run(b.Context())
 
 	b.ResetTimer()
@@ -161,7 +224,10 @@ func Benchmark_CallContext_Expired(b *testing.B) {
 }
 
 func Benchmark_TryCall(b *testing.B) {
-	actor := &BenchmarkActor{Mailbox: sup.NewMailbox(b.N)}
+	actor := &BenchmarkActor{
+		BaseActor: sup.NewBaseActor(b.Name()),
+		Mailbox:   sup.NewMailbox(b.N),
+	}
 	go actor.Run(b.Context())
 
 	b.ResetTimer()
@@ -173,7 +239,10 @@ func Benchmark_TryCall(b *testing.B) {
 }
 
 func Benchmark_TryCall_Concurrent(b *testing.B) {
-	actor := &BenchmarkActor{Mailbox: sup.NewMailbox(b.N)}
+	actor := &BenchmarkActor{
+		BaseActor: sup.NewBaseActor(b.Name()),
+		Mailbox:   sup.NewMailbox(b.N),
+	}
 	go actor.Run(b.Context())
 
 	b.ResetTimer()
@@ -187,13 +256,18 @@ func Benchmark_TryCall_Concurrent(b *testing.B) {
 }
 
 func Benchmark_Supervisor_SpawnAndExit(b *testing.B) {
-	supervisor := sup.NewSupervisor(sup.WithPolicy(sup.Temporary))
+	actor := &BenchmarkNilActor{
+		BaseActor: sup.NewBaseActor(b.Name()),
+	}
+	supervisor := sup.NewSupervisor(
+		b.Name(),
+		sup.WithPolicy(sup.Temporary),
+	)
+	go supervisor.Run(b.Context())
 
 	b.ResetTimer()
 	for b.Loop() {
-		supervisor.Spawn(b.Context(), sup.ActorFunc(func(ctx context.Context) error { return nil }))
+		supervisor.Spawn(b.Context(), actor)
 	}
 	b.StopTimer()
-
-	supervisor.Wait()
 }
