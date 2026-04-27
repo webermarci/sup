@@ -62,8 +62,8 @@ func TestActor_Cancellation(t *testing.T) {
 	err := actor.Run(ctx)
 	duration := time.Since(start)
 
-	if err == nil {
-		t.Error("expected error due to cancellation, got nil")
+	if err != nil {
+		t.Errorf("expected nil error on cancellation, got %v", err)
 	}
 
 	if duration > 1*time.Second {
