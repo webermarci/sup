@@ -57,12 +57,11 @@ func (b *broadcaster[V]) subscribe(ctx context.Context, mailbox *sup.Mailbox) <-
 		return ch
 	}
 
-	go func() {
-		<-ctx.Done()
+	context.AfterFunc(ctx, func() {
 		if err := sup.Cast(mailbox, unsubscribeMessage[V]{ch: ch}); err != nil {
 			close(ch)
 		}
-	}()
+	})
 
 	return ch
 }
