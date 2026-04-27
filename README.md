@@ -14,7 +14,6 @@ It provides a robust foundation for building highly concurrent, distributed, and
 - **OTP-style supervision** — Erlang-inspired supervisor trees with `Permanent`, `Transient`, and `Temporary` restart policies.
 - **Panic recovery** — Panics are caught, wrapped with a stack trace, and reported via `WithOnError`. The actor is then restarted according to the policy.
 - **Restart limits** — Optionally cap restarts within a sliding time window with `WithRestartLimit`.
-- **Lifecycle callbacks** — React to restarts and errors via `WithOnRestart` and `WithOnError`.
 - **No goroutine leaks** — `context.Context` integration ensures all actors shut down cleanly when the parent context is canceled.
 - **Supervisor trees** — Supervisors implement the `Actor` interface, so they can be nested inside other supervisors.
 
@@ -87,8 +86,8 @@ func main() {
 
 	counter := NewCounter()
 
-
 	supervisor := sup.NewSupervisor(
+		"root",
 		sup.WithActor(counter),
 		sup.WithPolicy(sup.Permanent),
 		sup.WithRestartDelay(time.Second),
@@ -148,6 +147,7 @@ cacheActor := NewCacheActor()
 
 // Child supervisor manages data-layer actors
 dataSup := sup.NewSupervisor(
+	"data_supervisor",
 	sup.WithActors(dbActor, cacheActor),
 	sup.WithPolicy(sup.Permanent),
 	sup.WithRestartDelay(500*time.Millisecond),
@@ -155,6 +155,7 @@ dataSup := sup.NewSupervisor(
 
 // Root supervisor treats the child supervisor as an actor
 root := sup.NewSupervisor(
+	"root",
 	sup.WithActor(dataSup),
 	sup.WithPolicy(sup.Permanent),
 )
@@ -167,7 +168,7 @@ go root.Run(ctx)
 For actors that don't need a mailbox or internal state, use `ActorFunc`:
 
 ```go
-healthCheck := sup.ActorFunc("func", func(ctx context.Context) error {
+healthCheck := sup.ActorFunc("health", func(ctx context.Context) error {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -183,6 +184,7 @@ healthCheck := sup.ActorFunc("func", func(ctx context.Context) error {
 })
 
 sup.NewSupervisor(
+  "health_supervisor",
 	sup.WithActor(healthCheck),
 	sup.WithPolicy(sup.Transient),
 ).Run(ctx)
@@ -194,6 +196,7 @@ Use `Spawn` to start actors dynamically after the supervisor is already running:
 
 ```go
 supervisor := sup.NewSupervisor(
+	"job_supervisor",
 	sup.WithPolicy(sup.Temporary),
 )
 go supervisor.Run(ctx)
