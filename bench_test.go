@@ -7,12 +7,12 @@ import (
 	"github.com/webermarci/sup"
 )
 
-type BenchmarkActor struct {
+type benchmarkActor struct {
 	*sup.BaseActor
 	*sup.Mailbox
 }
 
-func (a *BenchmarkActor) Run(ctx context.Context) error {
+func (a *benchmarkActor) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
@@ -29,16 +29,8 @@ func (a *BenchmarkActor) Run(ctx context.Context) error {
 	}
 }
 
-type BenchmarkNilActor struct {
-	*sup.BaseActor
-}
-
-func (a *BenchmarkNilActor) Run(ctx context.Context) error {
-	return nil
-}
-
 func Benchmark_Cast(b *testing.B) {
-	actor := &BenchmarkActor{
+	actor := &benchmarkActor{
 		BaseActor: sup.NewBaseActor(b.Name()),
 		Mailbox:   sup.NewMailbox(1000),
 	}
@@ -51,7 +43,7 @@ func Benchmark_Cast(b *testing.B) {
 }
 
 func Benchmark_Cast_Concurrent(b *testing.B) {
-	actor := &BenchmarkActor{
+	actor := &benchmarkActor{
 		BaseActor: sup.NewBaseActor(b.Name()),
 		Mailbox:   sup.NewMailbox(1000),
 	}
@@ -66,7 +58,7 @@ func Benchmark_Cast_Concurrent(b *testing.B) {
 }
 
 func Benchmark_CastContext(b *testing.B) {
-	actor := &BenchmarkActor{
+	actor := &benchmarkActor{
 		BaseActor: sup.NewBaseActor(b.Name()),
 		Mailbox:   sup.NewMailbox(1000),
 	}
@@ -79,7 +71,7 @@ func Benchmark_CastContext(b *testing.B) {
 }
 
 func Benchmark_CastContext_Concurrent(b *testing.B) {
-	actor := &BenchmarkActor{
+	actor := &benchmarkActor{
 		BaseActor: sup.NewBaseActor(b.Name()),
 		Mailbox:   sup.NewMailbox(1000),
 	}
@@ -94,7 +86,7 @@ func Benchmark_CastContext_Concurrent(b *testing.B) {
 }
 
 func Benchmark_CastContext_Expired(b *testing.B) {
-	actor := &BenchmarkActor{
+	actor := &benchmarkActor{
 		BaseActor: sup.NewBaseActor(b.Name()),
 		Mailbox:   sup.NewMailbox(1000),
 	}
@@ -110,7 +102,7 @@ func Benchmark_CastContext_Expired(b *testing.B) {
 }
 
 func Benchmark_TryCast(b *testing.B) {
-	actor := &BenchmarkActor{
+	actor := &benchmarkActor{
 		BaseActor: sup.NewBaseActor(b.Name()),
 		Mailbox:   sup.NewMailbox(b.N),
 	}
@@ -123,7 +115,7 @@ func Benchmark_TryCast(b *testing.B) {
 }
 
 func Benchmark_TryCast_Concurrent(b *testing.B) {
-	actor := &BenchmarkActor{
+	actor := &benchmarkActor{
 		BaseActor: sup.NewBaseActor(b.Name()),
 		Mailbox:   sup.NewMailbox(b.N),
 	}
@@ -148,7 +140,7 @@ func Benchmark_TryCast_Full(b *testing.B) {
 }
 
 func Benchmark_Call(b *testing.B) {
-	actor := &BenchmarkActor{
+	actor := &benchmarkActor{
 		BaseActor: sup.NewBaseActor(b.Name()),
 		Mailbox:   sup.NewMailbox(1000),
 	}
@@ -163,7 +155,7 @@ func Benchmark_Call(b *testing.B) {
 }
 
 func Benchmark_Call_Concurrent(b *testing.B) {
-	actor := &BenchmarkActor{
+	actor := &benchmarkActor{
 		BaseActor: sup.NewBaseActor(b.Name()),
 		Mailbox:   sup.NewMailbox(1000),
 	}
@@ -180,7 +172,7 @@ func Benchmark_Call_Concurrent(b *testing.B) {
 }
 
 func Benchmark_CallContext(b *testing.B) {
-	actor := &BenchmarkActor{
+	actor := &benchmarkActor{
 		BaseActor: sup.NewBaseActor(b.Name()),
 		Mailbox:   sup.NewMailbox(1000),
 	}
@@ -195,7 +187,7 @@ func Benchmark_CallContext(b *testing.B) {
 }
 
 func Benchmark_CallContext_Concurrent(b *testing.B) {
-	actor := &BenchmarkActor{
+	actor := &benchmarkActor{
 		BaseActor: sup.NewBaseActor(b.Name()),
 		Mailbox:   sup.NewMailbox(1000),
 	}
@@ -224,7 +216,7 @@ func Benchmark_CallContext_Expired(b *testing.B) {
 }
 
 func Benchmark_TryCall(b *testing.B) {
-	actor := &BenchmarkActor{
+	actor := &benchmarkActor{
 		BaseActor: sup.NewBaseActor(b.Name()),
 		Mailbox:   sup.NewMailbox(b.N),
 	}
@@ -239,7 +231,7 @@ func Benchmark_TryCall(b *testing.B) {
 }
 
 func Benchmark_TryCall_Concurrent(b *testing.B) {
-	actor := &BenchmarkActor{
+	actor := &benchmarkActor{
 		BaseActor: sup.NewBaseActor(b.Name()),
 		Mailbox:   sup.NewMailbox(b.N),
 	}
@@ -256,9 +248,9 @@ func Benchmark_TryCall_Concurrent(b *testing.B) {
 }
 
 func Benchmark_Supervisor_SpawnAndExit(b *testing.B) {
-	actor := &BenchmarkNilActor{
-		BaseActor: sup.NewBaseActor(b.Name()),
-	}
+	actor := sup.ActorFunc(b.Name(), func(ctx context.Context) error {
+		return nil
+	})
 	supervisor := sup.NewSupervisor(
 		b.Name(),
 		sup.WithPolicy(sup.Temporary),
