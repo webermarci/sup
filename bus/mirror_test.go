@@ -4,16 +4,16 @@ import (
 	"testing"
 )
 
-type MockReadable[V any] struct {
+type mockReadable[V any] struct {
 	value V
 }
 
-func (m *MockReadable[V]) Read() V {
+func (m *mockReadable[V]) Read() V {
 	return m.value
 }
 
 func TestMirror_Simple(t *testing.T) {
-	parent := &MockReadable[int]{value: 10}
+	parent := &mockReadable[int]{value: 10}
 
 	m := NewMirror(func() int {
 		return parent.Read() * 2
@@ -30,8 +30,8 @@ func TestMirror_Simple(t *testing.T) {
 }
 
 func TestMirror_Aggregation(t *testing.T) {
-	p1 := &MockReadable[int]{value: 10}
-	p2 := &MockReadable[int]{value: 20}
+	p1 := &mockReadable[int]{value: 10}
+	p2 := &mockReadable[int]{value: 20}
 
 	sum := NewMirror(func() int {
 		return p1.Read() + p2.Read()
@@ -43,7 +43,7 @@ func TestMirror_Aggregation(t *testing.T) {
 }
 
 func TestMirror_TypeConversion(t *testing.T) {
-	parent := &MockReadable[int]{value: 1}
+	parent := &mockReadable[int]{value: 1}
 
 	m := NewMirror(func() string {
 		if parent.Read() == 1 {
@@ -58,7 +58,7 @@ func TestMirror_TypeConversion(t *testing.T) {
 }
 
 func TestMirror_Chaining(t *testing.T) {
-	p := &MockReadable[int]{value: 10}
+	p := &mockReadable[int]{value: 10}
 
 	m1 := NewMirror(func() int {
 		return p.Read() * 2
