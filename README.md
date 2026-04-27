@@ -86,8 +86,7 @@ func main() {
 
 	counter := NewCounter()
 
-	supervisor := sup.NewSupervisor(
-		"root",
+	supervisor := sup.NewSupervisor("root",
 		sup.WithActor(counter),
 		sup.WithPolicy(sup.Permanent),
 		sup.WithRestartDelay(time.Second),
@@ -146,16 +145,14 @@ dbActor := NewDatabaseActor()
 cacheActor := NewCacheActor()
 
 // Child supervisor manages data-layer actors
-dataSup := sup.NewSupervisor(
-	"data_supervisor",
+dataSup := sup.NewSupervisor("data_supervisor",
 	sup.WithActors(dbActor, cacheActor),
 	sup.WithPolicy(sup.Permanent),
 	sup.WithRestartDelay(500*time.Millisecond),
 )
 
 // Root supervisor treats the child supervisor as an actor
-root := sup.NewSupervisor(
-	"root",
+root := sup.NewSupervisor("root",
 	sup.WithActor(dataSup),
 	sup.WithPolicy(sup.Permanent),
 )
@@ -183,8 +180,7 @@ healthCheck := sup.ActorFunc("health", func(ctx context.Context) error {
 	}
 })
 
-sup.NewSupervisor(
-  "health_supervisor",
+sup.NewSupervisor("health_supervisor",
 	sup.WithActor(healthCheck),
 	sup.WithPolicy(sup.Transient),
 ).Run(ctx)
@@ -195,8 +191,7 @@ sup.NewSupervisor(
 Use `Spawn` to start actors dynamically after the supervisor is already running:
 
 ```go
-supervisor := sup.NewSupervisor(
-	"job_supervisor",
+supervisor := sup.NewSupervisor("job_supervisor",
 	sup.WithPolicy(sup.Temporary),
 )
 go supervisor.Run(ctx)

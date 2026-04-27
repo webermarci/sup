@@ -109,40 +109,40 @@ if err := trigger.Write(42); err != nil {
 
 ```go
 func main() {
-    ctx, cancel := context.WithCancel(context.Background())
-    defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-    // 1. Inputs
-    temp := bus.NewSignal("temperature", func() (float64, error) {
-        return readTemperatureSensor()
-    }).WithInterval(500 * time.Millisecond)
+	// 1. Inputs
+	temp := bus.NewSignal("temperature", func() (float64, error) {
+		return readTemperatureSensor()
+	}).WithInterval(500 * time.Millisecond)
 
-    // 2. Logic (Mirror)
-    // Automatically determine if heating is needed
-    needsHeat := bus.NewMirror(func() bool {
-        return temp.Read() < 20.0
-    })
+	// 2. Logic (Mirror)
+	// Automatically determine if heating is needed
+	needsHeat := bus.NewMirror(func() bool {
+		return temp.Read() < 20.0
+	})
 
-    // 3. Output
-    heater := bus.NewTrigger("heater", func(on bool) error {
-        return setHeaterRelay(on)
-    })
+	// 3. Output
+	heater := bus.NewTrigger("heater", func(on bool) error {
+		return setHeaterRelay(on)
+	})
 
-    go temp.Run(ctx)
-    go heater.Run(ctx)
+	go temp.Run(ctx)
+	go heater.Run(ctx)
 
-    // Using the Mirror in a control loop
-    tempCh := temp.Subscribe(ctx)
-    go func() {
-        for range tempCh {
-            // Read the logic from the mirror and write to the trigger
-            if err := heater.Write(needsHeat.Read()); err != nil {
-                fmt.Printf("heater control failed: %v\n", err)
-            }
-        }
-    }()
+	// Using the Mirror in a control loop
+	tempCh := temp.Subscribe(ctx)
+	go func() {
+		for range tempCh {
+			// Read the logic from the mirror and write to the trigger
+			if err := heater.Write(needsHeat.Read()); err != nil {
+				fmt.Printf("heater control failed: %v\n", err)
+			}
+		}
+	}()
 
-    time.Sleep(10 * time.Second)
+	time.Sleep(10 * time.Second)
 }
 ```
 
@@ -151,10 +151,10 @@ func main() {
 Both `Signal` and `Trigger` implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor. `Mirror` is passive and does not need to be supervised.
 
 ```go
-supervisor := sup.NewSupervisor(
-    sup.WithActors(temp, heater),
-    sup.WithPolicy(sup.Permanent),
-    sup.WithRestartDelay(time.Second),
+supervisor := sup.NewSupervisor("root",
+	sup.WithActors(temp, heater),
+	sup.WithPolicy(sup.Permanent),
+	sup.WithRestartDelay(time.Second),
 )
 
 supervisor.Run(ctx)
