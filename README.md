@@ -167,7 +167,7 @@ go root.Run(ctx)
 For actors that don't need a mailbox or internal state, use `ActorFunc`:
 
 ```go
-healthCheck := sup.ActorFunc(func(ctx context.Context) error {
+healthCheck := sup.ActorFunc("func", func(ctx context.Context) error {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
