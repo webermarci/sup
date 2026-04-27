@@ -218,20 +218,20 @@ goos: darwin
 goarch: arm64
 pkg: github.com/webermarci/sup
 cpu: Apple M5
-Benchmark_Cast-10                       20938254    57.2 ns/op     0 B/op   0 allocs/op
-Benchmark_Cast_Concurrent-10            10266757   122.5 ns/op     0 B/op   0 allocs/op
-Benchmark_CastContext-10                21600847    55.9 ns/op     0 B/op   0 allocs/op
-Benchmark_CastContext_Concurrent-10     15451960    74.3 ns/op     0 B/op   0 allocs/op
-Benchmark_CastContext_Expired-10        24459242    48.9 ns/op     0 B/op   0 allocs/op
-Benchmark_TryCast-10                   192998186     6.2 ns/op     0 B/op   0 allocs/op
-Benchmark_TryCast_Concurrent-10         85340160    14.9 ns/op     0 B/op   0 allocs/op
-Benchmark_TryCast_Full-10              244051416     4.9 ns/op     0 B/op   0 allocs/op
-Benchmark_Call-10                        3548784   341.7 ns/op    16 B/op   1 allocs/op
-Benchmark_Call_Concurrent-10             2394580   501.9 ns/op    16 B/op   1 allocs/op
-Benchmark_CallContext-10                 3018014   397.2 ns/op    16 B/op   1 allocs/op
-Benchmark_CallContext_Concurrent-10      1422726   842.3 ns/op    16 B/op   1 allocs/op
-Benchmark_CallContext_Expired-10        19289618    62.2 ns/op    16 B/op   1 allocs/op
-Benchmark_TryCall-10                     3556698   341.0 ns/op    16 B/op   1 allocs/op
-Benchmark_TryCall_Concurrent-10          3028040   453.5 ns/op    16 B/op   1 allocs/op
-Benchmark_Supervisor_SpawnAndExit-10     4608442   261.4 ns/op    72 B/op   2 allocs/op
+Benchmark_Cast-10                       20725142    57.4 ns/op     0 B/op   0 allocs/op
+Benchmark_Cast_Concurrent-10            10265941   117.4 ns/op     0 B/op   0 allocs/op
+Benchmark_CastContext-10                21805774    55.2 ns/op     0 B/op   0 allocs/op
+Benchmark_CastContext_Concurrent-10     15253065    79.0 ns/op     0 B/op   0 allocs/op
+Benchmark_CastContext_Expired-10        23459665    51.0 ns/op     0 B/op   0 allocs/op
+Benchmark_TryCast-10                   198711219     6.0 ns/op     0 B/op   0 allocs/op
+Benchmark_TryCast_Concurrent-10         89085205    13.9 ns/op     0 B/op   0 allocs/op
+Benchmark_TryCast_Full-10              254923090     4.7 ns/op     0 B/op   0 allocs/op
+Benchmark_Call-10                        3095778   390.2 ns/op   152 B/op   3 allocs/op
+Benchmark_Call_Concurrent-10             2198695   506.8 ns/op   152 B/op   3 allocs/op
+Benchmark_CallContext-10                 2545513   451.1 ns/op   152 B/op   3 allocs/op
+Benchmark_CallContext_Concurrent-10      1301760   896.5 ns/op   152 B/op   3 allocs/op
+Benchmark_CallContext_Expired-10        14855138    78.4 ns/op   152 B/op   3 allocs/op
+Benchmark_TryCall-10                     3060210   392.7 ns/op   152 B/op   3 allocs/op
+Benchmark_TryCall_Concurrent-10          2227587   527.4 ns/op   152 B/op   3 allocs/op
+Benchmark_Supervisor_SpawnAndExit-10     4714188   236.9 ns/op    72 B/op   2 allocs/op
 ```
