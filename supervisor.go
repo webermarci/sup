@@ -205,17 +205,20 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		close(allDone)
 	}()
 
-	var runErr error
 	select {
 	case <-ctx.Done():
-		runErr = ctx.Err()
+		s.wg.Wait()
+		return ctx.Err()
 	case err := <-s.terminalErr:
-		runErr = err
 		cancel()
+		s.wg.Wait()
+		return err
 	case <-allDone:
 		return nil
 	}
+}
 
+// Wait blocks until all supervised actors have stopped.
+func (s *Supervisor) Wait() {
 	s.wg.Wait()
-	return runErr
 }

@@ -42,3 +42,13 @@ func (m *Mailbox) Close() {
 		close(m.ch)
 	}
 }
+
+// Len returns the number of messages currently in the mailbox.
+func (m *Mailbox) Len() int {
+	return len(m.ch)
+}
+
+// Cap returns the capacity of the mailbox buffer.
+func (m *Mailbox) Cap() int {
+	return cap(m.ch)
+}
