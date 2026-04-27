@@ -49,6 +49,27 @@ func (b *broadcaster[V]) closeAll() {
 	b.subs = b.subs[:0]
 }
 
+func (b *broadcaster[V]) handleSubscription(msg any, currentValue V, initialNotify bool) bool {
+	switch m := msg.(type) {
+	case sup.CallRequest[subscribeMessage[V], error]:
+		ch := m.Payload().ch
+		b.add(ch)
+		if initialNotify {
+			select {
+			case ch <- currentValue:
+			default:
+			}
+		}
+		m.Reply(nil, nil)
+		return true
+
+	case sup.CastRequest[unsubscribeMessage[V]]:
+		b.remove(m.Payload().ch)
+		return true
+	}
+	return false
+}
+
 func (b *broadcaster[V]) subscribe(ctx context.Context, mailbox *sup.Mailbox) <-chan V {
 	ch := make(chan V, b.buffer)
 

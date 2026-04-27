@@ -95,19 +95,8 @@ func (s *Signal[V]) Run(ctx context.Context) error {
 			case sup.CallRequest[signalGetValueMessage, V]:
 				m.Reply(s.value, nil)
 
-			case sup.CallRequest[subscribeMessage[V], error]:
-				ch := m.Payload().ch
-				s.broadcaster.add(ch)
-				if s.initialNotify {
-					select {
-					case ch <- s.value:
-					default:
-					}
-				}
-				m.Reply(nil, nil)
-
-			case sup.CastRequest[unsubscribeMessage[V]]:
-				s.broadcaster.remove(m.Payload().ch)
+			default:
+				s.broadcaster.handleSubscription(msg, s.value, s.initialNotify)
 			}
 
 		case <-ticker.C:

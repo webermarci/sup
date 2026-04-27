@@ -110,27 +110,15 @@ func (t *Trigger[V]) Run(ctx context.Context) error {
 				}
 				m.Reply(nil, err)
 
-			case sup.CallRequest[subscribeMessage[V], error]:
-				ch := m.Payload().ch
-				t.broadcaster.add(ch)
-				if t.initialNotify {
-					select {
-					case ch <- t.value:
-					default:
-					}
-				}
-				m.Reply(nil, nil)
-
-			case sup.CastRequest[unsubscribeMessage[V]]:
-				ch := m.Payload().ch
-				t.broadcaster.remove(ch)
-
 			case sup.CallRequest[triggerSyncMessage, error]:
 				err := t.update(t.value)
 				if err == nil {
 					t.broadcaster.notify(t.value)
 				}
 				m.Reply(nil, err)
+
+			default:
+				t.broadcaster.handleSubscription(msg, t.value, t.initialNotify)
 			}
 		}
 	}
