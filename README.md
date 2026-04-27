@@ -208,6 +208,7 @@ supervisor.Wait()
 
 - [`sup`](./) — Core supervisor and mailbox implementation
 - [`sup/bus`](./bus) — Higher-level abstractions for polling and controlling with automatic scheduling and change notifications
+- [`sup/exec`](./exec) — Actors that manage external processes with graceful shutdown and output redirection
 
 ## Benchmark
 
