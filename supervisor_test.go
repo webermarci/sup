@@ -99,7 +99,8 @@ func TestSupervisor_OnError(t *testing.T) {
 	if capturedErr == nil || capturedErr.Error() != "boom" {
 		t.Errorf("failed to capture error via OnError")
 	}
-	if capturedActor == nil || capturedActor.Name() != "test-actor" {
+
+	if capturedActor == nil || capturedActor.Name() != t.Name() {
 		t.Errorf("failed to capture actor identity")
 	}
 }
