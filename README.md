@@ -13,6 +13,7 @@ It provides a robust foundation for building highly concurrent, distributed, and
 - **Idiomatic Go** — Actors are just goroutines running a `select` loop. No magic interfaces, no reflection, no global registries.
 - **OTP-style supervision** — Erlang-inspired supervisor trees with `Permanent`, `Transient`, and `Temporary` restart policies.
 - **Panic recovery** — Panics are caught, wrapped with a stack trace, and reported via `WithOnError`. The actor is then restarted according to the policy.
+- **Global Registry** — Find and communicate with actors across your application using a thread-safe name-based registry.
 - **Restart limits** — Optionally cap restarts within a sliding time window with `WithRestartLimit`.
 - **No goroutine leaks** — `context.Context` integration ensures all actors shut down cleanly when the parent context is canceled.
 - **Supervisor trees** — Supervisors implement the `Actor` interface, so they can be nested inside other supervisors.
@@ -203,6 +204,27 @@ for _, job := range jobs {
 
 supervisor.Wait()
 ```
+
+## Registry
+
+```go
+counter := NewCounter()
+
+// Create a new registry and register the actor
+registry := sup.NewRegistry()
+
+registry.Register(counter)
+
+// Or use the global registry for convenience
+sup.GlobalRegistry().Register(counter)
+
+// Look up the actor by name and send messages
+actor, found := registry.Get("counter")
+
+// Or using the global registry
+actor, found := sup.GlobalRegistry().Get("counter")
+```
+
 
 ## Packages
 
