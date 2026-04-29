@@ -69,7 +69,7 @@ func (c *Counter) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case msg := <-c.Receive():
+		case msg := <-c.mailbox.Receive():
 			switch m := msg.(type) {
 			case sup.CastRequest[incrementMsg]:
 				c.count += m.Payload().amount
