@@ -10,7 +10,7 @@ import (
 )
 
 func TestSignal_DefaultValue(t *testing.T) {
-	signal := NewSignal(t.Name(), func() (int, error) {
+	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 42, nil
 	})
 
@@ -22,7 +22,7 @@ func TestSignal_DefaultValue(t *testing.T) {
 }
 
 func TestSignal_InitialValue(t *testing.T) {
-	signal := NewSignal(t.Name(), func() (int, error) {
+	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 99, nil
 	}).WithInitialValue(7)
 
@@ -34,7 +34,7 @@ func TestSignal_InitialValue(t *testing.T) {
 }
 
 func TestSignal_Value(t *testing.T) {
-	signal := NewSignal(t.Name(), func() (int, error) {
+	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 42, nil
 	}).WithInterval(10 * time.Millisecond)
 
@@ -48,7 +48,7 @@ func TestSignal_Value(t *testing.T) {
 }
 
 func TestSignal_ErrorSkipsUpdate(t *testing.T) {
-	signal := NewSignal(t.Name(), func() (int, error) {
+	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, errors.New("oops")
 	}).
 		WithInitialValue(5).
@@ -66,7 +66,7 @@ func TestSignal_ErrorSkipsUpdate(t *testing.T) {
 func TestSignal_Subscribe(t *testing.T) {
 	ctx := t.Context()
 
-	signal := NewSignal(t.Name(), func() (int, error) {
+	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 42, nil
 	}).WithInterval(10 * time.Millisecond)
 
@@ -87,7 +87,7 @@ func TestSignal_Subscribe(t *testing.T) {
 func TestSignal_MultipleSubscribers(t *testing.T) {
 	ctx := t.Context()
 
-	signal := NewSignal(t.Name(), func() (int, error) {
+	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 55, nil
 	}).WithInterval(10 * time.Millisecond)
 
@@ -111,7 +111,7 @@ func TestSignal_MultipleSubscribers(t *testing.T) {
 func TestSignal_UnsubscribeOnContextCancel(t *testing.T) {
 	ctx := t.Context()
 
-	signal := NewSignal(t.Name(), func() (int, error) {
+	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 1, nil
 	}).WithInterval(10 * time.Millisecond)
 
@@ -137,7 +137,7 @@ func TestSignal_UnsubscribeOnContextCancel(t *testing.T) {
 func TestSignal_InitialNotifyEnabled(t *testing.T) {
 	ctx := t.Context()
 
-	signal := NewSignal(t.Name(), func() (int, error) {
+	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, nil
 	}).
 		WithInitialValue(42).
@@ -161,7 +161,7 @@ func TestSignal_InitialNotifyEnabled(t *testing.T) {
 func TestSignal_InitialNotifyDisabled(t *testing.T) {
 	ctx := t.Context()
 
-	signal := NewSignal(t.Name(), func() (int, error) {
+	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, nil
 	}).
 		WithInitialValue(42).
@@ -180,7 +180,7 @@ func TestSignal_InitialNotifyDisabled(t *testing.T) {
 }
 
 func TestSignal_ActorInterface(t *testing.T) {
-	signal := NewSignal(t.Name(), func() (int, error) {
+	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, errors.New("fail")
 	})
 

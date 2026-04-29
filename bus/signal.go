@@ -15,13 +15,13 @@ type Signal[V any] struct {
 	broadcaster   broadcaster[V]
 	mailbox       *sup.Mailbox
 	value         V
-	update        func() (V, error)
+	update        func(context.Context) (V, error)
 	interval      time.Duration
 	initialNotify bool
 }
 
 // NewSignal creates a new Signal with the given name and update function.
-func NewSignal[V any](name string, update func() (V, error)) *Signal[V] {
+func NewSignal[V any](name string, update func(context.Context) (V, error)) *Signal[V] {
 	return &Signal[V]{
 		BaseActor: sup.NewBaseActor(name),
 		broadcaster: broadcaster[V]{
@@ -100,7 +100,7 @@ func (s *Signal[V]) Run(ctx context.Context) error {
 			}
 
 		case <-ticker.C:
-			value, err := s.update()
+			value, err := s.update(ctx)
 			if err != nil {
 				continue
 			}

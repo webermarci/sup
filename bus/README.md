@@ -27,7 +27,7 @@ Both types are actors. They do nothing until `Run(ctx)` is called.
 A `Signal` periodically calls a poll function and broadcasts the result to all current subscribers whenever the value changes.
 
 ```go
-signal := bus.NewSignal("signal", func() (uint16, error) {
+signal := bus.NewSignal("signal", func(ctx context.Context) (uint16, error) {
     return modbusClient.ReadRegister(0x01)
 }).
     WithInterval(100 * time.Millisecond).
@@ -81,7 +81,7 @@ isSafe := bus.NewMirror(func() bool {
 A `Trigger` accepts writes via `Write`, calls an update function with the new value, and — on success — updates the stored value and notifies subscribers.
 
 ```go
-trigger := bus.NewTrigger("trigger", func(v uint16) error {
+trigger := bus.NewTrigger("trigger", func(ctx context.Context, v uint16) error {
     return modbusClient.WriteRegister(0x02, v)
 }).WithInitialValue(0)
 
@@ -113,7 +113,7 @@ func main() {
 	defer cancel()
 
 	// 1. Inputs
-	temp := bus.NewSignal("temperature", func() (float64, error) {
+	temp := bus.NewSignal("temperature", func(ctx context.Context) (float64, error) {
 		return readTemperatureSensor()
 	}).WithInterval(500 * time.Millisecond)
 
@@ -124,7 +124,7 @@ func main() {
 	})
 
 	// 3. Output
-	heater := bus.NewTrigger("heater", func(on bool) error {
+	heater := bus.NewTrigger("heater", func(ctx context.Context, on bool) error {
 		return setHeaterRelay(on)
 	})
 

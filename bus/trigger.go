@@ -20,12 +20,12 @@ type Trigger[V any] struct {
 	broadcaster   broadcaster[V]
 	mailbox       *sup.Mailbox
 	value         V
-	update        func(V) error
+	update        func(context.Context, V) error
 	initialNotify bool
 }
 
 // NewTrigger creates a new Trigger with the given name and update function.
-func NewTrigger[V any](name string, update func(V) error) *Trigger[V] {
+func NewTrigger[V any](name string, update func(context.Context, V) error) *Trigger[V] {
 	return &Trigger[V]{
 		BaseActor: sup.NewBaseActor(name),
 		broadcaster: broadcaster[V]{
@@ -103,7 +103,7 @@ func (t *Trigger[V]) Run(ctx context.Context) error {
 
 			case sup.CallRequest[triggerSetValueMessage[V], error]:
 				value := m.Payload().value
-				err := t.update(value)
+				err := t.update(ctx, value)
 				if err == nil {
 					t.value = value
 					t.broadcaster.notify(value)
@@ -111,7 +111,7 @@ func (t *Trigger[V]) Run(ctx context.Context) error {
 				m.Reply(nil, err)
 
 			case sup.CallRequest[triggerSyncMessage, error]:
-				err := t.update(t.value)
+				err := t.update(ctx, t.value)
 				if err == nil {
 					t.broadcaster.notify(t.value)
 				}
