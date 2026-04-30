@@ -15,6 +15,7 @@ It provides a robust foundation for building highly concurrent, distributed, and
 - **Panic recovery** — Panics are caught, wrapped with a stack trace, and reported via `WithOnError`. The actor is then restarted according to the policy.
 - **Restart limits** — Optionally cap restarts within a sliding time window with `WithRestartLimit`.
 - **No goroutine leaks** — `context.Context` integration ensures all actors shut down cleanly when the parent context is canceled.
+- **Supervisor observers** — Lightweight lifecycle hooks so you can collect metrics, log events, or build diagnostics without changing supervision semantics.
 - **Supervisor trees** — Supervisors implement the `Actor` interface, so they can be nested inside other supervisors.
 
 ## Installation
@@ -56,11 +57,11 @@ func NewCounter() *Counter {
 
 // 3. Clean public API — callers never interact with the mailbox directly
 func (c *Counter) Increment(amount int) {
-	_ = sup.Cast(c.Mailbox, incrementMsg{amount: amount})
+	_ = sup.Cast(c.mailbox, incrementMsg{amount: amount})
 }
 
 func (c *Counter) Get() (int, error) {
-	return sup.Call[getCountMsg, int](c.Mailbox, getCountMsg{})
+	return sup.Call[getCountMsg, int](c.mailbox, getCountMsg{})
 }
 
 // 4. The Run loop is a standard Go select statement
@@ -202,6 +203,55 @@ for _, job := range jobs {
 }
 
 supervisor.Wait()
+```
+
+## Observability
+
+`sup` exposes a minimal, flexible observer mechanism via `SupervisorObserver` and the `WithObserver` option. Observers are small collections of optional callbacks that receive lifecycle events from the supervisor:
+
+- `OnActorRegistered(actor Actor)` — called when `Spawn` is invoked for an actor.
+- `OnActorStarted(actor Actor)` — called immediately before `actor.Run(ctx)` for each run.
+- `OnActorStopped(actor Actor, err error)` — called after `actor.Run` returns (error may be nil for clean exits).
+- `OnActorRestarted(actor Actor, restartCount int, lastErr error)` — called when the supervisor decides to restart an actor.
+- `OnSupervisorTerminal(err error)` — called when the supervisor escalates to a terminal error (e.g. restart limits exceeded).
+
+Design notes:
+- All callbacks are optional — provide only the ones you need.
+- Callbacks are invoked asynchronously (each runs in its own goroutine) and any panic inside an observer is recovered. Observers cannot block or crash the supervisor.
+- Observers receive the `Actor` value so they may type-assert to access actor-specific fields (for example, bus actors may expose a `Mailbox()` accessor to inspect queue size).
+
+```go
+package main
+
+import (
+    "fmt"
+
+    "github.com/webermarci/sup"
+)
+
+func main() {
+	observer := &sup.SupervisorObserver{
+		OnActorRegistered: func(a sup.Actor) {
+			fmt.Printf("registered: %s\n", a.Name())
+		},
+		OnActorStarted: func(a sup.Actor) {
+			fmt.Printf("started: %s\n", a.Name())
+		},
+		OnActorStopped: func(a sup.Actor, err error) {
+			fmt.Printf("stopped: %s err=%v\n", a.Name(), err)
+		},
+		OnActorRestarted: func(a sup.Actor, count int, lastErr error) {
+      fmt.Printf("restarted: %s count=%d lastErr=%v\n", a.Name(), count, lastErr)
+    },
+		OnSupervisorTerminal: func(err error) {
+			fmt.Printf("supervisor terminal: err=%v\n", err)
+		},
+	}
+
+	supervisor := sup.NewSupervisor("root",
+		sup.WithObserver(observer),
+	)
+}
 ```
 
 ## Packages

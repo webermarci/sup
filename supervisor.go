@@ -18,6 +18,15 @@ const (
 	Temporary                      // Never restart
 )
 
+// SupervisorObserver allows observing lifecycle events of supervised actors and the supervisor itself. This can be used for logging, monitoring, or triggering side effects based on actor behavior.
+type SupervisorObserver struct {
+	OnActorRegistered    func(actor Actor)
+	OnActorStarted       func(actor Actor)
+	OnActorStopped       func(actor Actor, err error)
+	OnActorRestarted     func(actor Actor, restartCount int, lastErr error)
+	OnSupervisorTerminal func(err error)
+}
+
 // SupervisorOption configures a Supervisor.
 type SupervisorOption func(*Supervisor)
 
@@ -65,6 +74,13 @@ func WithOnError(handler func(actor Actor, err error)) SupervisorOption {
 	}
 }
 
+// WithObserver sets a SupervisorObserver to receive lifecycle event notifications for supervised actors and the supervisor itself. This allows external monitoring of actor behavior and supervisor actions.
+func WithObserver(observer *SupervisorObserver) SupervisorOption {
+	return func(s *Supervisor) {
+		s.observer = observer
+	}
+}
+
 // Supervisor manages the lifecycle of actor Run loops.
 type Supervisor struct {
 	*BaseActor
@@ -76,6 +92,7 @@ type Supervisor struct {
 	wg            sync.WaitGroup
 	onError       func(actor Actor, err error)
 	terminalErr   chan error
+	observer      *SupervisorObserver
 }
 
 // NewSupervisor creates a new Supervisor with the given options.
@@ -111,6 +128,81 @@ func (s *Supervisor) executeSafe(ctx context.Context, fn func(context.Context) e
 	return fn(ctx)
 }
 
+func (s *Supervisor) notifyActorRegistered(actor Actor) {
+	obs := s.observer
+	if obs == nil || obs.OnActorRegistered == nil {
+		return
+	}
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+			}
+		}()
+		obs.OnActorRegistered(actor)
+	}()
+}
+
+func (s *Supervisor) notifyActorStarted(actor Actor) {
+	obs := s.observer
+	if obs == nil || obs.OnActorStarted == nil {
+		return
+	}
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+			}
+		}()
+		obs.OnActorStarted(actor)
+	}()
+}
+
+func (s *Supervisor) notifyActorStopped(actor Actor, err error) {
+	obs := s.observer
+	if obs == nil || obs.OnActorStopped == nil {
+		return
+	}
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+			}
+		}()
+		obs.OnActorStopped(actor, err)
+	}()
+}
+
+func (s *Supervisor) notifyActorRestarted(actor Actor, restartCount int, lastErr error) {
+	obs := s.observer
+	if obs == nil || obs.OnActorRestarted == nil {
+		return
+	}
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+			}
+		}()
+		obs.OnActorRestarted(actor, restartCount, lastErr)
+	}()
+}
+
+func (s *Supervisor) notifySupervisorTerminal(err error) {
+	obs := s.observer
+	if obs == nil || obs.OnSupervisorTerminal == nil {
+		return
+	}
+
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+			}
+		}()
+		obs.OnSupervisorTerminal(err)
+	}()
+}
+
 // Spawn starts the given actor under supervision. It will be restarted according to the supervisor's policy if it returns an error or panics.
 func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 	if actor == nil {
@@ -120,6 +212,8 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 	if actor.Name() == "" {
 		panic("sup: actor name cannot be empty")
 	}
+
+	s.notifyActorRegistered(actor)
 
 	s.wg.Go(func() {
 		var (
@@ -131,8 +225,12 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 			restarts = make([]time.Time, 0, maxCap)
 		}
 
+		restartCount := 0
+
 		for {
+			s.notifyActorStarted(actor)
 			err := s.executeSafe(ctx, actor.Run)
+			s.notifyActorStopped(actor, err)
 
 			if err != nil && s.onError != nil {
 				s.onError(actor, err)
@@ -159,13 +257,19 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 				restarts = append(restarts[:n], now)
 
 				if len(restarts) > s.maxRestarts {
+					escErr := fmt.Errorf("actor %s exceeded max restarts", actor.Name())
+					s.notifySupervisorTerminal(escErr)
+
 					select {
-					case s.terminalErr <- fmt.Errorf("actor %s exceeded max restarts", actor.Name()):
+					case s.terminalErr <- escErr:
 					default:
 					}
 					return
 				}
 			}
+
+			restartCount++
+			s.notifyActorRestarted(actor, restartCount, err)
 
 			delay := s.restartDelay
 

@@ -182,3 +182,63 @@ func TestSupervisor_PanicStackTrace(t *testing.T) {
 		t.Fatal("expected stack trace in panic recovery")
 	}
 }
+
+func TestSupervisor_ObserverBasicLifecycle(t *testing.T) {
+	var registered atomic.Int32
+	var started atomic.Int32
+	var stopped atomic.Int32
+	var restarted atomic.Int32
+	var terminal atomic.Int32
+
+	observer := &sup.SupervisorObserver{
+		OnActorRegistered: func(a sup.Actor) {
+			registered.Add(1)
+		},
+		OnActorStarted: func(a sup.Actor) {
+			started.Add(1)
+		},
+		OnActorStopped: func(a sup.Actor, err error) {
+			stopped.Add(1)
+		},
+		OnActorRestarted: func(a sup.Actor, restartCount int, lastErr error) {
+			restarted.Add(1)
+		},
+		OnSupervisorTerminal: func(err error) {
+			terminal.Add(1)
+		},
+	}
+
+	var runs atomic.Int32
+	actor := sup.ActorFunc(t.Name(), func(ctx context.Context) error {
+		n := runs.Add(1)
+		if n == 1 {
+			return errors.New("boom")
+		}
+		return nil
+	})
+
+	supervisor := sup.NewSupervisor("sup",
+		sup.WithActor(actor),
+		sup.WithPolicy(sup.Transient),
+		sup.WithRestartDelay(5*time.Millisecond),
+		sup.WithObserver(observer),
+	)
+
+	if err := supervisor.Run(t.Context()); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		if registered.Load() == 1 && started.Load() == 2 && stopped.Load() == 2 && restarted.Load() == 1 && terminal.Load() == 0 {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("unexpected observer counts: registered=%d started=%d stopped=%d restarted=%d terminal=%d",
+				registered.Load(), started.Load(), stopped.Load(), restarted.Load(), terminal.Load())
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
