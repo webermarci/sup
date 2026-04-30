@@ -241,7 +241,7 @@ func main() {
 			fmt.Printf("stopped: %s err=%v\n", a.Name(), err)
 		},
 		OnActorRestarting: func(a sup.Actor, count int, lastErr error) {
-      fmt.Printf("restarting: %s count=%d lastErr=%v\n", a.Name(), count, lastErr)
+			fmt.Printf("restarting: %s count=%d lastErr=%v\n", a.Name(), count, lastErr)
 		},
 		OnSupervisorTerminal: func(err error) {
 			fmt.Printf("supervisor terminal: err=%v\n", err)
