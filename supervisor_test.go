@@ -187,7 +187,7 @@ func TestSupervisor_ObserverBasicLifecycle(t *testing.T) {
 	var registered atomic.Int32
 	var started atomic.Int32
 	var stopped atomic.Int32
-	var restarted atomic.Int32
+	var restarting atomic.Int32
 	var terminal atomic.Int32
 
 	observer := &sup.SupervisorObserver{
@@ -200,8 +200,8 @@ func TestSupervisor_ObserverBasicLifecycle(t *testing.T) {
 		OnActorStopped: func(a sup.Actor, err error) {
 			stopped.Add(1)
 		},
-		OnActorRestarted: func(a sup.Actor, restartCount int, lastErr error) {
-			restarted.Add(1)
+		OnActorRestarting: func(a sup.Actor, restartCount int, lastErr error) {
+			restarting.Add(1)
 		},
 		OnSupervisorTerminal: func(err error) {
 			terminal.Add(1)
@@ -230,13 +230,13 @@ func TestSupervisor_ObserverBasicLifecycle(t *testing.T) {
 
 	deadline := time.After(500 * time.Millisecond)
 	for {
-		if registered.Load() == 1 && started.Load() == 2 && stopped.Load() == 2 && restarted.Load() == 1 && terminal.Load() == 0 {
+		if registered.Load() == 1 && started.Load() == 2 && stopped.Load() == 2 && restarting.Load() == 1 && terminal.Load() == 0 {
 			return
 		}
 		select {
 		case <-deadline:
 			t.Fatalf("unexpected observer counts: registered=%d started=%d stopped=%d restarted=%d terminal=%d",
-				registered.Load(), started.Load(), stopped.Load(), restarted.Load(), terminal.Load())
+				registered.Load(), started.Load(), stopped.Load(), restarting.Load(), terminal.Load())
 		default:
 			time.Sleep(5 * time.Millisecond)
 		}

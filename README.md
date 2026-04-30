@@ -212,7 +212,7 @@ supervisor.Wait()
 - `OnActorRegistered(actor Actor)` — called when `Spawn` is invoked for an actor.
 - `OnActorStarted(actor Actor)` — called immediately before `actor.Run(ctx)` for each run.
 - `OnActorStopped(actor Actor, err error)` — called after `actor.Run` returns (error may be nil for clean exits).
-- `OnActorRestarted(actor Actor, restartCount int, lastErr error)` — called when the supervisor decides to restart an actor.
+- `OnActorRestarting(actor Actor, restartCount int, lastErr error)` — called when the supervisor decides to restart an actor.
 - `OnSupervisorTerminal(err error)` — called when the supervisor escalates to a terminal error (e.g. restart limits exceeded).
 
 Design notes:
@@ -240,8 +240,8 @@ func main() {
 		OnActorStopped: func(a sup.Actor, err error) {
 			fmt.Printf("stopped: %s err=%v\n", a.Name(), err)
 		},
-		OnActorRestarted: func(a sup.Actor, count int, lastErr error) {
-      fmt.Printf("restarted: %s count=%d lastErr=%v\n", a.Name(), count, lastErr)
+		OnActorRestarting: func(a sup.Actor, count int, lastErr error) {
+      fmt.Printf("restarting: %s count=%d lastErr=%v\n", a.Name(), count, lastErr)
     },
 		OnSupervisorTerminal: func(err error) {
 			fmt.Printf("supervisor terminal: err=%v\n", err)

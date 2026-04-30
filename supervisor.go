@@ -23,7 +23,7 @@ type SupervisorObserver struct {
 	OnActorRegistered    func(actor Actor)
 	OnActorStarted       func(actor Actor)
 	OnActorStopped       func(actor Actor, err error)
-	OnActorRestarted     func(actor Actor, restartCount int, lastErr error)
+	OnActorRestarting    func(actor Actor, restartCount int, lastErr error)
 	OnSupervisorTerminal func(err error)
 }
 
@@ -173,9 +173,9 @@ func (s *Supervisor) notifyActorStopped(actor Actor, err error) {
 	}()
 }
 
-func (s *Supervisor) notifyActorRestarted(actor Actor, restartCount int, lastErr error) {
+func (s *Supervisor) notifyActorRestarting(actor Actor, restartCount int, lastErr error) {
 	obs := s.observer
-	if obs == nil || obs.OnActorRestarted == nil {
+	if obs == nil || obs.OnActorRestarting == nil {
 		return
 	}
 
@@ -184,7 +184,7 @@ func (s *Supervisor) notifyActorRestarted(actor Actor, restartCount int, lastErr
 			if r := recover(); r != nil {
 			}
 		}()
-		obs.OnActorRestarted(actor, restartCount, lastErr)
+		obs.OnActorRestarting(actor, restartCount, lastErr)
 	}()
 }
 
@@ -269,7 +269,7 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 			}
 
 			restartCount++
-			s.notifyActorRestarted(actor, restartCount, err)
+			s.notifyActorRestarting(actor, restartCount, err)
 
 			delay := s.restartDelay
 
