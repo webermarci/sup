@@ -59,8 +59,8 @@ func (t *Trigger[V]) Subscribe(ctx context.Context) <-chan V {
 	return t.broadcaster.subscribeValues(ctx, current, t.initialNotify)
 }
 
-// Notify allows clients to subscribe to notifications whenever the Trigger's value is updated, without receiving the actual value. It returns a channel that will receive a notification (empty struct) whenever the value is updated. The subscription will automatically clean up when the provided context is canceled.
-func (t *Trigger[V]) Notify(ctx context.Context) <-chan struct{} {
+// Watch allows clients to subscribe to notifications whenever the Trigger's value is updated, without receiving the actual value. It returns a channel that will receive a notification (empty struct) whenever the value is updated. The subscription will automatically clean up when the provided context is canceled.
+func (t *Trigger[V]) Watch(ctx context.Context) <-chan struct{} {
 	return t.broadcaster.subscribeNotifications(ctx, t.initialNotify)
 }
 

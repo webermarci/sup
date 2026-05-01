@@ -13,12 +13,12 @@ type Derived[V any] struct {
 	broadcaster[V]
 	value  V
 	update func() V
-	deps   []Notifyable
+	deps   []Watcher
 	mu     sync.RWMutex
 }
 
 // NewDerived creates a new Derived with the given name, update function, and dependencies. The update function is called whenever any of the dependencies notify a change, and the result is broadcast to subscribers.
-func NewDerived[V any](name string, update func() V, deps ...Notifyable) *Derived[V] {
+func NewDerived[V any](name string, update func() V, deps ...Watcher) *Derived[V] {
 	return &Derived[V]{
 		BaseActor:   sup.NewBaseActor(name),
 		broadcaster: broadcaster[V]{buffer: 16},
@@ -40,8 +40,8 @@ func (d *Derived[V]) Subscribe(ctx context.Context) <-chan V {
 	return d.broadcaster.subscribeValues(ctx, d.Read(), true)
 }
 
-// Notify returns a channel that receives notifications whenever any of the dependencies of the Derived change. It subscribes to all dependencies and triggers an update whenever any of them notify a change. The channel will receive a notification immediately upon subscription.
-func (d *Derived[V]) Notify(ctx context.Context) <-chan struct{} {
+// Watch returns a channel that receives notifications whenever any of the dependencies of the Derived change. It subscribes to all dependencies and triggers an update whenever any of them notify a change. The channel will receive a notification immediately upon subscription.
+func (d *Derived[V]) Watch(ctx context.Context) <-chan struct{} {
 	return d.broadcaster.subscribeNotifications(ctx, true)
 }
 
@@ -50,7 +50,7 @@ func (d *Derived[V]) Run(ctx context.Context) error {
 	ping := make(chan struct{}, 1)
 
 	for _, dep := range d.deps {
-		ch := dep.Notify(ctx)
+		ch := dep.Watch(ctx)
 		go func(c <-chan struct{}) {
 			for range c {
 				select {

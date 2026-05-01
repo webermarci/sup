@@ -68,8 +68,8 @@ func (s *Signal[V]) Subscribe(ctx context.Context) <-chan V {
 	return s.broadcaster.subscribeValues(ctx, current, s.initialNotify)
 }
 
-// Notify allows clients to subscribe to notifications whenever the Signal's value is updated, without receiving the actual value. It returns a channel that will receive a notification (empty struct) whenever the value is updated. The subscription will automatically clean up when the provided context is canceled.
-func (s *Signal[V]) Notify(ctx context.Context) <-chan struct{} {
+// Watch allows clients to subscribe to notifications whenever the Signal's value is updated, without receiving the actual value. It returns a channel that will receive a notification (empty struct) whenever the value is updated. The subscription will automatically clean up when the provided context is canceled.
+func (s *Signal[V]) Watch(ctx context.Context) <-chan struct{} {
 	return s.broadcaster.subscribeNotifications(ctx, s.initialNotify)
 }
 

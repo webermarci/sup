@@ -109,7 +109,7 @@ func TestDerived_Notify(t *testing.T) {
 	go derived.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
 
-	ch := derived.Notify(ctx)
+	ch := derived.Watch(ctx)
 
 	// The first notification is sent immediately upon subscription because notify=true in SubscribeNotifications
 	select {
@@ -162,7 +162,7 @@ func TestDerived_MultipleDependencies(t *testing.T) {
 	waitForValue(t, derived, 3)
 }
 
-func waitForValue[V comparable](t *testing.T, r Readable[V], want V) {
+func waitForValue[V comparable](t *testing.T, r Reader[V], want V) {
 	t.Helper()
 	deadline := time.After(500 * time.Millisecond)
 	for {

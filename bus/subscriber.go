@@ -2,6 +2,6 @@ package bus
 
 import "context"
 
-type Subscribable[V any] interface {
+type Subscriber[V any] interface {
 	Subscribe(context.Context) <-chan V
 }

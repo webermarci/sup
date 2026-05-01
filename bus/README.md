@@ -59,7 +59,7 @@ for v := range ch {
 
 ## View
 
-A `View` provides a lazy, functional transformation of one or more `Readables`. It calculates its value on-demand when `Read()` is called.
+A `View` provides a lazy, functional transformation of one or more `Readers`. It calculates its value on-demand when `Read()` is called.
 
 ```go
 tempC := bus.NewSignal(...)
