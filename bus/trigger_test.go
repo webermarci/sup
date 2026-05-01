@@ -34,13 +34,15 @@ func TestTrigger_InitialValue(t *testing.T) {
 }
 
 func TestTrigger_SetValue(t *testing.T) {
+	ctx := t.Context()
+
 	trigger := NewTrigger(t.Name(), func(_ context.Context, v int) error {
 		return nil
 	})
 
-	go trigger.Run(t.Context())
+	go trigger.Run(ctx)
 
-	if err := trigger.Write(10); err != nil {
+	if err := trigger.Write(ctx, 10); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -50,13 +52,15 @@ func TestTrigger_SetValue(t *testing.T) {
 }
 
 func TestTrigger_SetValueRejected(t *testing.T) {
+	ctx := t.Context()
+
 	trigger := NewTrigger(t.Name(), func(_ context.Context, v int) error {
 		return errors.New("rejected")
 	}).WithInitialValue(5)
 
-	go trigger.Run(t.Context())
+	go trigger.Run(ctx)
 
-	if err := trigger.Write(99); err == nil {
+	if err := trigger.Write(ctx, 99); err == nil {
 		t.Fatal("expected error, got nil")
 	}
 
@@ -74,7 +78,7 @@ func TestTrigger_Subscribe(t *testing.T) {
 	go trigger.Run(ctx)
 
 	ch := trigger.Subscribe(ctx)
-	trigger.Write(77)
+	trigger.Write(ctx, 77)
 
 	select {
 	case v := <-ch:
@@ -95,7 +99,7 @@ func TestTrigger_SubscribeNotNotifiedOnError(t *testing.T) {
 	go trigger.Run(ctx)
 
 	ch := trigger.Subscribe(ctx)
-	trigger.Write(99)
+	trigger.Write(ctx, 99)
 
 	select {
 	case v := <-ch:
@@ -114,7 +118,7 @@ func TestTrigger_MultipleSubscribers(t *testing.T) {
 
 	ch1 := trigger.Subscribe(ctx)
 	ch2 := trigger.Subscribe(ctx)
-	trigger.Write(55)
+	trigger.Write(ctx, 55)
 
 	for i, ch := range []<-chan int{ch1, ch2} {
 		select {
@@ -154,15 +158,17 @@ func TestTrigger_UnsubscribeOnContextCancel(t *testing.T) {
 }
 
 func TestTrigger_Sync(t *testing.T) {
+	ctx := t.Context()
+
 	synced := make(chan int, 1)
 	trigger := NewTrigger(t.Name(), func(_ context.Context, v int) error {
 		synced <- v
 		return nil
 	}).WithInitialValue(3)
 
-	go trigger.Run(t.Context())
+	go trigger.Run(ctx)
 
-	if err := trigger.Sync(); err != nil {
+	if err := trigger.Sync(ctx); err != nil {
 		t.Fatalf("unexpected sync error: %v", err)
 	}
 
@@ -187,7 +193,7 @@ func TestTrigger_SyncNotifiesSubscribers(t *testing.T) {
 
 	ch := trigger.Subscribe(ctx)
 
-	if err := trigger.Sync(); err != nil {
+	if err := trigger.Sync(ctx); err != nil {
 		t.Fatalf("unexpected sync error: %v", err)
 	}
 
@@ -202,13 +208,15 @@ func TestTrigger_SyncNotifiesSubscribers(t *testing.T) {
 }
 
 func TestTrigger_SyncError(t *testing.T) {
+	ctx := t.Context()
+
 	trigger := NewTrigger(t.Name(), func(_ context.Context, v int) error {
 		return errors.New("sync failed")
 	})
 
-	go trigger.Run(t.Context())
+	go trigger.Run(ctx)
 
-	if err := trigger.Sync(); err == nil {
+	if err := trigger.Sync(ctx); err == nil {
 		t.Fatal("expected sync error, got nil")
 	}
 }

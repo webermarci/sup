@@ -2,38 +2,47 @@ package bus
 
 import (
 	"context"
-
-	"github.com/webermarci/sup"
+	"sync"
 )
 
-type subscribeMessage[V any] struct {
-	ch chan V
-}
-
-type unsubscribeMessage[V any] struct {
-	ch chan V
-}
-
 type broadcaster[V any] struct {
+	mu     sync.RWMutex
 	subs   []chan V
 	buffer int
 }
 
-func (b *broadcaster[V]) add(ch chan V) {
-	b.subs = append(b.subs, ch)
-}
+func (b *broadcaster[V]) subscribe(ctx context.Context, initial V, notify bool) <-chan V {
+	ch := make(chan V, b.buffer)
 
-func (b *broadcaster[V]) remove(ch chan V) {
-	for i, sub := range b.subs {
-		if sub == ch {
-			b.subs = append(b.subs[:i], b.subs[i+1:]...)
-			break
+	b.mu.Lock()
+	b.subs = append(b.subs, ch)
+	b.mu.Unlock()
+
+	if notify {
+		select {
+		case ch <- initial:
+		default:
 		}
 	}
-	close(ch)
+
+	context.AfterFunc(ctx, func() {
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		for i, sub := range b.subs {
+			if sub == ch {
+				b.subs = append(b.subs[:i], b.subs[i+1:]...)
+				close(ch)
+				break
+			}
+		}
+	})
+
+	return ch
 }
 
 func (b *broadcaster[V]) notify(v V) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
 	for _, ch := range b.subs {
 		select {
 		case ch <- v:
@@ -43,46 +52,10 @@ func (b *broadcaster[V]) notify(v V) {
 }
 
 func (b *broadcaster[V]) closeAll() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	for _, ch := range b.subs {
 		close(ch)
 	}
-	b.subs = b.subs[:0]
-}
-
-func (b *broadcaster[V]) handleSubscription(msg any, currentValue V, initialNotify bool) bool {
-	switch m := msg.(type) {
-	case sup.CallRequest[subscribeMessage[V], error]:
-		ch := m.Payload().ch
-		b.add(ch)
-		if initialNotify {
-			select {
-			case ch <- currentValue:
-			default:
-			}
-		}
-		m.Reply(nil, nil)
-		return true
-
-	case sup.CastRequest[unsubscribeMessage[V]]:
-		b.remove(m.Payload().ch)
-		return true
-	}
-	return false
-}
-
-func (b *broadcaster[V]) subscribe(ctx context.Context, mailbox *sup.Mailbox) <-chan V {
-	ch := make(chan V, b.buffer)
-
-	if _, err := sup.Call[subscribeMessage[V], error](mailbox, subscribeMessage[V]{ch: ch}); err != nil {
-		close(ch)
-		return ch
-	}
-
-	context.AfterFunc(ctx, func() {
-		if err := sup.Cast(mailbox, unsubscribeMessage[V]{ch: ch}); err != nil {
-			close(ch)
-		}
-	})
-
-	return ch
+	b.subs = nil
 }

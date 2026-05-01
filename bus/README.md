@@ -16,10 +16,10 @@ go get github.com/webermarci/sup/bus
 | Type | Direction | Use case |
 |---|---|---|
 | `Signal` | Read → broadcast | Poll a register, sensor, or API; notify subscribers on change |
-| `Mirror` | Read (Lazy) | Transform or combine existing values without extra goroutines |
+| `View` | Read (Lazy) | Transform or combine existing values without extra goroutines |
 | `Trigger` | Write → update | Accept writes from callers; forward to a handler on success |
 
-Both types are actors. They do nothing until `Run(ctx)` is called.
+These types are actors. They should be managed with a supervisor.
 
 ## Signal
 
@@ -56,23 +56,27 @@ for v := range ch {
 - Subscribing with a canceled context is a no-op; the returned channel is closed immediately.
 - Canceling a subscriber's context closes its channel and removes it from the broadcast list.
 
-## Mirror
+## View
 
-A `Mirror` provides a lazy, functional transformation of one or more `Readables`. It does not require a goroutine or a mailbox; it calculates its value on-demand when `Read()` is called.
+A `View` provides a lazy, functional transformation of one or more `Readables`. It calculates its value on-demand when `Read()` is called.
 
 ```go
 tempC := bus.NewSignal(...)
 
 // Simple transformation
-tempF := bus.NewMirror(func() float64 {
+tempF := bus.NewView("fahrenheit", func() float64 {
     return tempC.Read()*9/5 + 32
 })
 
+tempF.Read() // calculates fahrenheit from the latest celsius value
+
 // Complex aggregation
-isSafe := bus.NewMirror(func() bool {
+isSafe := bus.NewView("isSafe", func() bool {
     // Capture multiple signals in a closure for type-safe logic
     return tempC.Read() < 100.0 && pressure.Read() < 10.5
 })
+
+isSafe.Read() // calculates safety status from multiple signals
 ```
 
 ## Trigger
@@ -86,8 +90,8 @@ trigger := bus.NewTrigger("trigger", func(ctx context.Context, v uint16) error {
 
 go trigger.Run(ctx)
 
-if err := trigger.Write(42); err != nil {
-    log.Printf("write rejected: %v", err)
+if err := trigger.Write(ctx, 42); err != nil {
+    fmt.Printf("write rejected: %v\n", err)
 }
 ```
 
@@ -116,9 +120,9 @@ func main() {
 		return readTemperatureSensor()
 	}).WithInterval(500 * time.Millisecond)
 
-	// 2. Logic (Mirror)
+	// 2. Logic (View)
 	// Automatically determine if heating is needed
-	needsHeat := bus.NewMirror(func() bool {
+	needsHeat := bus.NewView("needsHeat", func() bool {
 		return temp.Read() < 20.0
 	})
 
@@ -129,13 +133,14 @@ func main() {
 
 	go temp.Run(ctx)
 	go heater.Run(ctx)
+	go needsHeat.Run(ctx)
 
 	// Using the Mirror in a control loop
 	tempCh := temp.Subscribe(ctx)
 	go func() {
 		for range tempCh {
 			// Read the logic from the mirror and write to the trigger
-			if err := heater.Write(needsHeat.Read()); err != nil {
+			if err := heater.Write(ctx, needsHeat.Read()); err != nil {
 				fmt.Printf("heater control failed: %v\n", err)
 			}
 		}
@@ -147,11 +152,11 @@ func main() {
 
 ## Using with a Supervisor
 
-Both `Signal` and `Trigger` implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor. `Mirror` is passive and does not need to be supervised.
+Both `Signal`, `View` and `Trigger` implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor.
 
 ```go
 supervisor := sup.NewSupervisor("root",
-	sup.WithActors(temp, heater),
+	sup.WithActors(temp, heater, needsHeat),
 	sup.WithPolicy(sup.Permanent),
 	sup.WithRestartDelay(time.Second),
 )

@@ -2,41 +2,31 @@ package bus
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/webermarci/sup"
 )
 
-type signalGetValueMessage struct{}
-
 // Signal represents a value that is periodically updated by a function and can be subscribed to for updates.
 type Signal[V any] struct {
 	*sup.BaseActor
 	broadcaster   broadcaster[V]
-	mailbox       *sup.Mailbox
 	value         V
 	update        func(context.Context) (V, error)
 	interval      time.Duration
 	initialNotify bool
+	mu            sync.RWMutex
 }
 
 // NewSignal creates a new Signal with the given name and update function.
 func NewSignal[V any](name string, update func(context.Context) (V, error)) *Signal[V] {
 	return &Signal[V]{
-		BaseActor: sup.NewBaseActor(name),
-		broadcaster: broadcaster[V]{
-			buffer: 16,
-		},
-		mailbox:  sup.NewMailbox(64),
-		update:   update,
-		interval: time.Second,
+		BaseActor:   sup.NewBaseActor(name),
+		broadcaster: broadcaster[V]{buffer: 16},
+		update:      update,
+		interval:    time.Second,
 	}
-}
-
-// WithMailboxSize allows configuring the mailbox buffer size for the Signal.
-func (s *Signal[V]) WithMailboxSize(size int) *Signal[V] {
-	s.mailbox = sup.NewMailbox(size)
-	return s
 }
 
 // WithInitialValue sets the initial value of the Signal before any updates occur.
@@ -63,18 +53,22 @@ func (s *Signal[V]) WithInitialNotify(enabled bool) *Signal[V] {
 	return s
 }
 
-// Read returns the current value of the Signal by sending a call message to its mailbox.
+// Read returns the current value of the Signal. It acquires a read lock to ensure thread-safe access to the value.
 func (s *Signal[V]) Read() V {
-	res, _ := sup.Call[signalGetValueMessage, V](s.mailbox, signalGetValueMessage{})
-	return res
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.value
 }
 
-// Subscribe allows clients to receive updates whenever the Signal's value changes. It returns a channel that will receive new values.
+// Subscribe allows clients to subscribe to updates of the Signal's value. It returns a channel that will receive new values whenever they are updated. The subscription will automatically clean up when the provided context is canceled.
 func (s *Signal[V]) Subscribe(ctx context.Context) <-chan V {
-	return s.broadcaster.subscribe(ctx, s.mailbox)
+	s.mu.RLock()
+	current := s.value
+	s.mu.RUnlock()
+	return s.broadcaster.subscribe(ctx, current, s.initialNotify)
 }
 
-// Run starts the main loop of the Signal, which periodically updates its value by calling the provided function and notifies subscribers of changes. It also handles incoming messages for getting the current value and managing subscriptions.
+// Run starts the Signal's update loop, which periodically calls the update function to refresh the Signal's value and notifies subscribers of any changes. The loop continues until the provided context is canceled, at which point it will clean up all subscriber channels.
 func (s *Signal[V]) Run(ctx context.Context) error {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
@@ -84,28 +78,15 @@ func (s *Signal[V]) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			s.broadcaster.closeAll()
 			return nil
-
-		case msg, ok := <-s.mailbox.Receive():
-			if !ok {
-				s.broadcaster.closeAll()
-				return nil
-			}
-
-			switch m := msg.(type) {
-			case sup.CallRequest[signalGetValueMessage, V]:
-				m.Reply(s.value, nil)
-
-			default:
-				s.broadcaster.handleSubscription(msg, s.value, s.initialNotify)
-			}
-
 		case <-ticker.C:
-			value, err := s.update(ctx)
+			val, err := s.update(ctx)
 			if err != nil {
 				continue
 			}
-			s.value = value
-			s.broadcaster.notify(value)
+			s.mu.Lock()
+			s.value = val
+			s.mu.Unlock()
+			s.broadcaster.notify(val)
 		}
 	}
 }

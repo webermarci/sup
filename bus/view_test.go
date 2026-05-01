@@ -12,10 +12,10 @@ func (m *mockReadable[V]) Read() V {
 	return m.value
 }
 
-func TestMirror_Simple(t *testing.T) {
+func TestView_Simple(t *testing.T) {
 	parent := &mockReadable[int]{value: 10}
 
-	m := NewMirror(func() int {
+	m := NewView(t.Name(), func() int {
 		return parent.Read() * 2
 	})
 
@@ -29,11 +29,11 @@ func TestMirror_Simple(t *testing.T) {
 	}
 }
 
-func TestMirror_Aggregation(t *testing.T) {
+func TestView_Aggregation(t *testing.T) {
 	p1 := &mockReadable[int]{value: 10}
 	p2 := &mockReadable[int]{value: 20}
 
-	sum := NewMirror(func() int {
+	sum := NewView(t.Name(), func() int {
 		return p1.Read() + p2.Read()
 	})
 
@@ -42,10 +42,10 @@ func TestMirror_Aggregation(t *testing.T) {
 	}
 }
 
-func TestMirror_TypeConversion(t *testing.T) {
+func TestView_TypeConversion(t *testing.T) {
 	parent := &mockReadable[int]{value: 1}
 
-	m := NewMirror(func() string {
+	m := NewView(t.Name(), func() string {
 		if parent.Read() == 1 {
 			return "Active"
 		}
@@ -57,14 +57,14 @@ func TestMirror_TypeConversion(t *testing.T) {
 	}
 }
 
-func TestMirror_Chaining(t *testing.T) {
+func TestView_Chaining(t *testing.T) {
 	p := &mockReadable[int]{value: 10}
 
-	m1 := NewMirror(func() int {
+	m1 := NewView(t.Name(), func() int {
 		return p.Read() * 2
 	})
 
-	m2 := NewMirror(func() int {
+	m2 := NewView(t.Name(), func() int {
 		return m1.Read() + 5
 	})
 
