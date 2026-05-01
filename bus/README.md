@@ -16,7 +16,6 @@ go get github.com/webermarci/sup/bus
 | Type | Direction | Use case |
 |---|---|---|
 | `Signal` | Read → broadcast | Poll a register, sensor, or API; notify subscribers on change |
-| `Stream` | Async channel → broadcast | Consume from a channel like a WebSocket or MQTT topic |
 | `Mirror` | Read (Lazy) | Transform or combine existing values without extra goroutines |
 | `Trigger` | Write → update | Accept writes from callers; forward to a handler on success |
 
@@ -56,32 +55,6 @@ for v := range ch {
 - Subscribers are notified only when the value **changes** — repeated identical results are silently dropped.
 - Subscribing with a canceled context is a no-op; the returned channel is closed immediately.
 - Canceling a subscriber's context closes its channel and removes it from the broadcast list.
-
-## Stream
-
-A `Stream` consumes values from a Go channel and broadcasts them to all current subscribers. It takes a factory function so it can automatically re-establish the connection (e.g., resubscribe to an MQTT topic) if the channel closes.
-
-```go
-stream := bus.NewStream("mqtt", func(ctx context.Context) (<-chan []byte, error) {
-    return mqttClient.Subscribe("sensors/temp")
-}).WithRetryInterval(5 * time.Second)
-
-go stream.Run(ctx)
-
-ch := stream.Subscribe(ctx)
-for msg := range ch {
-    fmt.Printf("received: %s\n", string(msg))
-}
-```
-
-### Options
-
-| Option | Default | Description |
-|---|---|---|
-| `WithRetryInterval(d)` | 1s | How long to wait before calling the factory again after a failure |
-| `WithInitialValue(v)` | zero value | Value before the first message arrives |
-| `WithInitialNotify(true)` | false | Send the last known value immediately to each new subscriber |
-
 
 ## Mirror
 
