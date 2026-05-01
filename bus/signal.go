@@ -65,7 +65,12 @@ func (s *Signal[V]) Subscribe(ctx context.Context) <-chan V {
 	s.mu.RLock()
 	current := s.value
 	s.mu.RUnlock()
-	return s.broadcaster.subscribe(ctx, current, s.initialNotify)
+	return s.broadcaster.subscribeValues(ctx, current, s.initialNotify)
+}
+
+// Notify allows clients to subscribe to notifications whenever the Signal's value is updated, without receiving the actual value. It returns a channel that will receive a notification (empty struct) whenever the value is updated. The subscription will automatically clean up when the provided context is canceled.
+func (s *Signal[V]) Notify(ctx context.Context) <-chan struct{} {
+	return s.broadcaster.subscribeNotifications(ctx, s.initialNotify)
 }
 
 // Run starts the Signal's update loop, which periodically calls the update function to refresh the Signal's value and notifies subscribers of any changes. The loop continues until the provided context is canceled, at which point it will clean up all subscriber channels.
@@ -78,15 +83,18 @@ func (s *Signal[V]) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			s.broadcaster.closeAll()
 			return nil
+
 		case <-ticker.C:
-			val, err := s.update(ctx)
+			value, err := s.update(ctx)
 			if err != nil {
 				continue
 			}
+
 			s.mu.Lock()
-			s.value = val
+			s.value = value
 			s.mu.Unlock()
-			s.broadcaster.notify(val)
+
+			s.broadcaster.notify(value)
 		}
 	}
 }

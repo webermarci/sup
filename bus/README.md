@@ -16,6 +16,7 @@ go get github.com/webermarci/sup/bus
 | Type | Direction | Use case |
 |---|---|---|
 | `Signal` | Read → broadcast | Poll a register, sensor, or API; notify subscribers on change |
+| `Derived` | Notify → Update | Eagerly update value when dependencies change; broadcast updates |
 | `View` | Read (Lazy) | Transform or combine existing values without extra goroutines |
 | `Trigger` | Write → update | Accept writes from callers; forward to a handler on success |
 
@@ -27,17 +28,17 @@ A `Signal` periodically calls a poll function and broadcasts the result to all c
 
 ```go
 signal := bus.NewSignal("signal", func(ctx context.Context) (uint16, error) {
-    return modbusClient.ReadRegister(0x01)
+	return modbusClient.ReadRegister(0x01)
 }).
-    WithInterval(100 * time.Millisecond).
-    WithInitialValue(0).
-    WithInitialNotify(true)
+	WithInterval(100 * time.Millisecond).
+	WithInitialValue(0).
+	WithInitialNotify(true)
 
 go signal.Run(ctx)
 
 ch := signal.Subscribe(ctx)
 for v := range ch {
-    fmt.Printf("register 0x01 changed: %d\n", v)
+	fmt.Printf("register 0x01 changed: %d\n", v)
 }
 ```
 
@@ -65,19 +66,49 @@ tempC := bus.NewSignal(...)
 
 // Simple transformation
 tempF := bus.NewView("fahrenheit", func() float64 {
-    return tempC.Read()*9/5 + 32
+	return tempC.Read()*9/5 + 32
 })
 
 tempF.Read() // calculates fahrenheit from the latest celsius value
 
 // Complex aggregation
 isSafe := bus.NewView("isSafe", func() bool {
-    // Capture multiple signals in a closure for type-safe logic
-    return tempC.Read() < 100.0 && pressure.Read() < 10.5
+	// Capture multiple signals in a closure for type-safe logic
+	return tempC.Read() < 100.0 && pressure.Read() < 10.5
 })
 
 isSafe.Read() // calculates safety status from multiple signals
 ```
+
+## Derived
+
+A `Derived` actor eagerly updates its value whenever its dependencies notify it of a change. Unlike a `View`, which is lazy, a `Derived` actor maintains its own state and broadcasts changes to its own subscribers.
+
+```go
+temp := bus.NewSignal(...)
+humidity := bus.NewSignal(...)
+
+// Eagerly compute heat index whenever temp or humidity changes
+update := func() float64 {
+	return calculateHeatIndex(temp.Read(), humidity.Read())
+}
+heatIndex := bus.NewDerived("heatIndex", update, temp, humidity)
+
+go heatIndex.Run(ctx)
+
+// Subscribers receive updates automatically when dependencies change
+ch := heatIndex.Subscribe(ctx)
+for v := range ch {
+	fmt.Printf("new heat index: %.2f\n", v)
+}
+```
+
+### Behaviour
+
+- It calls the update function once during creation to establish the initial value.
+- It subscribes to all provided dependencies and re-runs the update function whenever any dependency notifies it.
+- After each update, it broadcasts the new value to its subscribers.
+- It is useful for building reactive pipelines where intermediate results need to be observed or used as dependencies for other actors.
 
 ## Trigger
 
@@ -85,13 +116,13 @@ A `Trigger` accepts writes via `Write`, calls an update function with the new va
 
 ```go
 trigger := bus.NewTrigger("trigger", func(ctx context.Context, v uint16) error {
-    return modbusClient.WriteRegister(0x02, v)
+	return modbusClient.WriteRegister(0x02, v)
 }).WithInitialValue(0)
 
 go trigger.Run(ctx)
 
 if err := trigger.Write(ctx, 42); err != nil {
-    fmt.Printf("write rejected: %v\n", err)
+	fmt.Printf("write rejected: %v\n", err)
 }
 ```
 
@@ -152,7 +183,7 @@ func main() {
 
 ## Using with a Supervisor
 
-Both `Signal`, `View` and `Trigger` implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor.
+Both `Signal`, `Derived`, `View` and `Trigger` implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor.
 
 ```go
 supervisor := sup.NewSupervisor("root",

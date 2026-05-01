@@ -56,7 +56,12 @@ func (t *Trigger[V]) Subscribe(ctx context.Context) <-chan V {
 	t.mu.Lock()
 	current := t.value
 	t.mu.Unlock()
-	return t.broadcaster.subscribe(ctx, current, t.initialNotify)
+	return t.broadcaster.subscribeValues(ctx, current, t.initialNotify)
+}
+
+// Notify allows clients to subscribe to notifications whenever the Trigger's value is updated, without receiving the actual value. It returns a channel that will receive a notification (empty struct) whenever the value is updated. The subscription will automatically clean up when the provided context is canceled.
+func (t *Trigger[V]) Notify(ctx context.Context) <-chan struct{} {
+	return t.broadcaster.subscribeNotifications(ctx, t.initialNotify)
 }
 
 // Write updates the Trigger's value by calling the update function with the provided value. If the update is successful, it notifies all subscribers of the new value. It acquires a lock to ensure thread-safe updates to the value.
