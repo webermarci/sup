@@ -89,16 +89,15 @@ temp := bus.NewSignal(...)
 humidity := bus.NewSignal(...)
 
 // Eagerly compute heat index whenever temp or humidity changes
-update := func() float64 {
+heatIndex := bus.NewDerived("heatIndex", func() float64 {
 	return calculateHeatIndex(temp.Read(), humidity.Read())
-}
-heatIndex := bus.NewDerived("heatIndex", update, temp, humidity)
+}, temp, humidity)
 
 go heatIndex.Run(ctx)
 
 // Subscribers receive updates automatically when dependencies change
-ch := heatIndex.Subscribe(ctx)
-for v := range ch {
+channel := heatIndex.Subscribe(ctx)
+for v := range channel {
 	fmt.Printf("new heat index: %.2f\n", v)
 }
 ```
