@@ -134,9 +134,8 @@ if err := trigger.Write(ctx, 42); err != nil {
 
 ### Behaviour
 
-- `SetValue` is synchronous — it blocks until the update function has returned.
+- `Write` is synchronous — it blocks until the update function has returned.
 - If the update function returns an error, the stored value is **not updated** and subscribers are **not notified**. The error is returned to the caller.
-- `Sync` re-runs the update function with the current stored value, useful for forcing hardware to match state after a reconnect.
 
 ## Full Example
 

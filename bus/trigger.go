@@ -78,19 +78,6 @@ func (t *Trigger[V]) Write(ctx context.Context, value V) error {
 	return nil
 }
 
-// Sync forces the Trigger to re-evaluate its current value by calling the update function with the existing value. If the update is successful, it notifies all subscribers of the (potentially) new value. It acquires a lock to ensure thread-safe access to the value during the update process.
-func (t *Trigger[V]) Sync(ctx context.Context) error {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if err := t.update(ctx, t.value); err != nil {
-		return err
-	}
-
-	t.broadcaster.notify(t.value)
-	return nil
-}
-
 // Run starts the Trigger's main loop, which waits for the context to be canceled. When the context is canceled, it cleans up all subscriber channels. This method should be run in a separate goroutine.
 func (t *Trigger[V]) Run(ctx context.Context) error {
 	<-ctx.Done()
