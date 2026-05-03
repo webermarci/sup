@@ -13,7 +13,7 @@ type mockWriter[V any] struct {
 	mu     sync.Mutex
 }
 
-func (m *mockWriter[V]) Write(v V) error {
+func (m *mockWriter[V]) Write(ctx context.Context, v V) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.values = append(m.values, v)

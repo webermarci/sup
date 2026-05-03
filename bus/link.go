@@ -38,7 +38,7 @@ func (l *Link[V]) Run(ctx context.Context) error {
 				return nil
 			}
 
-			_ = l.dest.Write(v)
+			_ = l.dest.Write(ctx, v)
 		}
 	}
 }

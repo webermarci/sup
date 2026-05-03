@@ -1,0 +1,154 @@
+:root {
+    --bg-page: oklch(100% 0 0);
+    --border: oklch(92.7% 0.006 264.5);
+    --text-main: oklch(27.4% 0.006 286);
+    --text-muted: oklch(55.1% 0.007 262);
+    --header-bg: oklch(96.7% 0.001 286.375);
+    --header-text: oklch(44.2% 0.017 285.8);
+    --radius: 6px;
+}
+
+body {
+    font-family:
+        system-ui,
+        -apple-system,
+        BlinkMacSystemFont,
+        "Segoe UI",
+        Roboto,
+        sans-serif;
+    background-color: var(--bg-page);
+    color: var(--text-main);
+    margin: 0;
+    padding: 16px;
+    -webkit-font-smoothing: antialiased;
+}
+
+.container {
+    width: 100%;
+    background: var(--bg-page);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    table-layout: auto;
+    font-size: 14px;
+}
+
+.data-table th {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+    text-align: left;
+    font-weight: 600;
+    color: var(--header-text);
+    background-color: var(--header-bg);
+    height: 36px;
+    box-sizing: border-box;
+}
+
+.data-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+    height: 40px;
+    box-sizing: border-box;
+}
+
+.data-table th:not(:first-child),
+.data-table td:not(:first-child) {
+    border-left: 1px solid var(--border);
+}
+
+.data-table tr:last-child td {
+    border-bottom: none;
+}
+
+.data-table tbody tr:nth-child(even) {
+    background-color: oklch(98.5% 0 0);
+}
+
+.cell-shrink {
+    width: 1%;
+    white-space: nowrap;
+}
+
+.col-type-header,
+.col-type {
+    text-align: center !important;
+}
+
+.row-name {
+    font-weight: 500;
+}
+
+.col-state {
+    overflow-wrap: anywhere;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-weight: 500;
+    color: var(--text-main);
+}
+
+.badge {
+    background: var(--bg-page);
+    color: var(--text-main);
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 13px;
+    font-weight: 500;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    border: 1px solid var(--border);
+}
+
+.badge[data-type="boolean"] {
+    background-color: oklch(96.2% 0.044 142.5);
+    color: oklch(43.3% 0.119 146.9);
+    border-color: oklch(92.5% 0.084 142.5);
+}
+
+.badge[data-type="number"] {
+    background-color: oklch(95.1% 0.026 236.8);
+    color: oklch(42.4% 0.076 244);
+    border-color: oklch(91.6% 0.053 239.5);
+}
+
+.badge[data-type="string"] {
+    background-color: oklch(96.2% 0.059 86.9);
+    color: oklch(50.8% 0.141 53);
+    border-color: oklch(92.4% 0.12 86.5);
+}
+
+.badge[data-type="json"],
+.badge[data-type="object"] {
+    background-color: oklch(95% 0.038 314.7);
+    color: oklch(40% 0.12 312.2);
+    border-color: oklch(89.5% 0.081 315.7);
+}
+
+.state-val {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.state-val[data-type="boolean"]::before {
+    content: "";
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: var(--border);
+    flex-shrink: 0;
+}
+
+.state-val[data-type="boolean"][data-value="true"]::before {
+    background-color: oklch(72.3% 0.219 149.579);
+}
+
+.state-val[data-type="boolean"][data-value="false"]::before {
+    background-color: oklch(70.4% 0.191 22.216);
+}

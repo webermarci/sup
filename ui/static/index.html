@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>Sup Dashboard</title>
+        <link rel="stylesheet" href="/static/theme.css" />
+    </head>
+
+    <body>
+        <div class="container">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th class="cell-shrink">Name</th>
+                        <th class="cell-shrink col-type-header">Type</th>
+                        <th>State</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .Cards}}
+                    <tr>
+                        <td class="cell-shrink">
+                            <span class="row-name">{{.Name}}</span>
+                        </td>
+                        <td class="cell-shrink col-type">
+                            <span class="badge" data-type="{{.Type}}">
+                                {{.Type}}
+                            </span>
+                        </td>
+                        <td class="col-state">
+                            <div
+                                id="val-{{.Name}}"
+                                class="state-val"
+                                data-type="{{.Type}}"
+                                data-value="{{index $.LastValues .Name}}"
+                            >
+                                {{index $.LastValues .Name}}
+                            </div>
+                        </td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+
+        <script>
+            const sse = new EventSource("/api/events");
+
+            sse.addEventListener("update", (e) => {
+                const data = JSON.parse(e.data);
+
+                const el = document.getElementById("val-" + data.name);
+                if (el) {
+                    el.dataset.value = data.value;
+
+                    if (typeof data.value === "object" && data.value !== null) {
+                        el.innerText = JSON.stringify(data.value);
+                    } else {
+                        el.innerText = data.value;
+                    }
+                }
+            });
+        </script>
+    </body>
+</html>
