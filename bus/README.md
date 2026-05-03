@@ -18,10 +18,10 @@ go get github.com/webermarci/sup/bus
 | `Signal` | Read → broadcast | Poll a register, sensor, or API; notify subscribers on change |
 | `Derived` | Notify → Update | Eagerly update value when dependencies change; broadcast updates |
 | `Debounce` | Notify → Wait → Broadcast | Ignore rapid updates until the source is quiet; prevent noise |
-| `View` | Read (Lazy) | Transform or combine existing values without extra goroutines |
+| `ViewFunc` | Read (Lazy) | Transform or combine existing values statically without any goroutines |
 | `Trigger` | Write → update | Accept writes from callers; forward to a handler on success |
 
-These types are actors. They should be managed with a supervisor.
+Active types (`Signal`, `Derived`, `Debounce`, `Trigger`) are actors and should be managed with a supervisor.
 
 ## Signal
 
@@ -58,22 +58,22 @@ for v := range ch {
 - Subscribing with a canceled context is a no-op; the returned channel is closed immediately.
 - Canceling a subscriber's context closes its channel and removes it from the broadcast list.
 
-## View
+## ViewFunc
 
-A `View` provides a lazy, functional transformation of one or more `Readers`. It calculates its value on-demand when `Read()` is called.
+A `ViewFunc` provides a lazy, zero-overhead functional transformation of one or more `Readers`. It calculates its value on-demand when `Read()` is called. It is an adapter type, not an actor, and requires no supervision.
 
 ```go
 tempC := bus.NewSignal(...)
 
 // Simple transformation
-tempF := bus.NewView("fahrenheit", func() float64 {
+tempF := bus.ViewFunc[float64](func() float64 {
 	return tempC.Read()*9/5 + 32
 })
 
 tempF.Read() // calculates fahrenheit from the latest celsius value
 
 // Complex aggregation
-isSafe := bus.NewView("isSafe", func() bool {
+isSafe := bus.ViewFunc[bool](func() bool {
 	// Capture multiple signals in a closure for type-safe logic
 	return tempC.Read() < 100.0 && pressure.Read() < 10.5
 })
@@ -83,7 +83,7 @@ isSafe.Read() // calculates safety status from multiple signals
 
 ## Derived
 
-A `Derived` actor eagerly updates its value whenever its dependencies notify it of a change. Unlike a `View`, which is lazy, a `Derived` actor maintains its own state and broadcasts changes to its own subscribers.
+A `Derived` actor eagerly updates its value whenever its dependencies notify it of a change. Unlike a `ViewFunc`, which is lazy, a `Derived` actor maintains its own state and broadcasts changes to its own subscribers.
 
 ```go
 temp := bus.NewSignal(...)
@@ -189,7 +189,7 @@ func main() {
 
 	// 2. Logic (View)
 	// Automatically determine if heating is needed
-	needsHeat := bus.NewView("needsHeat", func() bool {
+	needsHeat := bus.ViewFunc[bool](func() bool {
 		return cleanTemp.Read() < 20.0
 	})
 
@@ -199,7 +199,7 @@ func main() {
 	})
 
 	supervisor := sup.NewSupervisor("root",
-		sup.WithActors(temp, cleanTemp, heater, needsHeat),
+		sup.WithActors(temp, cleanTemp, heater),
 		sup.WithPolicy(sup.Permanent),
 		sup.WithRestartDelay(time.Second),
 	)
@@ -223,11 +223,11 @@ func main() {
 
 ## Using with a Supervisor
 
-All active types (`Signal`, `Derived`, `Debounce`, and `Trigger`) implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor.
+All active types (`Signal`, `Derived`, `Debounce`, and `Trigger`) implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor. Note that `ViewFunc` is not supervised as it contains no running goroutines.
 
 ```go
 supervisor := sup.NewSupervisor("root",
-	sup.WithActors(temp, heater, needsHeat),
+	sup.WithActors(temp, heater, cleanTemp),
 	sup.WithPolicy(sup.Permanent),
 	sup.WithRestartDelay(time.Second),
 )
