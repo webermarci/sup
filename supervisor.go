@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math/rand/v2"
 	"runtime/debug"
 	"sync"
@@ -78,6 +79,13 @@ func WithOnError(handler func(actor Actor, err error)) SupervisorOption {
 func WithObserver(observer *SupervisorObserver) SupervisorOption {
 	return func(s *Supervisor) {
 		s.observer = observer
+	}
+}
+
+// WithLogger sets a logger for the supervisor.
+func WithLogger(logger *slog.Logger) SupervisorOption {
+	return func(s *Supervisor) {
+		s.SetLogger(logger)
 	}
 }
 
@@ -213,6 +221,7 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 		panic("sup: actor name cannot be empty")
 	}
 
+	actor.SetLogger(s.Logger())
 	s.notifyActorRegistered(actor)
 
 	s.wg.Go(func() {
@@ -228,19 +237,40 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 		restartCount := 0
 
 		for {
+			s.Logger().Info("starting child actor",
+				slog.String("child", actor.Name()),
+			)
+
 			s.notifyActorStarted(actor)
 			err := s.executeSafe(ctx, actor.Run)
 			s.notifyActorStopped(actor, err)
 
-			if err != nil && s.onError != nil {
-				s.onError(actor, err)
+			if err != nil {
+				s.Logger().Error("child actor failed",
+					slog.String("child", actor.Name()),
+					slog.Any("err", err),
+				)
+				if s.onError != nil {
+					s.onError(actor, err)
+				}
+			} else {
+				s.Logger().Info("child actor exited cleanly",
+					slog.String("child", actor.Name()),
+				)
 			}
 
 			if ctx.Err() != nil {
+				s.Logger().Info("supervisor context canceled, stopping child",
+					slog.String("child", actor.Name()),
+				)
 				return
 			}
 
 			if s.policy == Temporary || (s.policy == Transient && err == nil) {
+				s.Logger().Info("child actor will not be restarted due to policy",
+					slog.String("child", actor.Name()),
+					slog.Int("policy", int(s.policy)),
+				)
 				return
 			}
 
@@ -258,6 +288,11 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 
 				if len(restarts) > s.maxRestarts {
 					escErr := fmt.Errorf("actor %s exceeded max restarts", actor.Name())
+					s.Logger().Error("supervisor terminal error: restart limit reached",
+						slog.String("child", actor.Name()),
+						slog.Int("max_restarts", s.maxRestarts),
+						slog.Duration("window", s.restartWindow),
+					)
 					s.notifySupervisorTerminal(escErr)
 
 					select {
@@ -269,6 +304,10 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 			}
 
 			restartCount++
+			s.Logger().Warn("restarting child actor",
+				slog.String("child", actor.Name()),
+				slog.Int("restart_count", restartCount),
+			)
 			s.notifyActorRestarting(actor, restartCount, err)
 
 			delay := s.restartDelay
@@ -311,13 +350,19 @@ func (s *Supervisor) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
+		s.Logger().Info("supervisor shutting down via context")
 		s.wg.Wait()
+		s.Logger().Info("supervisor shutdown complete")
 		return ctx.Err()
 	case err := <-s.terminalErr:
+		s.Logger().Error("supervisor shutting down due to terminal error",
+			slog.String("err", err.Error()),
+		)
 		cancel()
 		s.wg.Wait()
 		return err
 	case <-allDone:
+		s.Logger().Info("supervisor shuting down as all actors have stopped")
 		return nil
 	}
 }
