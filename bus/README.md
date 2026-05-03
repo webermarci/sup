@@ -19,10 +19,11 @@ go get github.com/webermarci/sup/bus
 | `Computed` | Notify → Update | Eagerly update value when dependencies change; broadcast updates |
 | `Debounce` | Notify → Wait → Broadcast | Ignore rapid updates until the source is quiet; prevent noise |
 | `Throttle` | Notify → Limit → Broadcast | Limit the maximum rate of updates to prevent overwhelming consumers |
+| `Link` | Subscribe → Write | Connects a Provider to a Writer as a fully supervised actor |
 | `ViewFunc` | Read (Lazy) | Transform or combine existing values statically without any goroutines |
 | `Trigger` | Write → update | Accept writes from callers; forward to a handler on success |
 
-Active types (`Signal`, `Computed`, `Debounce`, `Throttle`, `Trigger`) are actors and should be managed with a supervisor.
+Active types (`Signal`, `Computed`, `Debounce`, `Throttle`, `Link`, `Trigger`) are actors and should be managed with a supervisor.
 
 ## Signal
 
@@ -170,7 +171,7 @@ go uiState.Run(ctx)
 ch := uiState.Subscribe(ctx)
 for state := range ch {
 	// Safely send to a slow client without overwhelming it
-	websocket.Send(state) 
+	websocket.Send(state)
 }
 ```
 
@@ -198,7 +199,7 @@ trigger := bus.NewTrigger("trigger", func(ctx context.Context, v uint16) error {
 
 go trigger.Run(ctx)
 
-if err := trigger.Write(ctx, 42); err != nil {
+if err := trigger.Write(42); err != nil {
 	fmt.Printf("write rejected: %v\n", err)
 }
 ```
@@ -216,6 +217,23 @@ if err := trigger.Write(ctx, 42); err != nil {
 - `Write` is synchronous — it blocks until the update function has returned.
 - If the update function returns an error, the stored value is **not updated** and subscribers are **not notified**. The error is returned to the caller.
 
+## Link
+
+A `Link` actor connects a readable `Provider` to a destination `Writer` (such as a `Trigger`). This lets you route data through your reactive pipeline without writing unsupervised goroutines.
+
+```go
+// Route throttled state directly into a trigger
+wiring := bus.NewLink("websocket-wiring", uiState, websocketTrigger)
+
+go wiring.Run(ctx)
+```
+
+### Behaviour
+
+- It subscribes to the source provider and forwards each received value to the destination writer.
+- It exits when the context is canceled or the source subscription closes.
+- Writes are synchronous, so backpressure naturally propagates through the link.
+
 ## Full Example
 
 ```go
@@ -229,53 +247,42 @@ func main() {
 	}).WithInterval(10 * time.Millisecond)
 
 	// Filter out sensor noise with Debounce
-	cleanTemp := bus.NewDebounce("clean-temp", temp, 200 * time.Millisecond)
+	cleanTemp := bus.NewDebounce("clean-temp", temp, 200*time.Millisecond)
 
 	// 2. Logic (ViewFunc)
-	// Automatically determine if heating is needed
 	needsHeat := bus.ViewFunc[bool](func() bool {
 		return cleanTemp.Read() < 20.0
 	})
 
 	// 3. Output Control (Throttle)
-	// Don't spam the heater relay, limit commands to once per second max
-	safeHeaterCmd := bus.NewThrottle("safe-heater", needsHeat, time.Second)
+	safeHeaterCmd := bus.NewThrottle("safe-heater", cleanTemp, time.Second)
 
 	// 4. Output Actuator
 	heater := bus.NewTrigger("heater", func(ctx context.Context, on bool) error {
 		return setHeaterRelay(on)
 	})
 
+	// 5. The Wiring (Supervised)
+	wiring := bus.NewLink("heater-wiring", safeHeaterCmd, heater)
+
+	// 6. 100% Supervised System
 	supervisor := sup.NewSupervisor("root",
-		sup.WithActors(temp, cleanTemp, safeHeaterCmd, heater),
+		sup.WithActors(temp, cleanTemp, safeHeaterCmd, heater, wiring),
 		sup.WithPolicy(sup.Permanent),
 		sup.WithRestartDelay(time.Second),
 	)
 
-	go supervisor.Run(ctx)
-
-	// Using the Throttle in a control loop
-	heaterCh := safeHeaterCmd.Subscribe(ctx)
-	go func() {
-		for cmd := range heaterCh {
-			// Read the throttled command and write to the trigger
-			if err := heater.Write(ctx, cmd); err != nil {
-				fmt.Printf("heater control failed: %v\n", err)
-			}
-		}
-	}()
-
-	time.Sleep(10 * time.Second)
+	supervisor.Run(ctx)
 }
 ```
 
 ## Using with a Supervisor
 
-All active types (`Signal`, `Computed`, `Debounce`, `Throttle`, and `Trigger`) implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor. Note that `ViewFunc` is not supervised as it contains no running goroutines.
+All active types (`Signal`, `Computed`, `Debounce`, `Throttle`, `Link`, and `Trigger`) implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor. `ViewFunc` is not supervised because it contains no running goroutines.
 
 ```go
 supervisor := sup.NewSupervisor("root",
-	sup.WithActors(temp, heater, cleanTemp, safeHeaterCmd),
+	sup.WithActors(temp, heater, cleanTemp, safeHeaterCmd, wiring),
 	sup.WithPolicy(sup.Permanent),
 	sup.WithRestartDelay(time.Second),
 )
