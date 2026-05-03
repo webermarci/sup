@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-func TestDerived_InitialValue(t *testing.T) {
-	d := NewDerived("test", func() int {
+func TestComputed_InitialValue(t *testing.T) {
+	d := NewComputed("test", func() int {
 		return 42
 	})
 
@@ -17,7 +17,7 @@ func TestDerived_InitialValue(t *testing.T) {
 	}
 }
 
-func TestDerived_UpdateOnDependency(t *testing.T) {
+func TestComputed_UpdateOnDependency(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
@@ -27,18 +27,18 @@ func TestDerived_UpdateOnDependency(t *testing.T) {
 	go trigger.Run(ctx)
 
 	var count int32
-	derived := NewDerived("derived", func() int32 {
+	computed := NewComputed("computed", func() int32 {
 		return atomic.AddInt32(&count, 1)
 	}, trigger)
 
-	go derived.Run(ctx)
+	go computed.Run(ctx)
 
 	// Wait for subscriptions to be established.
 	// In a real system, we'd wait for a ready signal, but here we just wait briefly.
 	time.Sleep(20 * time.Millisecond)
 
-	// Initial value should be 1 (from NewDerived)
-	if got := derived.Read(); got != 1 {
+	// Initial value should be 1 (from NewComputed)
+	if got := computed.Read(); got != 1 {
 		t.Errorf("Expected initial value 1, got %d", got)
 	}
 
@@ -46,10 +46,10 @@ func TestDerived_UpdateOnDependency(t *testing.T) {
 	trigger.Write(ctx, 100)
 
 	// Wait for update
-	waitForValue(t, derived, 2)
+	waitForValue(t, computed, 2)
 }
 
-func TestDerived_Subscribe(t *testing.T) {
+func TestComputed_Subscribe(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
@@ -59,14 +59,14 @@ func TestDerived_Subscribe(t *testing.T) {
 	go trigger.Run(ctx)
 
 	val := int32(10)
-	derived := NewDerived("derived", func() int32 {
+	computed := NewComputed("computed", func() int32 {
 		return atomic.LoadInt32(&val)
 	}, trigger)
 
-	go derived.Run(ctx)
+	go computed.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
 
-	ch := derived.Subscribe(ctx)
+	ch := computed.Subscribe(ctx)
 
 	// First value should be initial value
 	select {
@@ -93,7 +93,7 @@ func TestDerived_Subscribe(t *testing.T) {
 	}
 }
 
-func TestDerived_Notify(t *testing.T) {
+func TestComputed_Notify(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
@@ -102,14 +102,14 @@ func TestDerived_Notify(t *testing.T) {
 	})
 	go trigger.Run(ctx)
 
-	derived := NewDerived("derived", func() int {
+	computed := NewComputed("computed", func() int {
 		return 0
 	}, trigger)
 
-	go derived.Run(ctx)
+	go computed.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
 
-	ch := derived.Watch(ctx)
+	ch := computed.Watch(ctx)
 
 	// The first notification is sent immediately upon subscription because notify=true in SubscribeNotifications
 	select {
@@ -131,7 +131,7 @@ func TestDerived_Notify(t *testing.T) {
 	}
 }
 
-func TestDerived_MultipleDependencies(t *testing.T) {
+func TestComputed_MultipleDependencies(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
@@ -141,25 +141,25 @@ func TestDerived_MultipleDependencies(t *testing.T) {
 	go t2.Run(ctx)
 
 	var count int32
-	derived := NewDerived("derived", func() int32 {
+	computed := NewComputed("computed", func() int32 {
 		return atomic.AddInt32(&count, 1)
 	}, t1, t2)
 
-	go derived.Run(ctx)
+	go computed.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
 
 	// Initial value
-	if got := derived.Read(); got != 1 {
+	if got := computed.Read(); got != 1 {
 		t.Errorf("Expected 1, got %d", got)
 	}
 
 	// Trigger t1
 	t1.Write(ctx, 1)
-	waitForValue(t, derived, 2)
+	waitForValue(t, computed, 2)
 
 	// Trigger t2
 	t2.Write(ctx, 1)
-	waitForValue(t, derived, 3)
+	waitForValue(t, computed, 3)
 }
 
 func waitForValue[V comparable](t *testing.T, r Reader[V], want V) {
@@ -178,7 +178,7 @@ func waitForValue[V comparable](t *testing.T, r Reader[V], want V) {
 	}
 }
 
-func TestDerived_GlitchFreeDiamond(t *testing.T) {
+func TestComputed_GlitchFreeDiamond(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
@@ -186,12 +186,12 @@ func TestDerived_GlitchFreeDiamond(t *testing.T) {
 	go root.Run(ctx)
 
 	var valB, valC int32
-	nodeB := NewDerived("B", func() int32 {
+	nodeB := NewComputed("B", func() int32 {
 		atomic.AddInt32(&valB, 1)
 		return atomic.LoadInt32(&valB)
 	}, root)
 
-	nodeC := NewDerived("C", func() int32 {
+	nodeC := NewComputed("C", func() int32 {
 		atomic.AddInt32(&valC, 1)
 		return atomic.LoadInt32(&valC)
 	}, root)
@@ -200,7 +200,7 @@ func TestDerived_GlitchFreeDiamond(t *testing.T) {
 	go nodeC.Run(ctx)
 
 	var evalCount int32
-	nodeD := NewDerived("D", func() int32 {
+	nodeD := NewComputed("D", func() int32 {
 		atomic.AddInt32(&evalCount, 1)
 		b := nodeB.Read()
 		c := nodeC.Read()

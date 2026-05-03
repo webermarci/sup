@@ -16,12 +16,12 @@ go get github.com/webermarci/sup/bus
 | Type | Direction | Use case |
 |---|---|---|
 | `Signal` | Read → broadcast | Poll a register, sensor, or API; notify subscribers on change |
-| `Derived` | Notify → Update | Eagerly update value when dependencies change; broadcast updates |
+| `Computed` | Notify → Update | Eagerly update value when dependencies change; broadcast updates |
 | `Debounce` | Notify → Wait → Broadcast | Ignore rapid updates until the source is quiet; prevent noise |
 | `ViewFunc` | Read (Lazy) | Transform or combine existing values statically without any goroutines |
 | `Trigger` | Write → update | Accept writes from callers; forward to a handler on success |
 
-Active types (`Signal`, `Derived`, `Debounce`, `Trigger`) are actors and should be managed with a supervisor.
+Active types (`Signal`, `Computed`, `Debounce`, `Trigger`) are actors and should be managed with a supervisor.
 
 ## Signal
 
@@ -81,16 +81,16 @@ isSafe := bus.ViewFunc[bool](func() bool {
 isSafe.Read() // calculates safety status from multiple signals
 ```
 
-## Derived
+## Computed
 
-A `Derived` actor eagerly updates its value whenever its dependencies notify it of a change. Unlike a `ViewFunc`, which is lazy, a `Derived` actor maintains its own state and broadcasts changes to its own subscribers.
+A `Computed` actor eagerly updates its value whenever its dependencies notify it of a change. Unlike a `ViewFunc`, which is lazy, a `Computed` actor maintains its own state and broadcasts changes to its own subscribers.
 
 ```go
 temp := bus.NewSignal(...)
 humidity := bus.NewSignal(...)
 
 // Eagerly compute heat index whenever temp or humidity changes
-heatIndex := bus.NewDerived("heatIndex", func() float64 {
+heatIndex := bus.NewComputed("heatIndex", func() float64 {
 	return calculateHeatIndex(temp.Read(), humidity.Read())
 }, temp, humidity)
 
@@ -223,7 +223,7 @@ func main() {
 
 ## Using with a Supervisor
 
-All active types (`Signal`, `Derived`, `Debounce`, and `Trigger`) implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor. Note that `ViewFunc` is not supervised as it contains no running goroutines.
+All active types (`Signal`, `Computed`, `Debounce`, and `Trigger`) implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor. Note that `ViewFunc` is not supervised as it contains no running goroutines.
 
 ```go
 supervisor := sup.NewSupervisor("root",
