@@ -61,7 +61,7 @@ func TestComputed_Subscribe(t *testing.T) {
 	val := int32(10)
 	computed := NewComputed("computed", func() int32 {
 		return atomic.LoadInt32(&val)
-	}, trigger)
+	}, trigger).WithInitialNotify(true)
 
 	go computed.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
@@ -104,7 +104,7 @@ func TestComputed_Notify(t *testing.T) {
 
 	computed := NewComputed("computed", func() int {
 		return 0
-	}, trigger)
+	}, trigger).WithInitialNotify(true)
 
 	go computed.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
