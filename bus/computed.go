@@ -16,6 +16,7 @@ type Computed[V any] struct {
 	update         func() V
 	deps           []Watcher
 	coalesceWindow time.Duration
+	initialNotify  bool
 	mu             sync.RWMutex
 }
 
@@ -38,6 +39,12 @@ func (c *Computed[V]) WithCoalesceWindow(window time.Duration) *Computed[V] {
 	return c
 }
 
+// WithInitialNotify configures whether new subscribers should receive the current value immediately upon subscribing.
+func (c *Computed[V]) WithInitialNotify(enabled bool) *Computed[V] {
+	c.initialNotify = enabled
+	return c
+}
+
 // WithSubscriberBuffer configures the buffer size for subscriber channels.
 func (c *Computed[V]) WithSubscriberBuffer(buffer int) *Computed[V] {
 	c.broadcaster.buffer = buffer
@@ -53,12 +60,15 @@ func (c *Computed[V]) Read() V {
 
 // Subscribe returns a channel that receives updates whenever the Computed's value changes. It subscribes to all dependencies and triggers an update whenever any of them notify a change. The current value is sent to the channel immediately upon subscription.
 func (c *Computed[V]) Subscribe(ctx context.Context) <-chan V {
-	return c.broadcaster.subscribeValues(ctx, c.Read(), true)
+	c.mu.RLock()
+	current := c.value
+	c.mu.RUnlock()
+	return c.broadcaster.subscribeValues(ctx, current, c.initialNotify)
 }
 
 // Watch returns a channel that receives notifications whenever any of the dependencies of the Computed change. It subscribes to all dependencies and triggers an update whenever any of them notify a change. The channel will receive a notification immediately upon subscription.
 func (c *Computed[V]) Watch(ctx context.Context) <-chan struct{} {
-	return c.broadcaster.subscribeNotifications(ctx, true)
+	return c.broadcaster.subscribeNotifications(ctx, c.initialNotify)
 }
 
 // Run is the main loop for the Computed actor. It subscribes to all dependencies and listens for notifications. Whenever any dependency notifies a change, it calls the update function to compute the new value, updates its internal state, and broadcasts the new value to subscribers. The loop continues until the context is canceled, at which point it cleans up and exits.

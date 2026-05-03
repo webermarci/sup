@@ -18,10 +18,11 @@ go get github.com/webermarci/sup/bus
 | `Signal` | Read → broadcast | Poll a register, sensor, or API; notify subscribers on change |
 | `Computed` | Notify → Update | Eagerly update value when dependencies change; broadcast updates |
 | `Debounce` | Notify → Wait → Broadcast | Ignore rapid updates until the source is quiet; prevent noise |
+| `Throttle` | Notify → Limit → Broadcast | Limit the maximum rate of updates to prevent overwhelming consumers |
 | `ViewFunc` | Read (Lazy) | Transform or combine existing values statically without any goroutines |
 | `Trigger` | Write → update | Accept writes from callers; forward to a handler on success |
 
-Active types (`Signal`, `Computed`, `Debounce`, `Trigger`) are actors and should be managed with a supervisor.
+Active types (`Signal`, `Computed`, `Debounce`, `Throttle`, `Trigger`) are actors and should be managed with a supervisor.
 
 ## Signal
 
@@ -50,6 +51,7 @@ for v := range ch {
 | `WithInterval(d)` | 1s | How often the poll function is called |
 | `WithInitialValue(v)` | zero value | Value before the first successful poll |
 | `WithInitialNotify(true)` | false | Send the current value immediately to each new subscriber |
+| `WithSubscriberBuffer(n)` | 16 | The channel buffer size for subscribers |
 
 ### Behaviour
 
@@ -106,6 +108,14 @@ for v := range channel {
 }
 ```
 
+### Options
+
+| Option | Default | Description |
+|---|---|---|
+| `WithCoalesceWindow(d)` | 5ms | The delay used to batch concurrent dependency updates |
+| `WithInitialNotify(true)` | false | Send the current value immediately to each new subscriber |
+| `WithSubscriberBuffer(n)` | 16 | The channel buffer size for subscribers |
+
 ### Behaviour
 
 - It calls the update function once during creation to establish the initial value.
@@ -138,10 +148,43 @@ for v := range ch {
 |---|---|---|
 | `WithMaxWait(d)` | 0 | Forces an update after this duration, preventing infinite starvation |
 | `WithInitialNotify(true)` | false | Send the current value immediately to each new subscriber |
+| `WithSubscriberBuffer(n)` | 16 | The channel buffer size for subscribers |
 
 ### Behaviour
 
 - Emits only after the source has been quiet for the `wait` duration.
+- Evaluates the source immediately upon creation so `Read()` yields a valid initial value.
+
+## Throttle
+
+A `Throttle` actor limits the rate at which updates from its upstream source are broadcast. It ensures that updates are sent at most once per interval, making it ideal for decoupling fast internal state changes from slow consumers (like WebSockets or UI rendering).
+
+```go
+fastComputed := bus.NewComputed(...)
+
+// Limit broadcasts to at most 5 times per second (200ms interval)
+uiState := bus.NewThrottle("ui-throttle", fastComputed, 200*time.Millisecond)
+
+go uiState.Run(ctx)
+
+ch := uiState.Subscribe(ctx)
+for state := range ch {
+	// Safely send to a slow client without overwhelming it
+	websocket.Send(state) 
+}
+```
+
+### Options
+
+| Option | Default | Description |
+|---|---|---|
+| `WithInitialNotify(true)` | false | Send the current value immediately to each new subscriber |
+| `WithSubscriberBuffer(n)` | 16 | The channel buffer size for subscribers |
+
+### Behaviour
+
+- If the throttle window is open, the first event is emitted **immediately** without artificial delay.
+- If events arrive while the window is closed, it saves the absolute latest one and emits it exactly when the interval elapses (**trailing-edge** logic).
 - Evaluates the source immediately upon creation so `Read()` yields a valid initial value.
 
 ## Trigger
@@ -166,6 +209,7 @@ if err := trigger.Write(ctx, 42); err != nil {
 |---|---|---|
 | `WithInitialValue(v)` | zero value | Value before the first successful write |
 | `WithInitialNotify(true)` | false | Send the current value immediately to each new subscriber |
+| `WithSubscriberBuffer(n)` | 16 | The channel buffer size for subscribers |
 
 ### Behaviour
 
@@ -182,36 +226,40 @@ func main() {
 	// 1. Inputs
 	temp := bus.NewSignal("temperature", func(ctx context.Context) (float64, error) {
 		return readTemperatureSensor()
-	}).WithInterval(500 * time.Millisecond)
+	}).WithInterval(10 * time.Millisecond)
 
 	// Filter out sensor noise with Debounce
 	cleanTemp := bus.NewDebounce("clean-temp", temp, 200 * time.Millisecond)
 
-	// 2. Logic (View)
+	// 2. Logic (ViewFunc)
 	// Automatically determine if heating is needed
 	needsHeat := bus.ViewFunc[bool](func() bool {
 		return cleanTemp.Read() < 20.0
 	})
 
-	// 3. Output
+	// 3. Output Control (Throttle)
+	// Don't spam the heater relay, limit commands to once per second max
+	safeHeaterCmd := bus.NewThrottle("safe-heater", needsHeat, time.Second)
+
+	// 4. Output Actuator
 	heater := bus.NewTrigger("heater", func(ctx context.Context, on bool) error {
 		return setHeaterRelay(on)
 	})
 
 	supervisor := sup.NewSupervisor("root",
-		sup.WithActors(temp, cleanTemp, heater),
+		sup.WithActors(temp, cleanTemp, safeHeaterCmd, heater),
 		sup.WithPolicy(sup.Permanent),
 		sup.WithRestartDelay(time.Second),
 	)
 
 	go supervisor.Run(ctx)
 
-	// Using the View in a control loop
-	tempCh := cleanTemp.Subscribe(ctx)
+	// Using the Throttle in a control loop
+	heaterCh := safeHeaterCmd.Subscribe(ctx)
 	go func() {
-		for range tempCh {
-			// Read the logic from the view and write to the trigger
-			if err := heater.Write(ctx, needsHeat.Read()); err != nil {
+		for cmd := range heaterCh {
+			// Read the throttled command and write to the trigger
+			if err := heater.Write(ctx, cmd); err != nil {
 				fmt.Printf("heater control failed: %v\n", err)
 			}
 		}
@@ -223,11 +271,11 @@ func main() {
 
 ## Using with a Supervisor
 
-All active types (`Signal`, `Computed`, `Debounce`, and `Trigger`) implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor. Note that `ViewFunc` is not supervised as it contains no running goroutines.
+All active types (`Signal`, `Computed`, `Debounce`, `Throttle`, and `Trigger`) implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor. Note that `ViewFunc` is not supervised as it contains no running goroutines.
 
 ```go
 supervisor := sup.NewSupervisor("root",
-	sup.WithActors(temp, heater, cleanTemp),
+	sup.WithActors(temp, heater, cleanTemp, safeHeaterCmd),
 	sup.WithPolicy(sup.Permanent),
 	sup.WithRestartDelay(time.Second),
 )
