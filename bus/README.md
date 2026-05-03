@@ -17,6 +17,7 @@ go get github.com/webermarci/sup/bus
 |---|---|---|
 | `Signal` | Read → broadcast | Poll a register, sensor, or API; notify subscribers on change |
 | `Derived` | Notify → Update | Eagerly update value when dependencies change; broadcast updates |
+| `Debounce` | Notify → Wait → Broadcast | Ignore rapid updates until the source is quiet; prevent noise |
 | `View` | Read (Lazy) | Transform or combine existing values without extra goroutines |
 | `Trigger` | Write → update | Accept writes from callers; forward to a handler on success |
 
@@ -93,6 +94,9 @@ heatIndex := bus.NewDerived("heatIndex", func() float64 {
 	return calculateHeatIndex(temp.Read(), humidity.Read())
 }, temp, humidity)
 
+// Coalesce window prevents glitches from rapid concurrent updates
+heatIndex.WithCoalesceWindow(5 * time.Millisecond)
+
 go heatIndex.Run(ctx)
 
 // Subscribers receive updates automatically when dependencies change
@@ -106,8 +110,39 @@ for v := range channel {
 
 - It calls the update function once during creation to establish the initial value.
 - It subscribes to all provided dependencies and re-runs the update function whenever any dependency notifies it.
+- **Glitch-free:** It batches concurrent dependency notifications within a `coalesceWindow` (default 5ms) so complex diamond graphs don't cause multiple redundant recalculations or torn states.
 - After each update, it broadcasts the new value to its subscribers.
-- It is useful for building reactive pipelines where intermediate results need to be observed or used as dependencies for other actors.
+
+## Debounce
+
+A `Debounce` actor delays broadcasting updates from its upstream source until the source has stopped changing for a specified wait duration. This is ideal for taming noisy sensors or rapid user inputs.
+
+```go
+button := bus.NewTrigger(...)
+
+// Ignore button presses until 300ms of quiet time passes
+cleanButton := bus.NewDebounce("clean-button", button, 300*time.Millisecond).
+	WithMaxWait(1 * time.Second) // Force a publish every 1s even if still noisy
+
+go cleanButton.Run(ctx)
+
+ch := cleanButton.Subscribe(ctx)
+for v := range ch {
+	fmt.Println("debounced button state:", v)
+}
+```
+
+### Options
+
+| Option | Default | Description |
+|---|---|---|
+| `WithMaxWait(d)` | 0 | Forces an update after this duration, preventing infinite starvation |
+| `WithInitialNotify(true)` | false | Send the current value immediately to each new subscriber |
+
+### Behaviour
+
+- Emits only after the source has been quiet for the `wait` duration.
+- Evaluates the source immediately upon creation so `Read()` yields a valid initial value.
 
 ## Trigger
 
@@ -149,10 +184,13 @@ func main() {
 		return readTemperatureSensor()
 	}).WithInterval(500 * time.Millisecond)
 
+	// Filter out sensor noise with Debounce
+	cleanTemp := bus.NewDebounce("clean-temp", temp, 200 * time.Millisecond)
+
 	// 2. Logic (View)
 	// Automatically determine if heating is needed
 	needsHeat := bus.NewView("needsHeat", func() bool {
-		return temp.Read() < 20.0
+		return cleanTemp.Read() < 20.0
 	})
 
 	// 3. Output
@@ -160,15 +198,19 @@ func main() {
 		return setHeaterRelay(on)
 	})
 
-	go temp.Run(ctx)
-	go heater.Run(ctx)
-	go needsHeat.Run(ctx)
+	supervisor := sup.NewSupervisor("root",
+		sup.WithActors(temp, cleanTemp, heater, needsHeat),
+		sup.WithPolicy(sup.Permanent),
+		sup.WithRestartDelay(time.Second),
+	)
 
-	// Using the Mirror in a control loop
-	tempCh := temp.Subscribe(ctx)
+	go supervisor.Run(ctx)
+
+	// Using the View in a control loop
+	tempCh := cleanTemp.Subscribe(ctx)
 	go func() {
 		for range tempCh {
-			// Read the logic from the mirror and write to the trigger
+			// Read the logic from the view and write to the trigger
 			if err := heater.Write(ctx, needsHeat.Read()); err != nil {
 				fmt.Printf("heater control failed: %v\n", err)
 			}
@@ -181,7 +223,7 @@ func main() {
 
 ## Using with a Supervisor
 
-Both `Signal`, `Derived`, `View` and `Trigger` implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor.
+All active types (`Signal`, `Derived`, `Debounce`, and `Trigger`) implement the `sup.Actor` interface via their `Run` method, so they can be placed directly under a supervisor.
 
 ```go
 supervisor := sup.NewSupervisor("root",

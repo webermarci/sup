@@ -177,3 +177,47 @@ func waitForValue[V comparable](t *testing.T, r Reader[V], want V) {
 		}
 	}
 }
+
+func TestDerived_GlitchFreeDiamond(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	root := NewTrigger("root", func(ctx context.Context, v int) error { return nil })
+	go root.Run(ctx)
+
+	var valB, valC int32
+	nodeB := NewDerived("B", func() int32 {
+		atomic.AddInt32(&valB, 1)
+		return atomic.LoadInt32(&valB)
+	}, root)
+
+	nodeC := NewDerived("C", func() int32 {
+		atomic.AddInt32(&valC, 1)
+		return atomic.LoadInt32(&valC)
+	}, root)
+
+	go nodeB.Run(ctx)
+	go nodeC.Run(ctx)
+
+	var evalCount int32
+	nodeD := NewDerived("D", func() int32 {
+		atomic.AddInt32(&evalCount, 1)
+		b := nodeB.Read()
+		c := nodeC.Read()
+		return b + c
+	}, nodeB, nodeC)
+
+	nodeD.WithCoalesceWindow(20 * time.Millisecond)
+	go nodeD.Run(ctx)
+
+	time.Sleep(50 * time.Millisecond)
+
+	atomic.StoreInt32(&evalCount, 0)
+	root.Write(ctx, 1)
+	waitForValue(t, nodeD, 4)
+
+	count := atomic.LoadInt32(&evalCount)
+	if count != 1 {
+		t.Errorf("Glitch detected! Expected node D to evaluate exactly 1 time, but it evaluated %d times", count)
+	}
+}

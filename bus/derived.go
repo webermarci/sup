@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/webermarci/sup"
 )
@@ -11,21 +12,36 @@ import (
 type Derived[V any] struct {
 	*sup.BaseActor
 	broadcaster[V]
-	value  V
-	update func() V
-	deps   []Watcher
-	mu     sync.RWMutex
+	value          V
+	update         func() V
+	deps           []Watcher
+	coalesceWindow time.Duration
+	mu             sync.RWMutex
 }
 
 // NewDerived creates a new Derived with the given name, update function, and dependencies. The update function is called whenever any of the dependencies notify a change, and the result is broadcast to subscribers.
 func NewDerived[V any](name string, update func() V, deps ...Watcher) *Derived[V] {
 	return &Derived[V]{
-		BaseActor:   sup.NewBaseActor(name),
-		broadcaster: broadcaster[V]{buffer: 16},
-		value:       update(),
-		update:      update,
-		deps:        deps,
+		BaseActor:      sup.NewBaseActor(name),
+		broadcaster:    broadcaster[V]{buffer: 16},
+		value:          update(),
+		update:         update,
+		deps:           deps,
+		coalesceWindow: 5 * time.Millisecond,
 	}
+}
+
+// WithCoalesceWindow configures the delay used to batch concurrent dependency updates.
+// Defaults to 5ms, which is typically enough to catch immediately adjacent graph updates.
+func (d *Derived[V]) WithCoalesceWindow(window time.Duration) *Derived[V] {
+	d.coalesceWindow = window
+	return d
+}
+
+// WithSubscriberBuffer configures the buffer size for subscriber channels.
+func (d *Derived[V]) WithSubscriberBuffer(buffer int) *Derived[V] {
+	d.broadcaster.buffer = buffer
+	return d
 }
 
 // Read returns the current value of the Derived. It acquires a read lock to ensure thread-safe access to the value.
@@ -52,14 +68,32 @@ func (d *Derived[V]) Run(ctx context.Context) error {
 	for _, dep := range d.deps {
 		ch := dep.Watch(ctx)
 		go func(c <-chan struct{}) {
-			for range c {
+			for {
 				select {
-				case ping <- struct{}{}:
-				default:
+				case <-ctx.Done():
+					return
+				case _, ok := <-c:
+					if !ok {
+						return
+					}
+					select {
+					case ping <- struct{}{}:
+					default:
+					}
 				}
 			}
 		}(ch)
 	}
+
+	coalesce := time.NewTimer(time.Hour)
+	if !coalesce.Stop() {
+		select {
+		case <-coalesce.C:
+		default:
+		}
+	}
+	var coalesceChan <-chan time.Time
+	pending := false
 
 	for {
 		select {
@@ -68,6 +102,16 @@ func (d *Derived[V]) Run(ctx context.Context) error {
 			return nil
 
 		case <-ping:
+			if !pending {
+				pending = true
+				coalesce.Reset(d.coalesceWindow)
+				coalesceChan = coalesce.C
+			}
+
+		case <-coalesceChan:
+			pending = false
+			coalesceChan = nil
+
 			value := d.update()
 
 			d.mu.Lock()
