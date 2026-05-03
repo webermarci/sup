@@ -85,7 +85,7 @@ func WithObserver(observer *SupervisorObserver) SupervisorOption {
 // WithLogger sets a logger for the supervisor.
 func WithLogger(logger *slog.Logger) SupervisorOption {
 	return func(s *Supervisor) {
-		s.SetLogger(logger)
+		s.setLogger(logger)
 	}
 }
 
@@ -221,7 +221,7 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 		panic("sup: actor name cannot be empty")
 	}
 
-	actor.SetLogger(s.Logger())
+	actor.setLogger(s.Logger())
 	s.notifyActorRegistered(actor)
 
 	s.wg.Go(func() {

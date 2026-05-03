@@ -11,7 +11,7 @@ var noOpLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 type Actor interface {
 	Name() string
 	Run(context.Context) error
-	SetLogger(*slog.Logger)
+	setLogger(*slog.Logger)
 }
 
 type BaseActor struct {
@@ -36,15 +36,14 @@ func (a *BaseActor) Logger() *slog.Logger {
 	return a.logger
 }
 
-// SetLogger sets the actor's logger. It is called by the supervisor before Run() is called. The logger will include the actor's name as a field. It is not safe to call from inside Run().
-func (a *BaseActor) SetLogger(logger *slog.Logger) {
+func (a *BaseActor) setLogger(logger *slog.Logger) {
 	a.logger = logger.With("actor", a.name)
 }
 
 type actorFunc struct {
 	name   string
 	logger *slog.Logger
-	fn     func(context.Context) error
+	fn     func(ctx context.Context, logger *slog.Logger) error
 }
 
 func (a *actorFunc) Name() string {
@@ -52,15 +51,15 @@ func (a *actorFunc) Name() string {
 }
 
 func (a *actorFunc) Run(ctx context.Context) error {
-	return a.fn(ctx)
+	return a.fn(ctx, a.logger)
 }
 
-func (a *actorFunc) SetLogger(l *slog.Logger) {
+func (a *actorFunc) setLogger(l *slog.Logger) {
 	a.logger = l.With(slog.String("actor", a.name))
 }
 
 // ActorFunc creates a simple stateless actor from a function.
-func ActorFunc(name string, fn func(context.Context) error) Actor {
+func ActorFunc(name string, fn func(ctx context.Context, logger *slog.Logger) error) Actor {
 	return &actorFunc{
 		name:   name,
 		fn:     fn,

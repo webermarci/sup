@@ -2,6 +2,7 @@ package sup_test
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 
 	"github.com/webermarci/sup"
@@ -248,7 +249,7 @@ func Benchmark_TryCall_Concurrent(b *testing.B) {
 }
 
 func Benchmark_Supervisor_SpawnAndExit(b *testing.B) {
-	actor := sup.ActorFunc(b.Name(), func(ctx context.Context) error {
+	actor := sup.ActorFunc(b.Name(), func(ctx context.Context, _ *slog.Logger) error {
 		return nil
 	})
 	supervisor := sup.NewSupervisor(

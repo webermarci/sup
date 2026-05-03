@@ -3,6 +3,7 @@ package sup_test
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -16,7 +17,7 @@ func TestSupervisor_Temporary(t *testing.T) {
 	var runs atomic.Int32
 
 	supervisor := sup.NewSupervisor("sup",
-		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
+		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context, _ *slog.Logger) error {
 			runs.Add(1)
 			panic("fatal error")
 		})),
@@ -35,7 +36,7 @@ func TestSupervisor_Transient(t *testing.T) {
 	var runs atomic.Int32
 
 	supervisor := sup.NewSupervisor("sup",
-		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
+		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context, _ *slog.Logger) error {
 			count := runs.Add(1)
 			if count == 1 {
 				return errors.New("abnormal exit")
@@ -58,7 +59,7 @@ func TestSupervisor_MaxRestartsEscalation(t *testing.T) {
 	var runs atomic.Int32
 
 	supervisor := sup.NewSupervisor("sup",
-		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
+		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context, _ *slog.Logger) error {
 			runs.Add(1)
 			return errors.New("constant fail")
 		})),
@@ -84,7 +85,7 @@ func TestSupervisor_OnError(t *testing.T) {
 	var capturedActor sup.Actor
 
 	supervisor := sup.NewSupervisor("sup",
-		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
+		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context, _ *slog.Logger) error {
 			return errors.New("boom")
 		})),
 		sup.WithPolicy(sup.Temporary),
@@ -113,7 +114,7 @@ func TestSupervisor_NoGoroutineLeaks(t *testing.T) {
 
 	// Spawn multiple long-running actors
 	for range 10 {
-		supervisor.Spawn(ctx, sup.ActorFunc(t.Name(), func(aCtx context.Context) error {
+		supervisor.Spawn(ctx, sup.ActorFunc(t.Name(), func(aCtx context.Context, _ *slog.Logger) error {
 			<-aCtx.Done()
 			return nil
 		}))
@@ -139,7 +140,7 @@ func TestSupervisor_RestartLimit_WindowReset(t *testing.T) {
 	// Limit is 2 restarts in 50ms.
 	// We will fail, wait 100ms, fail again. Window should reset.
 	supervisor := sup.NewSupervisor("sup",
-		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
+		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context, _ *slog.Logger) error {
 			n := runs.Add(1)
 			if n == 3 {
 				time.Sleep(100 * time.Millisecond)
@@ -167,7 +168,7 @@ func TestSupervisor_RestartLimit_WindowReset(t *testing.T) {
 func TestSupervisor_PanicStackTrace(t *testing.T) {
 	var capturedErr error
 	supervisor := sup.NewSupervisor("sup",
-		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
+		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context, _ *slog.Logger) error {
 			panic("extreme failure")
 		})),
 		sup.WithPolicy(sup.Temporary),
@@ -209,7 +210,7 @@ func TestSupervisor_ObserverBasicLifecycle(t *testing.T) {
 	}
 
 	var runs atomic.Int32
-	actor := sup.ActorFunc(t.Name(), func(ctx context.Context) error {
+	actor := sup.ActorFunc(t.Name(), func(ctx context.Context, _ *slog.Logger) error {
 		n := runs.Add(1)
 		if n == 1 {
 			return errors.New("boom")
