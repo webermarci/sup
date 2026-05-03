@@ -15,6 +15,7 @@ type Computed[V any] struct {
 	value          V
 	update         func() V
 	deps           []Watcher
+	equal          func(a, b V) bool
 	coalesceWindow time.Duration
 	initialNotify  bool
 	mu             sync.RWMutex
@@ -48,6 +49,12 @@ func (c *Computed[V]) WithInitialNotify(enabled bool) *Computed[V] {
 // WithSubscriberBuffer configures the buffer size for subscriber channels.
 func (c *Computed[V]) WithSubscriberBuffer(buffer int) *Computed[V] {
 	c.broadcaster.buffer = buffer
+	return c
+}
+
+// WithEqual configures a custom equality function to determine if the computed value has changed. If not set, the Computed will use the default equality check (==) to compare old and new values. This can be useful for complex types where a simple equality check may not be sufficient.
+func (c *Computed[V]) WithEqual(eq func(a, b V) bool) *Computed[V] {
+	c.equal = eq
 	return c
 }
 
@@ -125,6 +132,10 @@ func (c *Computed[V]) Run(ctx context.Context) error {
 			value := c.update()
 
 			c.mu.Lock()
+			if c.equal != nil && c.equal(c.value, value) {
+				c.mu.Unlock()
+				continue
+			}
 			c.value = value
 			c.mu.Unlock()
 

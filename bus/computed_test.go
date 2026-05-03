@@ -221,3 +221,52 @@ func TestComputed_GlitchFreeDiamond(t *testing.T) {
 		t.Errorf("Glitch detected! Expected node D to evaluate exactly 1 time, but it evaluated %d times", count)
 	}
 }
+
+func TestComputed_WithEqual(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error { return nil })
+	go trigger.Run(ctx)
+
+	var currentVal int32 = 10
+
+	// Create a computed with a basic equality check
+	computed := NewComputed("computed", func() int {
+		return int(atomic.LoadInt32(&currentVal))
+	}, trigger).
+		WithEqual(func(a, b int) bool { return a == b }).
+		WithInitialNotify(false)
+
+	go computed.Run(ctx)
+	time.Sleep(20 * time.Millisecond)
+
+	ch := computed.Subscribe(ctx)
+
+	// --- Scenario 1: Value hasn't changed ---
+	// Trigger the dependency, but leave currentVal as 10
+	trigger.Write(ctx, 1)
+
+	// It should evaluate, but it MUST NOT broadcast
+	select {
+	case <-ch:
+		t.Fatal("Expected no broadcast because the value evaluated to equal")
+	case <-time.After(100 * time.Millisecond):
+		// Success! The broadcast was suppressed.
+	}
+
+	// --- Scenario 2: Value changes ---
+	// Update the underlying value to 20 and trigger the dependency
+	atomic.StoreInt32(&currentVal, 20)
+	trigger.Write(ctx, 2)
+
+	// It MUST broadcast the new value
+	select {
+	case v := <-ch:
+		if v != 20 {
+			t.Errorf("Expected updated value 20, got %d", v)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Timed out waiting for updated value to broadcast")
+	}
+}

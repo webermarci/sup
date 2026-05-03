@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -161,21 +162,27 @@ func TestSignal_InitialNotifyEnabled(t *testing.T) {
 func TestSignal_InitialNotifyDisabled(t *testing.T) {
 	ctx := t.Context()
 
+	// Create a signal that will NEVER naturally poll during the test
+	// because we set the interval to 1 Hour and return an error on the initial poll.
 	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
-		return 0, nil
+		return 0, context.Canceled // Return an error so it skips the initial poll broadcast
 	}).
 		WithInitialValue(42).
 		WithInterval(time.Hour)
 
-	go signal.Run(ctx)
-
+	// Since InitialNotify is false (by default), subscribing should NOT
+	// send the cached initial value of 42.
 	ch := signal.Subscribe(ctx)
 
+	// Start the actor
+	go signal.Run(ctx)
+
+	// We should receive absolutely nothing.
 	select {
 	case v := <-ch:
 		t.Errorf("expected no initial notification, got %d", v)
 	case <-time.After(100 * time.Millisecond):
-		// correct
+		// correct, we successfully subscribed without getting spammed by the cached value!
 	}
 }
 
@@ -186,5 +193,56 @@ func TestSignal_ActorInterface(t *testing.T) {
 
 	if _, ok := any(signal).(sup.Actor); !ok {
 		t.Fatal("signal does not implement sup.Actor interface")
+	}
+}
+
+func TestSignal_WithEqual(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	var pollCount int32
+	var currentVal int32 = 42
+
+	signal := NewSignal("test-signal", func(ctx context.Context) (int, error) {
+		atomic.AddInt32(&pollCount, 1)
+		return int(atomic.LoadInt32(&currentVal)), nil
+	}).
+		WithInterval(10 * time.Millisecond).
+		WithEqual(func(a, b int) bool { return a == b }).
+		WithInitialNotify(false)
+
+	go signal.Run(ctx)
+	time.Sleep(20 * time.Millisecond) // Let it start
+
+	ch := signal.Subscribe(ctx)
+
+	// --- Scenario 1: Same value ---
+	// Wait for several poll cycles (at least 50ms)
+	time.Sleep(50 * time.Millisecond)
+
+	// Ensure the poller is actually running
+	if atomic.LoadInt32(&pollCount) < 3 {
+		t.Fatal("Poller isn't running fast enough for the test")
+	}
+
+	// Verify nothing was broadcast because the value stayed 42
+	select {
+	case v := <-ch:
+		t.Fatalf("Expected no broadcast for identical values, but got %d", v)
+	default:
+		// Success!
+	}
+
+	// --- Scenario 2: Value changes ---
+	atomic.StoreInt32(&currentVal, 99)
+
+	// It should now detect the difference and broadcast
+	select {
+	case v := <-ch:
+		if v != 99 {
+			t.Errorf("Expected updated value 99, got %d", v)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Timed out waiting for new value after mutation")
 	}
 }

@@ -15,6 +15,7 @@ type Signal[V any] struct {
 	value         V
 	update        func(context.Context) (V, error)
 	interval      time.Duration
+	equal         func(a, b V) bool
 	initialNotify bool
 	mu            sync.RWMutex
 }
@@ -53,6 +54,12 @@ func (s *Signal[V]) WithInitialNotify(enabled bool) *Signal[V] {
 	return s
 }
 
+// WithEqual configures a custom equality function to determine if the Signal's value has changed. If not set, the Signal will use the default equality check (==) to compare old and new values. This can be useful for complex types where a simple equality check may not be sufficient.
+func (s *Signal[V]) WithEqual(eq func(a, b V) bool) *Signal[V] {
+	s.equal = eq
+	return s
+}
+
 // Read returns the current value of the Signal. It acquires a read lock to ensure thread-safe access to the value.
 func (s *Signal[V]) Read() V {
 	s.mu.RLock()
@@ -78,23 +85,37 @@ func (s *Signal[V]) Run(ctx context.Context) error {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 
+	if v, err := s.update(ctx); err == nil {
+		s.mu.Lock()
+		s.value = v
+		s.mu.Unlock()
+		s.broadcaster.notify(v)
+	}
+
 	for {
 		select {
 		case <-ctx.Done():
 			s.broadcaster.closeAll()
 			return nil
-
 		case <-ticker.C:
-			value, err := s.update(ctx)
+			v, err := s.update(ctx)
 			if err != nil {
 				continue
 			}
 
+			s.mu.RLock()
+			current := s.value
+			s.mu.RUnlock()
+
+			if s.equal != nil && s.equal(current, v) {
+				continue
+			}
+
 			s.mu.Lock()
-			s.value = value
+			s.value = v
 			s.mu.Unlock()
 
-			s.broadcaster.notify(value)
+			s.broadcaster.notify(v)
 		}
 	}
 }

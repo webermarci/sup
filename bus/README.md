@@ -15,19 +15,19 @@ go get github.com/webermarci/sup/bus
 ## Concepts
 | Type | Direction | Use case |
 |---|---|---|
-| `Signal` | Read → broadcast | Poll a register, sensor, or API; notify subscribers on change |
+| `Signal` | Read → broadcast | Poll a register, sensor, or API; notify subscribers on update |
 | `Computed` | Notify → Update | Eagerly update value when dependencies change; broadcast updates |
 | `Debounce` | Notify → Wait → Broadcast | Ignore rapid updates until the source is quiet; prevent noise |
 | `Throttle` | Notify → Limit → Broadcast | Limit the maximum rate of updates to prevent overwhelming consumers |
-| `Link` | Subscribe → Write | Connects a Provider to a Writer as a fully supervised actor |
-| `ViewFunc` | Read (Lazy) | Transform or combine existing values statically without any goroutines |
+| `Link` | Subscribe → Write | Connect a `Provider` to a `Writer` as a supervised actor |
+| `ViewFunc` | Read (Lazy) | Transform or combine existing values without any goroutines |
 | `Trigger` | Write → update | Accept writes from callers; forward to a handler on success |
 
 Active types (`Signal`, `Computed`, `Debounce`, `Throttle`, `Link`, `Trigger`) are actors and should be managed with a supervisor.
 
 ## Signal
 
-A `Signal` periodically calls a poll function and broadcasts the result to all current subscribers whenever the value changes.
+A `Signal` periodically calls an update function and broadcasts the result to all current subscribers.
 
 ```go
 signal := bus.NewSignal("signal", func(ctx context.Context) (uint16, error) {
@@ -49,21 +49,23 @@ for v := range ch {
 
 | Option | Default | Description |
 |---|---|---|
-| `WithInterval(d)` | 1s | How often the poll function is called |
-| `WithInitialValue(v)` | zero value | Value before the first successful poll |
+| `WithInterval(d)` | 1s | How often the update function is called |
+| `WithInitialValue(v)` | zero value | Value before the first successful update |
 | `WithInitialNotify(true)` | false | Send the current value immediately to each new subscriber |
 | `WithSubscriberBuffer(n)` | 16 | The channel buffer size for subscribers |
+| `WithEqual(func)` | nil | Custom equality function used to suppress identical updates |
 
 ### Behaviour
 
-- If the poll function returns an error, the value is **not updated** and subscribers are **not notified**.
-- Subscribers are notified only when the value **changes** — repeated identical results are silently dropped.
+- If the update function returns an error, the value is **not updated** and subscribers are **not notified**.
+- If `WithEqual` is configured, repeated equal values are dropped.
+- If `WithEqual` is not configured, every successful update is broadcast.
 - Subscribing with a canceled context is a no-op; the returned channel is closed immediately.
 - Canceling a subscriber's context closes its channel and removes it from the broadcast list.
 
 ## ViewFunc
 
-A `ViewFunc` provides a lazy, zero-overhead functional transformation of one or more `Readers`. It calculates its value on-demand when `Read()` is called. It is an adapter type, not an actor, and requires no supervision.
+A `ViewFunc` provides a lazy, zero-overhead functional transformation of one or more `Readers`. It calculates its value on demand when `Read()` is called. It is an adapter type, not an actor, and requires no supervision.
 
 ```go
 tempC := bus.NewSignal(...)
@@ -73,15 +75,14 @@ tempF := bus.ViewFunc[float64](func() float64 {
 	return tempC.Read()*9/5 + 32
 })
 
-tempF.Read() // calculates fahrenheit from the latest celsius value
+tempF.Read()
 
 // Complex aggregation
 isSafe := bus.ViewFunc[bool](func() bool {
-	// Capture multiple signals in a closure for type-safe logic
 	return tempC.Read() < 100.0 && pressure.Read() < 10.5
 })
 
-isSafe.Read() // calculates safety status from multiple signals
+isSafe.Read()
 ```
 
 ## Computed
@@ -92,19 +93,15 @@ A `Computed` actor eagerly updates its value whenever its dependencies notify it
 temp := bus.NewSignal(...)
 humidity := bus.NewSignal(...)
 
-// Eagerly compute heat index whenever temp or humidity changes
 heatIndex := bus.NewComputed("heatIndex", func() float64 {
 	return calculateHeatIndex(temp.Read(), humidity.Read())
-}, temp, humidity)
-
-// Coalesce window prevents glitches from rapid concurrent updates
-heatIndex.WithCoalesceWindow(5 * time.Millisecond)
+}, temp, humidity).
+	WithCoalesceWindow(5 * time.Millisecond)
 
 go heatIndex.Run(ctx)
 
-// Subscribers receive updates automatically when dependencies change
-channel := heatIndex.Subscribe(ctx)
-for v := range channel {
+ch := heatIndex.Subscribe(ctx)
+for v := range ch {
 	fmt.Printf("new heat index: %.2f\n", v)
 }
 ```
@@ -113,16 +110,18 @@ for v := range channel {
 
 | Option | Default | Description |
 |---|---|---|
-| `WithCoalesceWindow(d)` | 5ms | The delay used to batch concurrent dependency updates |
+| `WithCoalesceWindow(d)` | 5ms | Delay used to batch concurrent dependency updates |
 | `WithInitialNotify(true)` | false | Send the current value immediately to each new subscriber |
 | `WithSubscriberBuffer(n)` | 16 | The channel buffer size for subscribers |
+| `WithEqual(func)` | nil | Custom equality function used to suppress identical updates |
 
 ### Behaviour
 
 - It calls the update function once during creation to establish the initial value.
 - It subscribes to all provided dependencies and re-runs the update function whenever any dependency notifies it.
-- **Glitch-free:** It batches concurrent dependency notifications within a `coalesceWindow` (default 5ms) so complex diamond graphs don't cause multiple redundant recalculations or torn states.
-- After each update, it broadcasts the new value to its subscribers.
+- **Glitch-free:** it batches concurrent dependency notifications within a `coalesceWindow` so diamond graphs do not cause redundant recalculations or torn states.
+- If `WithEqual` is configured, equal results are not broadcast.
+- If `WithEqual` is not configured, every recomputation is broadcast.
 
 ## Debounce
 
@@ -131,9 +130,8 @@ A `Debounce` actor delays broadcasting updates from its upstream source until th
 ```go
 button := bus.NewTrigger(...)
 
-// Ignore button presses until 300ms of quiet time passes
 cleanButton := bus.NewDebounce("clean-button", button, 300*time.Millisecond).
-	WithMaxWait(1 * time.Second) // Force a publish every 1s even if still noisy
+	WithMaxWait(1 * time.Second)
 
 go cleanButton.Run(ctx)
 
@@ -147,7 +145,7 @@ for v := range ch {
 
 | Option | Default | Description |
 |---|---|---|
-| `WithMaxWait(d)` | 0 | Forces an update after this duration, preventing infinite starvation |
+| `WithMaxWait(d)` | 0 | Force an update after this duration, preventing infinite starvation |
 | `WithInitialNotify(true)` | false | Send the current value immediately to each new subscriber |
 | `WithSubscriberBuffer(n)` | 16 | The channel buffer size for subscribers |
 
@@ -158,19 +156,17 @@ for v := range ch {
 
 ## Throttle
 
-A `Throttle` actor limits the rate at which updates from its upstream source are broadcast. It ensures that updates are sent at most once per interval, making it ideal for decoupling fast internal state changes from slow consumers (like WebSockets or UI rendering).
+A `Throttle` actor limits the rate at which updates from its upstream source are broadcast. It ensures that updates are sent at most once per interval, which is useful for decoupling fast internal state changes from slower consumers such as WebSockets or UI rendering.
 
 ```go
 fastComputed := bus.NewComputed(...)
 
-// Limit broadcasts to at most 5 times per second (200ms interval)
 uiState := bus.NewThrottle("ui-throttle", fastComputed, 200*time.Millisecond)
 
 go uiState.Run(ctx)
 
 ch := uiState.Subscribe(ctx)
 for state := range ch {
-	// Safely send to a slow client without overwhelming it
 	websocket.Send(state)
 }
 ```
@@ -184,13 +180,13 @@ for state := range ch {
 
 ### Behaviour
 
-- If the throttle window is open, the first event is emitted **immediately** without artificial delay.
-- If events arrive while the window is closed, it saves the absolute latest one and emits it exactly when the interval elapses (**trailing-edge** logic).
+- If the throttle window is open, the first event is emitted **immediately**.
+- If events arrive while the window is closed, it keeps the latest one and emits it when the interval elapses.
 - Evaluates the source immediately upon creation so `Read()` yields a valid initial value.
 
 ## Trigger
 
-A `Trigger` accepts writes via `Write`, calls an update function with the new value, and — on success — updates the stored value and notifies subscribers.
+A `Trigger` accepts writes via `Write`, calls an update function with the new value, and, on success, updates the stored value and notifies subscribers.
 
 ```go
 trigger := bus.NewTrigger("trigger", func(ctx context.Context, v uint16) error {
@@ -214,15 +210,14 @@ if err := trigger.Write(42); err != nil {
 
 ### Behaviour
 
-- `Write` is synchronous — it blocks until the update function has returned.
-- If the update function returns an error, the stored value is **not updated** and subscribers are **not notified**. The error is returned to the caller.
+- `Write` is synchronous; it blocks until the update function returns.
+- If the update function returns an error, the stored value is **not updated** and subscribers are **not notified**.
 
 ## Link
 
-A `Link` actor connects a readable `Provider` to a destination `Writer` (such as a `Trigger`). This lets you route data through your reactive pipeline without writing unsupervised goroutines.
+A `Link` actor connects a readable `Provider` to a destination `Writer` such as a `Trigger`. This lets you route data through your reactive pipeline without writing unsupervised goroutines.
 
 ```go
-// Route throttled state directly into a trigger
 wiring := bus.NewLink("websocket-wiring", uiState, websocketTrigger)
 
 go wiring.Run(ctx)
@@ -249,23 +244,23 @@ func main() {
 	// Filter out sensor noise with Debounce
 	cleanTemp := bus.NewDebounce("clean-temp", temp, 200*time.Millisecond)
 
-	// 2. Logic (ViewFunc)
+	// 2. Logic
 	needsHeat := bus.ViewFunc[bool](func() bool {
 		return cleanTemp.Read() < 20.0
 	})
 
-	// 3. Output Control (Throttle)
-	safeHeaterCmd := bus.NewThrottle("safe-heater", cleanTemp, time.Second)
+	// 3. Output Control
+	safeHeaterCmd := bus.NewThrottle("safe-heater", needsHeat, time.Second)
 
 	// 4. Output Actuator
 	heater := bus.NewTrigger("heater", func(ctx context.Context, on bool) error {
 		return setHeaterRelay(on)
 	})
 
-	// 5. The Wiring (Supervised)
+	// 5. Wiring
 	wiring := bus.NewLink("heater-wiring", safeHeaterCmd, heater)
 
-	// 6. 100% Supervised System
+	// 6. Supervision
 	supervisor := sup.NewSupervisor("root",
 		sup.WithActors(temp, cleanTemp, safeHeaterCmd, heater, wiring),
 		sup.WithPolicy(sup.Permanent),
