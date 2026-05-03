@@ -288,7 +288,8 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 
 				if len(restarts) > s.maxRestarts {
 					escErr := fmt.Errorf("actor %s exceeded max restarts", actor.Name())
-					s.Logger().Error("supervisor terminal error: restart limit reached",
+					s.Logger().Error("supervisor terminal error",
+						slog.String("error", escErr.Error()),
 						slog.String("child", actor.Name()),
 						slog.Int("max_restarts", s.maxRestarts),
 						slog.Duration("window", s.restartWindow),
