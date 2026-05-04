@@ -29,14 +29,12 @@ func enqueueContext(ctx context.Context, mb *Mailbox, value any) (err error) {
 
 	defer recoverClosed(&err)
 
-	// Fast-path: if we can send immediately, do it.
 	select {
 	case mb.ch <- value:
 		return nil
 	default:
 	}
 
-	// Contended path.
 	select {
 	case mb.ch <- value:
 		return nil
@@ -69,7 +67,6 @@ func tryEnqueueContext(ctx context.Context, mb *Mailbox, value any) (err error) 
 
 	defer recoverClosed(&err)
 
-	// Fast-path.
 	select {
 	case mb.ch <- value:
 		return nil
