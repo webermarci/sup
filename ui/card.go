@@ -2,19 +2,10 @@ package ui
 
 import "reflect"
 
-// CardMode represents the mode of a card, which can be either "read" for displaying values or "write" for allowing user input to update values.
-type CardMode string
-
-const (
-	CardModeRead  CardMode = "read"
-	CardModeWrite CardMode = "write"
-)
-
-// Card represents a UI component on the dashboard that can either display a value (read mode) or allow user input to update a value (write mode). Each card has a name that identifies the data it represents and a mode that determines whether it is read-only or interactive.
+// Card represents a single card in the dashboard, with a name and a type.
 type Card struct {
-	Name string   `json:"name"`
-	Mode CardMode `json:"mode"`
-	Type string   `json:"type"`
+	Name string `json:"name"`
+	Type string `json:"type"`
 }
 
 func inferType[V any]() string {

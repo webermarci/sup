@@ -211,7 +211,8 @@ func (s *Supervisor) notifySupervisorTerminal(err error) {
 	}()
 }
 
-// Spawn starts the given actor under supervision. It will be restarted according to the supervisor's policy if it returns an error or panics.
+// Spawn starts the given actor under supervision.
+// It will be restarted according to the supervisor's policy if it returns an error or panics.
 func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 	if actor == nil {
 		panic("sup: cannot spawn nil actor")

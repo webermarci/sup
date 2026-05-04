@@ -51,7 +51,9 @@ func (t *Trigger[V]) Read() V {
 	return t.value
 }
 
-// Subscribe returns a channel that receives updates whenever the Trigger's value changes. If initialNotify is enabled, the current value is sent to the channel immediately upon subscription. It acquires a lock to ensure thread-safe access to the current value when subscribing.
+// Subscribe returns a channel that receives updates whenever the Trigger's value changes.
+// If initialNotify is enabled, the current value is sent to the channel immediately upon subscription.
+// It acquires a lock to ensure thread-safe access to the current value when subscribing.
 func (t *Trigger[V]) Subscribe(ctx context.Context) <-chan V {
 	t.mu.Lock()
 	current := t.value
@@ -59,12 +61,15 @@ func (t *Trigger[V]) Subscribe(ctx context.Context) <-chan V {
 	return t.broadcaster.subscribeValues(ctx, current, t.initialNotify)
 }
 
-// Watch allows clients to subscribe to notifications whenever the Trigger's value is updated, without receiving the actual value. It returns a channel that will receive a notification (empty struct) whenever the value is updated. The subscription will automatically clean up when the provided context is canceled.
+// Watch allows clients to subscribe to notifications whenever the Trigger's value is updated,
+// without receiving the actual value. It returns a channel that will receive a notification (empty struct) whenever the value is updated. The subscription will automatically clean up when the provided context is canceled.
 func (t *Trigger[V]) Watch(ctx context.Context) <-chan struct{} {
 	return t.broadcaster.subscribeNotifications(ctx, t.initialNotify)
 }
 
-// Write updates the Trigger's value by calling the update function with the provided value. If the update is successful, it notifies all subscribers of the new value. It acquires a lock to ensure thread-safe updates to the value.
+// Write updates the Trigger's value by calling the update function with the provided value.
+// If the update is successful, it notifies all subscribers of the new value.
+// It acquires a lock to ensure thread-safe updates to the value.
 func (t *Trigger[V]) Write(ctx context.Context, value V) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()

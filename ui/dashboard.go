@@ -2,38 +2,34 @@ package ui
 
 import (
 	"context"
+	"embed"
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io/fs"
 	"net/http"
 	"sync"
 
 	"github.com/webermarci/sup"
 	"github.com/webermarci/sup/bus"
-	"github.com/webermarci/sup/ui/static"
 )
 
-type TemplateData struct {
-	Cards      []Card
-	LastValues map[string]string
-}
+//go:embed static/*
+var staticFS embed.FS
 
-// State represents a value that can be observed for changes and updated by writing to it. It combines the bus.Provider and bus.Writer interfaces, allowing the dashboard to both subscribe to updates and send commands to update the state.
-type State[V any] interface {
-	bus.Provider[V]
-	bus.Writer[V]
-}
-
-// DashboardOption represents a functional option for configuring the Dashboard. It allows adding providers to observe or states to control, which will be reflected in the dashboard UI and API.
+// DashboardOption represents a functional option for configuring the Dashboard.
+// It allows adding providers to observe, which will be reflected in the real-time UI.
 type DashboardOption func(*Dashboard)
 
-// WithObserve adds a read-only card to the dashboard for the given provider. The dashboard will subscribe to the provider for updates and reflect changes in the UI, but will not allow user input to update the provider.
+// WithObserve adds a read-only card to the dashboard for the given provider.
+// The dashboard will subscribe to the provider for updates and reflect changes in the UI,
+// but will not allow user input to update the provider.
 func WithObserve[V any](provider bus.Provider[V]) DashboardOption {
 	return func(d *Dashboard) {
 		name := provider.Name()
+
 		d.schema = append(d.schema, Card{
 			Name: name,
-			Mode: CardModeRead,
 			Type: inferType[V](),
 		})
 
@@ -56,63 +52,17 @@ func WithObserve[V any](provider bus.Provider[V]) DashboardOption {
 					if b, err := json.Marshal(update); err == nil {
 						d.broadcast("update", b)
 					}
-
 				}
 			}
 		})
 	}
 }
 
-// WithControl adds a control card to the dashboard for the given state. The dashboard will send command events to the state whenever the user updates the control in the UI, and will also subscribe to the state for updates to reflect changes made outside the dashboard.
-func WithControl[V any](state State[V]) DashboardOption {
-	return func(d *Dashboard) {
-		name := state.Name()
-		d.schema = append(d.schema, Card{
-			Name: name,
-			Mode: CardModeWrite,
-			Type: inferType[V](),
-		})
-
-		d.commands[name] = func(ctx context.Context, payload []byte) error {
-			var val V
-			if err := json.Unmarshal(payload, &val); err != nil {
-				return err
-			}
-			return state.Write(ctx, val)
-		}
-
-		d.streams = append(d.streams, func(ctx context.Context) error {
-			ch := state.Subscribe(ctx)
-			for {
-				select {
-				case <-ctx.Done():
-					return nil
-				case val, ok := <-ch:
-					if !ok {
-						return fmt.Errorf("state %s closed subscription", name)
-					}
-
-					d.mu.Lock()
-					d.lastValues[name] = val
-					d.mu.Unlock()
-
-					update := map[string]any{"name": name, "value": val}
-					if b, err := json.Marshal(update); err == nil {
-						d.broadcast("update", b)
-					}
-
-				}
-			}
-		})
-	}
-}
-
-// Dashboard represents a real-time UI dashboard that can observe providers and control state through commands. It implements the sup.Actor interface and provides an HTTP handler for serving the dashboard frontend and API.
+// Dashboard is an actor that serves a web-based dashboard for monitoring various providers and states.
 type Dashboard struct {
 	*sup.BaseActor
 	schema     []Card
 	clients    map[chan []byte]struct{}
-	commands   map[string]func(context.Context, []byte) error
 	streams    []func(context.Context) error
 	lastValues map[string]any
 	mu         sync.RWMutex
@@ -123,7 +73,6 @@ func NewDashboard(name string, opts ...DashboardOption) *Dashboard {
 	d := &Dashboard{
 		BaseActor:  sup.NewBaseActor(name),
 		clients:    make(map[chan []byte]struct{}),
-		commands:   make(map[string]func(context.Context, []byte) error),
 		lastValues: make(map[string]any),
 	}
 
@@ -138,20 +87,22 @@ func NewDashboard(name string, opts ...DashboardOption) *Dashboard {
 func (d *Dashboard) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	tmpl := template.Must(template.ParseFS(static.FS, "index.html"))
+	tmpl := template.Must(template.ParseFS(staticFS, "static/index.html"))
 
-	mux.HandleFunc("OPTIONS /api/", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) })
+	subFS, err := fs.Sub(staticFS, "static")
+	if err != nil {
+		panic(err)
+	}
+
 	mux.HandleFunc("GET /{$}", staticHandler(d, tmpl))
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(static.FS))))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(subFS))))
 	mux.HandleFunc("GET /api/events", getEvents(d))
 
-	return cors()(mux)
+	return mux
 }
 
 // Run starts all dashboard streams and blocks until the context is canceled or a stream returns an error.
 func (d *Dashboard) Run(ctx context.Context) error {
-	d.Logger().Info("dashboard streams starting", "stream_count", len(d.streams))
-
 	errCh := make(chan error, len(d.streams))
 
 	for _, stream := range d.streams {
@@ -164,10 +115,8 @@ func (d *Dashboard) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		d.Logger().Info("dashboard streams shutting down")
 		return nil
 	case err := <-errCh:
-		d.Logger().Error("dashboard stream failed", "err", err)
 		return err
 	}
 }

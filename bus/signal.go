@@ -54,7 +54,9 @@ func (s *Signal[V]) WithInitialNotify(enabled bool) *Signal[V] {
 	return s
 }
 
-// WithEqual configures a custom equality function to determine if the Signal's value has changed. If not set, the Signal will use the default equality check (==) to compare old and new values. This can be useful for complex types where a simple equality check may not be sufficient.
+// WithEqual configures a custom equality function to determine if the Signal's value has changed.
+// If not set, the Signal will use the default equality check (==) to compare old and new values.
+// This can be useful for complex types where a simple equality check may not be sufficient.
 func (s *Signal[V]) WithEqual(eq func(a, b V) bool) *Signal[V] {
 	s.equal = eq
 	return s
@@ -67,7 +69,9 @@ func (s *Signal[V]) Read() V {
 	return s.value
 }
 
-// Subscribe allows clients to subscribe to updates of the Signal's value. It returns a channel that will receive new values whenever they are updated. The subscription will automatically clean up when the provided context is canceled.
+// Subscribe allows clients to subscribe to updates of the Signal's value.
+// It returns a channel that will receive new values whenever they are updated.
+// The subscription will automatically clean up when the provided context is canceled.
 func (s *Signal[V]) Subscribe(ctx context.Context) <-chan V {
 	s.mu.RLock()
 	current := s.value
@@ -75,12 +79,17 @@ func (s *Signal[V]) Subscribe(ctx context.Context) <-chan V {
 	return s.broadcaster.subscribeValues(ctx, current, s.initialNotify)
 }
 
-// Watch allows clients to subscribe to notifications whenever the Signal's value is updated, without receiving the actual value. It returns a channel that will receive a notification (empty struct) whenever the value is updated. The subscription will automatically clean up when the provided context is canceled.
+// Watch allows clients to subscribe to notifications whenever the Signal's value is updated,
+// without receiving the actual value.
+// It returns a channel that will receive a notification (empty struct) whenever the value is updated.
+// The subscription will automatically clean up when the provided context is canceled.
 func (s *Signal[V]) Watch(ctx context.Context) <-chan struct{} {
 	return s.broadcaster.subscribeNotifications(ctx, s.initialNotify)
 }
 
-// Run starts the Signal's update loop, which periodically calls the update function to refresh the Signal's value and notifies subscribers of any changes. The loop continues until the provided context is canceled, at which point it will clean up all subscriber channels.
+// Run starts the Signal's update loop,
+// which periodically calls the update function to refresh the Signal's value and notifies subscribers of any changes.
+// The loop continues until the provided context is canceled, at which point it will clean up all subscriber channels.
 func (s *Signal[V]) Run(ctx context.Context) error {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()

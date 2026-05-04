@@ -8,7 +8,8 @@ import (
 	"github.com/webermarci/sup"
 )
 
-// Computed is a reactive value that updates itself based on its dependencies. It implements both Subscribable and Notifyable interfaces.
+// Computed is a reactive value that updates itself based on its dependencies.
+// It implements both Subscribable and Notifyable interfaces.
 type Computed[V any] struct {
 	*sup.BaseActor
 	broadcaster[V]
@@ -21,7 +22,9 @@ type Computed[V any] struct {
 	mu             sync.RWMutex
 }
 
-// NewComputed creates a new Computed with the given name, update function, and dependencies. The update function is called whenever any of the dependencies notify a change, and the result is broadcast to subscribers.
+// NewComputed creates a new Computed with the given name, update function, and dependencies.
+// The update function is called whenever any of the dependencies notify a change,
+// and the result is broadcast to subscribers.
 func NewComputed[V any](name string, update func() V, deps ...Watcher) *Computed[V] {
 	return &Computed[V]{
 		BaseActor:      sup.NewBaseActor(name),

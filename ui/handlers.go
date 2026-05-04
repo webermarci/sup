@@ -7,18 +7,12 @@ import (
 	"sort"
 )
 
-func cors() func(next http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
 func staticHandler(dashboard *Dashboard, templ *template.Template) func(w http.ResponseWriter, r *http.Request) {
+	type templateData struct {
+		Cards      []Card
+		LastValues map[string]string
+	}
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 
@@ -48,7 +42,7 @@ func staticHandler(dashboard *Dashboard, templ *template.Template) func(w http.R
 			}
 		}
 
-		data := TemplateData{
+		data := templateData{
 			Cards:      sortedCards,
 			LastValues: values,
 		}
