@@ -11,7 +11,7 @@ jobs:
 
     strategy:
       matrix:
-        module: [".", "modbus", "ws"]
+        module: [".", "modbus", "mqtt", "ws"]
 
     runs-on: ubuntu-latest
     steps:
