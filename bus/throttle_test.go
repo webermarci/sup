@@ -20,8 +20,7 @@ func TestThrottle_InitialValue(t *testing.T) {
 }
 
 func TestThrottle_FiresImmediately(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error {
 		return nil
@@ -54,8 +53,7 @@ func TestThrottle_FiresImmediately(t *testing.T) {
 }
 
 func TestThrottle_TrailingEdge(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error {
 		return nil
