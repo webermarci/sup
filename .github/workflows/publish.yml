@@ -7,6 +7,7 @@ jobs:
   publish:
     permissions:
       contents: read
+
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -15,7 +16,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.26"
+          go-version: "stable"
           cache: true
 
       - name: Notify Go Proxy
