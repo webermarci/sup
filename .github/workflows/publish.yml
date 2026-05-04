@@ -1,29 +1,37 @@
 name: Publish
 on:
   push:
-    tags: ["v*"]
+    tags: ["v*", "**/v*"]
 
 jobs:
   publish:
-    permissions:
-      contents: read
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Setup Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v5
         with:
-          go-version: 1.26
-
-      - name: Test
-        run: go test -v -race ./...
+          go-version: "1.26"
+          cache: true
 
       - name: Notify Go Proxy
-        env:
-          GOPROXY: proxy.golang.org
         run: |
           TAG=${GITHUB_REF#refs/tags/}
-          MODULE=$(go list -m)
-          go list -m ${MODULE}@${TAG}
+
+          if [[ $TAG == *"/"* ]]; then
+            DIR="${TAG%/*}"
+            MODULE=$(cd $DIR && go list -m)
+          else
+            DIR="."
+            MODULE=$(go list -m)
+          fi
+
+          echo "Publishing $MODULE at $TAG from directory $DIR"
+
+          cd $DIR
+          go test -v -race ./...
+
+          VERSION=${TAG##*/}
+          GOPROXY=https://proxy.golang.org go list -m ${MODULE}@${VERSION}

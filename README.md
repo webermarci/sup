@@ -260,8 +260,10 @@ func main() {
 - [`sup/bus`](./bus) — Higher-level abstractions for polling and controlling with automatic scheduling and change notifications
 - [`sup/exec`](./exec) — Actor wrapper around `os/exec` for managing external processes as actors
 - [`sup/hub`](./hub) — Generic load balancer and distribution utility for grouping multiple function signatures and calling them with various strategies
+- [`sup/modbus`](./modbus) — Actor wrapper around Modbus connections (TCP/RTU/ASCII) for thread-safe hardware access with automatic reconnection
 - [`sup/sse`](./sse) — Actor wrapper around Server-Sent Events (SSE) for consuming real-time event streams with automatic reconnection and last-event-id tracking
 - [`sup/ui`](./ui) — Real-time dashboard for visualizing and inspecting actors in your supervisor tree
+- [`sup/ws`](./ws) — Actor wrapper around WebSocket connections for thread-safe communication with automatic reconnection
 
 ## Benchmark
 
