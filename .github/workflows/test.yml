@@ -6,6 +6,8 @@ on:
 
 jobs:
   test:
+    permissions:
+      contents: read
     strategy:
       matrix:
         module: [".", "modbus", "ws"]
