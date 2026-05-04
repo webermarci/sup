@@ -170,7 +170,7 @@ func NewActor(name string, protocol ModbusProtocol, address string, slaveId byte
 	a := &Actor{
 		BaseActor: sup.NewBaseActor(name),
 		config: &actorConfig{
-			mailboxSize:      10,
+			mailboxSize:      32,
 			protocol:         protocol,
 			address:          address,
 			slaveID:          slaveId,
