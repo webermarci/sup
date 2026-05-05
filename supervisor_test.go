@@ -75,7 +75,7 @@ func TestSupervisor_MaxRestartsEscalation(t *testing.T) {
 		t.Fatalf("expected 4 runs, got %d", runs.Load())
 	}
 
-	if err == nil || !strings.Contains(err.Error(), "exceeded max restarts") {
+	if err == nil || !strings.Contains(err.Error(), "exceeded") {
 		t.Fatalf("expected escalation error, got: %v", err)
 	}
 }

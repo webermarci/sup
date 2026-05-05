@@ -6,17 +6,18 @@
 
 **sup** is a high-performance, low-allocation Actor Model library for Go.
 
-It provides a robust foundation for building highly concurrent, distributed, and fault-tolerant stateful applications. It achieves zero-allocation for asynchronous messages (`Cast`) and minimizes overhead for synchronous requests (`Call`) by utilizing internal resource pooling. It embraces standard Go idioms (`select`, channels, and `context`) rather than hiding them behind heavy frameworks.
+It provides a robust foundation for building highly concurrent, distributed, and fault-tolerant stateful applications. It achieves very low allocations for asynchronous messages (`Cast`) and minimizes overhead for synchronous requests (`Call`) by utilizing typed inboxes and internal pooling. It embraces standard Go idioms (`select`, channels, and `context`) rather than hiding them behind heavy frameworks.
 
 ## Features
 
-- **Idiomatic Go** — Actors are just goroutines running a `select` loop. No magic interfaces, no reflection, no global registries.
-- **OTP-style supervision** — Erlang-inspired supervisor trees with `Permanent`, `Transient`, and `Temporary` restart policies.
+- **Idiomatic Go** — Actors are just goroutines running a `Run` loop. No magic interfaces, no reflection, no global registries.
+- **OTP-style supervision** — Supervisor trees with `Permanent`, `Transient`, and `Temporary` restart policies.
 - **Panic recovery** — Panics are caught, wrapped with a stack trace, and reported via `WithOnError`. The actor is then restarted according to the policy.
-- **Restart limits** — Optionally cap restarts within a sliding time window with `WithRestartLimit`.
-- **No goroutine leaks** — `context.Context` integration ensures all actors shut down cleanly when the parent context is canceled.
-- **Supervisor observers** — Lightweight lifecycle hooks so you can collect metrics, log events, or build diagnostics without changing supervision semantics.
-- **Supervisor trees** — Supervisors implement the `Actor` interface, so they can be nested inside other supervisors.
+- **Restart limits** — Cap restarts within a sliding time window with `WithRestartLimit`.
+- **Context-driven lifecycle** — `context.Context` ensures actors shut down cleanly when the parent context is canceled.
+- **Typed inboxes** — `CastInbox[T]` and `CallInbox[T, R]` provide type-safe, efficient messaging.
+- **Supervisor observers** — Lightweight lifecycle hooks for metrics, logging, or diagnostics via `SupervisorObserver`.
+- **Supervisor trees** — Supervisors implement the `Actor` interface, so they compose naturally.
 
 ## Installation
 
@@ -26,12 +27,16 @@ go get github.com/webermarci/sup
 
 ## Quick Start
 
+This example demonstrates a simple `Counter` actor using a `CastInbox` for fire-and-forget increments and a `CallInbox` for request/reply reads.
+
 ```go
 package main
 
 import (
 	"context"
 	"fmt"
+	"log/slog"
+	"os"
 	"time"
 
 	"github.com/webermarci/sup"
@@ -41,42 +46,49 @@ import (
 type incrementMsg struct{ amount int }
 type getCountMsg struct{}
 
-// 2. Define your Actor
+// 2. Define the actor with typed inboxes
 type Counter struct {
 	*sup.BaseActor
-	mailbox *sup.Mailbox
+	Casts *sup.CastInbox[incrementMsg]
+	Calls *sup.CallInbox[getCountMsg, int]
 	count int
 }
 
 func NewCounter() *Counter {
 	return &Counter{
 		BaseActor: sup.NewBaseActor("counter"),
-		mailbox: sup.NewMailbox(10),
+		Casts:     sup.NewCastInbox[incrementMsg](16),
+		Calls:     sup.NewCallInbox[getCountMsg, int](8),
 	}
 }
 
-// 3. Clean public API — callers never interact with the mailbox directly
+// 3. Public API — callers never access the inbox directly
 func (c *Counter) Increment(amount int) {
-	_ = sup.Cast(c.mailbox, incrementMsg{amount: amount})
+	_ = c.Casts.Cast(context.Background(), incrementMsg{amount: amount})
 }
 
 func (c *Counter) Get() (int, error) {
-	return sup.Call[getCountMsg, int](c.mailbox, getCountMsg{})
+	return c.Calls.Call(context.Background(), getCountMsg{})
 }
 
-// 4. The Run loop is a standard Go select statement
+// 4. Actor run loop
 func (c *Counter) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case msg := <-c.mailbox.Receive():
-			switch m := msg.(type) {
-			case sup.CastRequest[incrementMsg]:
-				c.count += m.Payload().amount
-			case sup.CallRequest[getCountMsg, int]:
-				m.Reply(c.count, nil)
+			
+		case inc, ok := <-c.Casts.Receive():
+			if !ok {
+				return nil
 			}
+			c.count += inc.amount
+			
+		case req, ok := <-c.Calls.Receive():
+			if !ok {
+				return nil
+			}
+			req.Reply(c.count, nil)
 		}
 	}
 }
@@ -87,6 +99,9 @@ func main() {
 
 	counter := NewCounter()
 
+	// Optional: create a logger for the supervisor (propagated to child actors)
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
 	supervisor := sup.NewSupervisor("root",
 		sup.WithActor(counter),
 		sup.WithPolicy(sup.Permanent),
@@ -95,6 +110,7 @@ func main() {
 		sup.WithOnError(func(actor sup.Actor, err error) {
 			fmt.Printf("Actor %s failed with error: %v\n", actor.Name(), err)
 		}),
+		sup.WithLogger(logger),
 	)
 
 	go supervisor.Run(ctx)
@@ -102,12 +118,12 @@ func main() {
 	counter.Increment(10)
 	counter.Increment(32)
 
-	count, err := counter.Get()
+	count, err := counter.Get(ctx)
 	if err != nil {
 		panic(err)
 	}
 
-	fmt.Printf("Final count: %d\n", count) // Final count: 42
+	fmt.Printf("Final count: %d\n", count)
 
 	cancel()
 	supervisor.Wait()
@@ -122,24 +138,38 @@ func main() {
 | `Transient` | Stops | Restarts |
 | `Temporary` | Stops | Stops |
 
-## Mailbox
+## Inboxes (CastInbox / CallInbox)
 
-A `Mailbox` is the actor's message queue. Messages are sent using `Cast` (fire-and-forget) or `Call` (request-reply), and received inside the actor's `Run` loop via `Receive()`.
+`CastInbox[T]` and `CallInbox[T, R]` are the type-safe building blocks for actor communication:
 
-### Sending variants
+- `NewCastInbox[T](size int)` — create a cast inbox for messages of type `T`.
+- `NewCallInbox[T, R](size int)` — create a call inbox that sends `T` and expects `R`.
 
-| Function | Behaviour on full mailbox | Behaviour on closed mailbox |
+`CastInbox[T]` API:
+
+- `Cast(ctx context.Context, message T) error` — enqueue a message (blocks until space or context expires).
+- `TryCast(ctx context.Context, message T) error` — non-blocking attempt; returns `ErrCastInboxFull` if full (or `ctx.Err()` if ctx is done).
+- `Receive() <-chan T` — read-only channel for the actor's run loop.
+- `Close()`, `Len()`, `Cap()`.
+
+`CallInbox[T, R]` API:
+
+- `Call(ctx context.Context, message T) (R, error)` — send a request and wait for reply (or context cancellation).
+- `Receive() <-chan CallRequest[T, R]` — incoming requests inside the actor; use `req.Reply(value, err)` to respond.
+- `Close()`, `Len()`, `Cap()`.
+
+### Sending variants (summary)
+
+| Method | Behaviour on full inbox | Behaviour on closed inbox |
 |---|---|---|
-| `Cast` | Blocks until space is available | Returns `ErrMailboxClosed` |
-| `CastContext` | Blocks until space or context expires | Returns `ErrMailboxClosed` |
-| `TryCast` | Returns `ErrMailboxFull` immediately | Returns `ErrMailboxClosed` |
-| `Call` | Blocks until reply is received | Returns `ErrMailboxClosed` |
-| `CallContext` | Blocks until reply or context expires | Returns `ErrMailboxClosed` |
-| `TryCall` | Returns `ErrMailboxFull` immediately | Returns `ErrMailboxClosed` |
+| `(*CastInbox).Cast` | Blocks until space or `ctx` done | Returns `ErrCastInboxClosed` |
+| `(*CastInbox).TryCast` | Returns `ErrCastInboxFull` immediately (or `ctx.Err()` if ctx done) | Returns `ErrCastInboxClosed` |
+| `(*CallInbox).Call` | Blocks until reply or `ctx` done | Returns `ErrCallInboxClosed` |
+
 
 ## Supervisor Trees
 
-Supervisors implement the `Actor` interface, so they compose naturally into trees. When the root context is canceled, shutdown propagates recursively through the entire tree.
+Supervisors implement the `Actor` interface, so they can be nested inside one another. Child supervisors/actors inherit the supervisor's logger when spawned.
 
 ```go
 dbActor := NewDatabaseActor()
@@ -163,10 +193,10 @@ go root.Run(ctx)
 
 ## Stateless Actors
 
-For actors that don't need a mailbox or internal state, use `ActorFunc`:
+For actors that don't need a mailbox or internal state, use `ActorFunc`. Note the function receives both the `context.Context` and a `*slog.Logger` so you can log directly from the actor.
 
 ```go
-healthCheck := sup.ActorFunc("health", func(ctx context.Context) error {
+healthCheck := sup.ActorFunc("health", func(ctx context.Context, logger *slog.Logger) error {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 	for {
@@ -175,6 +205,7 @@ healthCheck := sup.ActorFunc("health", func(ctx context.Context) error {
 			return ctx.Err()
 		case <-ticker.C:
 			if err := ping(); err != nil {
+				logger.Error("health check failed", "err", err)
 				return err // supervisor will restart based on policy
 			}
 		}
@@ -207,64 +238,50 @@ supervisor.Wait()
 
 ## Observability
 
-`sup` exposes a minimal, flexible observer mechanism via `SupervisorObserver` and the `WithObserver` option. Observers are small collections of optional callbacks that receive lifecycle events from the supervisor:
+`sup` exposes a minimal observer mechanism via `SupervisorObserver` and the `WithObserver` option. Observers receive small, optional callbacks for lifecycle events. Callbacks are invoked asynchronously and panics are recovered — observers cannot block or crash the supervisor.
 
-- `OnActorRegistered(actor Actor)` — called when `Spawn` is invoked for an actor.
-- `OnActorStarted(actor Actor)` — called immediately before `actor.Run(ctx)` for each run.
-- `OnActorStopped(actor Actor, err error)` — called after `actor.Run` returns (error may be nil for clean exits).
-- `OnActorRestarting(actor Actor, restartCount int, lastErr error)` — called when the supervisor decides to restart an actor.
-- `OnSupervisorTerminal(err error)` — called when the supervisor escalates to a terminal error (e.g. restart limits exceeded).
-
-Design notes:
-- All callbacks are optional — provide only the ones you need.
-- Callbacks are invoked asynchronously (each runs in its own goroutine) and any panic inside an observer is recovered. Observers cannot block or crash the supervisor.
-- Observers receive the `Actor` value so they may type-assert to access actor-specific fields (for example, bus actors may expose a `Mailbox()` accessor to inspect queue size).
+- `OnActorRegistered(actor Actor)`
+- `OnActorStarted(actor Actor)`
+- `OnActorStopped(actor Actor, err error)`
+- `OnActorRestarting(actor Actor, restartCount int, lastErr error)`
+- `OnSupervisorTerminal(err error)`
 
 ```go
-package main
-
-import (
-    "fmt"
-
-    "github.com/webermarci/sup"
-)
-
-func main() {
-	observer := &sup.SupervisorObserver{
-		OnActorRegistered: func(a sup.Actor) {
-			fmt.Printf("registered: %s\n", a.Name())
-		},
-		OnActorStarted: func(a sup.Actor) {
-			fmt.Printf("started: %s\n", a.Name())
-		},
-		OnActorStopped: func(a sup.Actor, err error) {
-			fmt.Printf("stopped: %s err=%v\n", a.Name(), err)
-		},
-		OnActorRestarting: func(a sup.Actor, count int, lastErr error) {
-			fmt.Printf("restarting: %s count=%d lastErr=%v\n", a.Name(), count, lastErr)
-		},
-		OnSupervisorTerminal: func(err error) {
-			fmt.Printf("supervisor terminal: err=%v\n", err)
-		},
-	}
-
-	supervisor := sup.NewSupervisor("root",
-		sup.WithObserver(observer),
-	)
+observer := &sup.SupervisorObserver{
+	OnActorRegistered: func(a sup.Actor) {
+		fmt.Printf("registered: %s\n", a.Name())
+	},
+	OnActorStarted: func(a sup.Actor) {
+		fmt.Printf("started: %s\n", a.Name())
+	},
+	OnActorStopped: func(a sup.Actor, err error) {
+		fmt.Printf("stopped: %s err=%v\n", a.Name(), err)
+	},
+	OnActorRestarting: func(a sup.Actor, count int, lastErr error) {
+		fmt.Printf("restarting: %s count=%d lastErr=%v\n", a.Name(), count, lastErr)
+	},
+	OnSupervisorTerminal: func(err error) {
+		fmt.Printf("supervisor terminal: err=%v\n", err)
+	},
 }
+
+supervisor := sup.NewSupervisor("root",
+	sup.WithObserver(observer),
+)
 ```
 
 ## Packages
 
-- [`sup`](./) — Core supervisor and mailbox implementation
-- [`sup/bus`](./bus) — Higher-level abstractions for polling and controlling with automatic scheduling and change notifications
-- [`sup/exec`](./exec) — Actor wrapper around `os/exec` for managing external processes as actors
-- [`sup/hub`](./hub) — Generic load balancer and distribution utility for grouping multiple function signatures and calling them with various strategies
-- [`sup/mesh`](./mesh) — NATS-backed actors for pub/sub messaging with automatic connection management
-- [`sup/modbus`](./modbus) — Actor wrapper around Modbus connections (TCP/RTU/ASCII) for thread-safe hardware access with automatic reconnection
-- [`sup/sse`](./sse) — Actor wrapper around Server-Sent Events (SSE) for consuming real-time event streams with automatic reconnection and last-event-id tracking
-- [`sup/ui`](./ui) — Real-time dashboard for visualizing and inspecting actors in your supervisor tree
-- [`sup/ws`](./ws) — Actor wrapper around WebSocket connections for thread-safe communication with automatic reconnection
+- `sup` — Core supervisor and typed inbox implementations
+- `sup/bus` — Higher-level abstractions for polling and controlling with automatic scheduling and change notifications
+- `sup/exec` — Actor wrapper around `os/exec` for managing external processes as actors
+- `sup/hub` — Generic load balancer and distribution utility for grouping multiple function signatures and calling them with various strategies
+- `sup/mesh` — NATS-backed actors for pub/sub messaging with automatic connection management
+- `sup/modbus` — Actor wrapper around Modbus connections (TCP/RTU/ASCII) for thread-safe hardware access with automatic reconnection
+- `sup/mqtt` — Actor wrapper around MQTT clients (Paho) for publish/subscribe with automatic reconnects and subscription handling
+- `sup/sse` — Actor wrapper around Server-Sent Events (SSE) for consuming real-time event streams with automatic reconnection and last-event-id tracking
+- `sup/ui` — Real-time dashboard for visualizing and inspecting actors in your supervisor tree
+- `sup/ws` — Actor wrapper around WebSocket connections for thread-safe communication with automatic reconnection
 
 ## Benchmark
 
@@ -273,20 +290,17 @@ goos: darwin
 goarch: arm64
 pkg: github.com/webermarci/sup
 cpu: Apple M5
-Benchmark_Cast-10                       20725142    57.4 ns/op     0 B/op   0 allocs/op
-Benchmark_Cast_Concurrent-10            10265941   117.4 ns/op     0 B/op   0 allocs/op
-Benchmark_CastContext-10                21805774    55.2 ns/op     0 B/op   0 allocs/op
-Benchmark_CastContext_Concurrent-10     15253065    79.0 ns/op     0 B/op   0 allocs/op
-Benchmark_CastContext_Expired-10        23459665    51.0 ns/op     0 B/op   0 allocs/op
-Benchmark_TryCast-10                   198711219     6.0 ns/op     0 B/op   0 allocs/op
-Benchmark_TryCast_Concurrent-10         89085205    13.9 ns/op     0 B/op   0 allocs/op
-Benchmark_TryCast_Full-10              254923090     4.7 ns/op     0 B/op   0 allocs/op
-Benchmark_Call-10                        3095778   390.2 ns/op   152 B/op   3 allocs/op
-Benchmark_Call_Concurrent-10             2198695   506.8 ns/op   152 B/op   3 allocs/op
-Benchmark_CallContext-10                 2545513   451.1 ns/op   152 B/op   3 allocs/op
-Benchmark_CallContext_Concurrent-10      1301760   896.5 ns/op   152 B/op   3 allocs/op
-Benchmark_CallContext_Expired-10        14855138    78.4 ns/op   152 B/op   3 allocs/op
-Benchmark_TryCall-10                     3060210   392.7 ns/op   152 B/op   3 allocs/op
-Benchmark_TryCall_Concurrent-10          2227587   527.4 ns/op   152 B/op   3 allocs/op
-Benchmark_Supervisor_SpawnAndExit-10     4714188   236.9 ns/op    72 B/op   2 allocs/op
+BenchmarkCallInbox_SingleWorker-10        3318741    346.1 ns/op     0 B/op    0 allocs/op
+BenchmarkCallInbox_Contention-10          1000000    682.5 ns/op     0 B/op    0 allocs/op
+BenchmarkCastInbox_SingleWorker-10       37592265     31.9 ns/op     0 B/op    0 allocs/op
+BenchmarkCastInbox_Parallel-10           24781441     48.6 ns/op     0 B/op    0 allocs/op
+BenchmarkCastInbox_TryCast-10           134381470      8.9 ns/op     0 B/op    0 allocs/op
+BenchmarkOutbox_Emit/1-10               187332144      6.4 ns/op     0 B/op    0 allocs/op
+BenchmarkOutbox_Emit/10-10               41823868     28.3 ns/op     0 B/op    0 allocs/op
+BenchmarkOutbox_Emit/100-10               4646634    256.1 ns/op     0 B/op    0 allocs/op
+BenchmarkOutbox_Subscribe-10            100000000     24.0 ns/op    49 B/op    0 allocs/op
+BenchmarkOutbox_EmitFireAndForget-10    337680223      3.6 ns/op     0 B/op    0 allocs/op
+BenchmarkSupervisor_SpawnAndExit-10       1810195    661.4 ns/op   474 B/op   12 allocs/op
+BenchmarkSupervisor_RestartCycle-10       1218945    980.3 ns/op   224 B/op    6 allocs/op
+BenchmarkSupervisor_ParallelSpawn-10      1644014    757.4 ns/op   616 B/op   11 allocs/op
 ```

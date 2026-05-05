@@ -226,21 +226,15 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 	s.notifyActorRegistered(actor)
 
 	s.wg.Go(func() {
-		var (
-			restarts []time.Time
-			maxCap   = s.maxRestarts + 1
-		)
-
-		if maxCap > 1 {
-			restarts = make([]time.Time, 0, maxCap)
+		var restarts []time.Time
+		if s.maxRestarts > 0 {
+			restarts = make([]time.Time, s.maxRestarts)
 		}
-
+		rIdx := 0
 		restartCount := 0
 
 		for {
-			s.Logger().Info("starting child actor",
-				slog.String("child", actor.Name()),
-			)
+			name := actor.Name()
 
 			s.notifyActorStarted(actor)
 			err := s.executeSafe(ctx, actor.Run)
@@ -261,9 +255,6 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 			}
 
 			if ctx.Err() != nil {
-				s.Logger().Info("supervisor context canceled, stopping child",
-					slog.String("child", actor.Name()),
-				)
 				return
 			}
 
@@ -277,18 +268,10 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 
 			if s.maxRestarts > 0 && s.restartWindow > 0 {
 				now := time.Now()
+				oldest := restarts[rIdx]
 
-				n := 0
-				for _, t := range restarts {
-					if now.Sub(t) <= s.restartWindow {
-						restarts[n] = t
-						n++
-					}
-				}
-				restarts = append(restarts[:n], now)
-
-				if len(restarts) > s.maxRestarts {
-					escErr := fmt.Errorf("actor %s exceeded max restarts", actor.Name())
+				if !oldest.IsZero() && now.Sub(oldest) <= s.restartWindow {
+					escErr := fmt.Errorf("actor %s exceeded %d restarts in %v", name, s.maxRestarts, s.restartWindow)
 					s.Logger().Error("supervisor terminal error",
 						slog.String("error", escErr.Error()),
 						slog.String("child", actor.Name()),
@@ -303,6 +286,9 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 					}
 					return
 				}
+
+				restarts[rIdx] = now
+				rIdx = (rIdx + 1) % s.maxRestarts
 			}
 
 			restartCount++
@@ -313,23 +299,21 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 			s.notifyActorRestarting(actor, restartCount, err)
 
 			delay := s.restartDelay
-
-			jitterRange := int64(delay) / 10
-			if jitterRange > 0 {
-				jitter := time.Duration(rand.Int64N(jitterRange))
+			if delay > 0 {
+				jitter := time.Duration(rand.Int64N(int64(delay) / 10))
 				if rand.N(2) == 0 {
 					delay += jitter
 				} else {
 					delay -= jitter
 				}
-			}
 
-			timer := time.NewTimer(delay)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
+				t := time.NewTimer(delay)
+				select {
+				case <-ctx.Done():
+					t.Stop()
+					return
+				case <-t.C:
+				}
 			}
 		}
 	})
