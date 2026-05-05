@@ -236,6 +236,10 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 		for {
 			name := actor.Name()
 
+			s.Logger().Info("starting child actor",
+				slog.String("child", actor.Name()),
+			)
+
 			s.notifyActorStarted(actor)
 			err := s.executeSafe(ctx, actor.Run)
 			s.notifyActorStopped(actor, err)
@@ -255,6 +259,9 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 			}
 
 			if ctx.Err() != nil {
+				s.Logger().Info("supervisor context canceled, stopping child",
+					slog.String("child", actor.Name()),
+				)
 				return
 			}
 
