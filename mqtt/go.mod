@@ -4,7 +4,7 @@ go 1.26.2
 
 require (
 	github.com/eclipse/paho.mqtt.golang v1.5.1
-	github.com/webermarci/sup v0.0.36
+	github.com/webermarci/sup v0.0.39
 )
 
 require (
