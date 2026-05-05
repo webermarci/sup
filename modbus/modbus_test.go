@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/goburrow/modbus"
-	"github.com/webermarci/sup"
 )
 
 type mockClient struct {
@@ -54,16 +53,20 @@ func TestModbusActor_ReadCoils_Success(t *testing.T) {
 			select {
 			case <-ctx.Done():
 				return
-			case msg, ok := <-actor.mailbox.Receive():
+			case message, ok := <-actor.inbox.Receive():
 				if !ok {
 					return
 				}
-				if m, ok := msg.(sup.CallRequest[readCoils, []byte]); ok {
-					p := m.Payload()
+
+				switch p := message.Payload().(type) {
+				case readCoils:
 					res, err := actor.execute(modbus.FuncCodeReadCoils, p.address, p.quantity, func() ([]byte, error) {
 						return actor.client.ReadCoils(p.address, p.quantity)
 					})
-					handleFatalErr(m, res, err)
+					handleFatalErr(message, res, err)
+				default:
+					t.Errorf("Received unexpected message type: %T", message.Payload())
+					continue
 				}
 			}
 		}
@@ -110,8 +113,8 @@ func TestModbusActor_ErrorHandling(t *testing.T) {
 }
 
 func TestWithMailboxSize(t *testing.T) {
-	actor := NewActor(t.Name(), TCP, "127.0.0.1:502", 1, WithMailboxSize(50))
-	if actor.config.mailboxSize != 50 {
-		t.Errorf("Expected mailbox size 50, got %d", actor.config.mailboxSize)
+	actor := NewActor(t.Name(), TCP, "127.0.0.1:502", 1, WithInboxSize(50))
+	if actor.config.inboxSize != 50 {
+		t.Errorf("Expected mailbox size 50, got %d", actor.config.inboxSize)
 	}
 }

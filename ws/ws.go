@@ -26,10 +26,10 @@ type Message struct {
 // ActorOption defines a function type for configuring the Actor.
 type ActorOption func(*Actor)
 
-// WithMailboxSize sets the size of the actor's outbound mailbox. Default is 10.
-func WithMailboxSize(size int) ActorOption {
+// WithInboxSize sets the size of the actor's outbound inbox. Default is 64.
+func WithInboxSize(size int) ActorOption {
 	return func(a *Actor) {
-		a.config.mailboxSize = size
+		a.config.inboxSize = size
 	}
 }
 
@@ -71,7 +71,7 @@ func WithOnError(handler func(err error)) ActorOption {
 
 type actorConfig struct {
 	httpClient   *http.Client
-	mailboxSize  int
+	inboxSize    int
 	pingInterval time.Duration
 	onConnect    func(url string)
 	onMessage    func(msg Message, duration time.Duration)
@@ -88,7 +88,7 @@ type sendMsg struct {
 // under a sup.Supervisor, which handles reconnection on failure.
 type Actor struct {
 	*sup.BaseActor
-	mailbox *sup.Mailbox
+	inbox   *sup.CastInbox[sendMsg]
 	url     string
 	handler func(Message)
 	config  *actorConfig
@@ -102,7 +102,7 @@ func NewActor(name string, url string, handler func(Message), opts ...ActorOptio
 		url:       url,
 		handler:   handler,
 		config: &actorConfig{
-			mailboxSize:  10,
+			inboxSize:    64,
 			pingInterval: 15 * time.Second,
 		},
 	}
@@ -111,7 +111,7 @@ func NewActor(name string, url string, handler func(Message), opts ...ActorOptio
 		opt(a)
 	}
 
-	a.mailbox = sup.NewMailbox(a.config.mailboxSize)
+	a.inbox = sup.NewCastInbox[sendMsg](a.config.inboxSize)
 
 	return a
 }
@@ -119,7 +119,10 @@ func NewActor(name string, url string, handler func(Message), opts ...ActorOptio
 // Send enqueues an outbound message to be written by the actor's run loop.
 // It is safe to call from any goroutine.
 func (a *Actor) Send(msgType MessageType, data []byte) error {
-	return sup.Cast(a.mailbox, sendMsg{msgType: msgType, data: data})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	return a.inbox.Cast(ctx, sendMsg{msgType: msgType, data: data})
 }
 
 // Run establishes the WebSocket connection and drives concurrent concerns:
@@ -199,21 +202,17 @@ func (a *Actor) Run(ctx context.Context) error {
 			a.handler(res.msg)
 			msgStart = time.Now()
 
-		case envelope, ok := <-a.mailbox.Receive():
+		case message, ok := <-a.inbox.Receive():
 			if !ok {
-				conn.Close(websocket.StatusNormalClosure, "mailbox closed")
+				conn.Close(websocket.StatusNormalClosure, "inbox closed")
 				return nil
 			}
 
-			switch m := envelope.(type) {
-			case sup.CastRequest[sendMsg]:
-				p := m.Payload()
-				if err := conn.Write(connCtx, websocket.MessageType(p.msgType), p.data); err != nil {
-					if a.config.onError != nil {
-						a.config.onError(err)
-					}
-					return err
+			if err := conn.Write(connCtx, websocket.MessageType(message.msgType), message.data); err != nil {
+				if a.config.onError != nil {
+					a.config.onError(err)
 				}
+				return err
 			}
 		}
 	}

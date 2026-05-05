@@ -71,10 +71,10 @@ type readFIFOQueue struct {
 // ActorOption defines a function type for configuring the Actor. It allows for flexible configuration of the actor's behavior and settings when creating a new instance.
 type ActorOption func(*Actor)
 
-// WithMailboxSize sets the size of the actor's mailbox. A larger mailbox allows for more concurrent requests to be queued, but may increase memory usage. The default mailbox size is 10.
-func WithMailboxSize(size int) ActorOption {
+// WithInboxSize sets the size of the actor's inbox. A larger inbox allows for more concurrent requests to be queued, but may increase memory usage. The default mailbox size is 64.
+func WithInboxSize(size int) ActorOption {
 	return func(a *Actor) {
-		a.config.mailboxSize = size
+		a.config.inboxSize = size
 	}
 }
 
@@ -135,11 +135,11 @@ const (
 )
 
 type actorConfig struct {
-	mailboxSize int
-	protocol    ModbusProtocol
-	address     string
-	slaveID     byte
-	timeout     time.Duration
+	inboxSize int
+	protocol  ModbusProtocol
+	address   string
+	slaveID   byte
+	timeout   time.Duration
 	// Serial specific
 	baudRate int
 	dataBits int
@@ -159,7 +159,7 @@ type actorConfig struct {
 // It processes Modbus requests sequentially and can be configured with various options such as mailbox size, timeouts, serial settings, and an optional observer for monitoring requests and responses.
 type Actor struct {
 	*sup.BaseActor
-	mailbox *sup.Mailbox
+	inbox   *sup.CallInbox[any, []byte]
 	config  *actorConfig
 	handler modbus.ClientHandler
 	client  modbus.Client
@@ -170,7 +170,7 @@ func NewActor(name string, protocol ModbusProtocol, address string, slaveId byte
 	a := &Actor{
 		BaseActor: sup.NewBaseActor(name),
 		config: &actorConfig{
-			mailboxSize:      32,
+			inboxSize:        64,
 			protocol:         protocol,
 			address:          address,
 			slaveID:          slaveId,
@@ -189,7 +189,7 @@ func NewActor(name string, protocol ModbusProtocol, address string, slaveId byte
 		opt(a)
 	}
 
-	a.mailbox = sup.NewMailbox(a.config.mailboxSize)
+	a.inbox = sup.NewCallInbox[any, []byte](a.config.inboxSize)
 
 	return a
 }
@@ -259,16 +259,15 @@ func (a *Actor) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return nil
-		case msg, ok := <-a.mailbox.Receive():
+		case message, ok := <-a.inbox.Receive():
 			if !ok {
 				return nil
 			}
 
 			var fatalErr error
 
-			switch m := msg.(type) {
-			case sup.CallRequest[readCoils, []byte]:
-				p := m.Payload()
+			switch p := message.Payload().(type) {
+			case readCoils:
 				res, err := a.execute(
 					modbus.FuncCodeReadCoils,
 					p.address,
@@ -277,10 +276,9 @@ func (a *Actor) Run(ctx context.Context) error {
 						return a.client.ReadCoils(p.address, p.quantity)
 					},
 				)
-				fatalErr = handleFatalErr(m, res, err)
+				fatalErr = handleFatalErr(message, res, err)
 
-			case sup.CallRequest[readDiscreteInputs, []byte]:
-				p := m.Payload()
+			case readDiscreteInputs:
 				res, err := a.execute(
 					modbus.FuncCodeReadDiscreteInputs,
 					p.address,
@@ -289,10 +287,9 @@ func (a *Actor) Run(ctx context.Context) error {
 						return a.client.ReadDiscreteInputs(p.address, p.quantity)
 					},
 				)
-				fatalErr = handleFatalErr(m, res, err)
+				fatalErr = handleFatalErr(message, res, err)
 
-			case sup.CallRequest[writeSingleCoil, []byte]:
-				p := m.Payload()
+			case writeSingleCoil:
 				res, err := a.execute(
 					modbus.FuncCodeWriteSingleCoil,
 					p.address,
@@ -301,10 +298,9 @@ func (a *Actor) Run(ctx context.Context) error {
 						return a.client.WriteSingleCoil(p.address, p.value)
 					},
 				)
-				fatalErr = handleFatalErr(m, res, err)
+				fatalErr = handleFatalErr(message, res, err)
 
-			case sup.CallRequest[writeMultipleCoils, []byte]:
-				p := m.Payload()
+			case writeMultipleCoils:
 				res, err := a.execute(
 					modbus.FuncCodeWriteMultipleCoils,
 					p.address,
@@ -313,10 +309,9 @@ func (a *Actor) Run(ctx context.Context) error {
 						return a.client.WriteMultipleCoils(p.address, p.quantity, p.value)
 					},
 				)
-				fatalErr = handleFatalErr(m, res, err)
+				fatalErr = handleFatalErr(message, res, err)
 
-			case sup.CallRequest[readInputRegisters, []byte]:
-				p := m.Payload()
+			case readInputRegisters:
 				res, err := a.execute(
 					modbus.FuncCodeReadInputRegisters,
 					p.address,
@@ -325,10 +320,9 @@ func (a *Actor) Run(ctx context.Context) error {
 						return a.client.ReadInputRegisters(p.address, p.quantity)
 					},
 				)
-				fatalErr = handleFatalErr(m, res, err)
+				fatalErr = handleFatalErr(message, res, err)
 
-			case sup.CallRequest[readHoldingRegisters, []byte]:
-				p := m.Payload()
+			case readHoldingRegisters:
 				res, err := a.execute(
 					modbus.FuncCodeReadHoldingRegisters,
 					p.address,
@@ -337,10 +331,9 @@ func (a *Actor) Run(ctx context.Context) error {
 						return a.client.ReadHoldingRegisters(p.address, p.quantity)
 					},
 				)
-				fatalErr = handleFatalErr(m, res, err)
+				fatalErr = handleFatalErr(message, res, err)
 
-			case sup.CallRequest[writeSingleRegister, []byte]:
-				p := m.Payload()
+			case writeSingleRegister:
 				res, err := a.execute(
 					modbus.FuncCodeWriteSingleRegister,
 					p.address,
@@ -349,10 +342,9 @@ func (a *Actor) Run(ctx context.Context) error {
 						return a.client.WriteSingleRegister(p.address, p.value)
 					},
 				)
-				fatalErr = handleFatalErr(m, res, err)
+				fatalErr = handleFatalErr(message, res, err)
 
-			case sup.CallRequest[writeMultipleRegisters, []byte]:
-				p := m.Payload()
+			case writeMultipleRegisters:
 				res, err := a.execute(
 					modbus.FuncCodeWriteMultipleRegisters,
 					p.address,
@@ -361,10 +353,9 @@ func (a *Actor) Run(ctx context.Context) error {
 						return a.client.WriteMultipleRegisters(p.address, p.quantity, p.value)
 					},
 				)
-				fatalErr = handleFatalErr(m, res, err)
+				fatalErr = handleFatalErr(message, res, err)
 
-			case sup.CallRequest[readWriteMultipleRegisters, []byte]:
-				p := m.Payload()
+			case readWriteMultipleRegisters:
 				res, err := a.execute(
 					modbus.FuncCodeReadWriteMultipleRegisters,
 					p.readAddress,
@@ -379,10 +370,9 @@ func (a *Actor) Run(ctx context.Context) error {
 						)
 					},
 				)
-				fatalErr = handleFatalErr(m, res, err)
+				fatalErr = handleFatalErr(message, res, err)
 
-			case sup.CallRequest[maskWriteRegister, []byte]:
-				p := m.Payload()
+			case maskWriteRegister:
 				res, err := a.execute(
 					modbus.FuncCodeMaskWriteRegister,
 					p.address,
@@ -391,10 +381,9 @@ func (a *Actor) Run(ctx context.Context) error {
 						return a.client.MaskWriteRegister(p.address, p.andMask, p.orMask)
 					},
 				)
-				fatalErr = handleFatalErr(m, res, err)
+				fatalErr = handleFatalErr(message, res, err)
 
-			case sup.CallRequest[readFIFOQueue, []byte]:
-				p := m.Payload()
+			case readFIFOQueue:
 				res, err := a.execute(
 					modbus.FuncCodeReadFIFOQueue,
 					p.address,
@@ -403,7 +392,7 @@ func (a *Actor) Run(ctx context.Context) error {
 						return a.client.ReadFIFOQueue(p.address)
 					},
 				)
-				fatalErr = handleFatalErr(m, res, err)
+				fatalErr = handleFatalErr(message, res, err)
 			}
 
 			if fatalErr != nil {
@@ -443,118 +432,86 @@ func (a *Actor) execute(
 }
 
 func (a *Actor) ReadCoils(address, quantity uint16) ([]byte, error) {
-	return sup.Call[readCoils, []byte](
-		a.mailbox,
-		readCoils{
-			address:  address,
-			quantity: quantity,
-		},
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), a.config.timeout)
+	defer cancel()
+
+	return a.inbox.Call(ctx, readCoils{address: address, quantity: quantity})
 }
 
 func (a *Actor) ReadDiscreteInputs(address, quantity uint16) ([]byte, error) {
-	return sup.Call[readDiscreteInputs, []byte](
-		a.mailbox,
-		readDiscreteInputs{
-			address:  address,
-			quantity: quantity,
-		},
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), a.config.timeout)
+	defer cancel()
+
+	return a.inbox.Call(ctx, readDiscreteInputs{address: address, quantity: quantity})
 }
 
 func (a *Actor) WriteSingleCoil(address, value uint16) ([]byte, error) {
-	return sup.Call[writeSingleCoil, []byte](
-		a.mailbox,
-		writeSingleCoil{
-			address: address,
-			value:   value,
-		},
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), a.config.timeout)
+	defer cancel()
+
+	return a.inbox.Call(ctx, writeSingleCoil{address: address, value: value})
 }
 
 func (a *Actor) WriteMultipleCoils(address, quantity uint16, value []byte) ([]byte, error) {
-	return sup.Call[writeMultipleCoils, []byte](
-		a.mailbox,
-		writeMultipleCoils{
-			address:  address,
-			quantity: quantity,
-			value:    value,
-		},
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), a.config.timeout)
+	defer cancel()
+
+	return a.inbox.Call(ctx, writeMultipleCoils{address: address, quantity: quantity, value: value})
 }
 
 func (a *Actor) ReadHoldingRegisters(address, quantity uint16) ([]byte, error) {
-	return sup.Call[readHoldingRegisters, []byte](
-		a.mailbox,
-		readHoldingRegisters{
-			address:  address,
-			quantity: quantity,
-		},
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), a.config.timeout)
+	defer cancel()
+
+	return a.inbox.Call(ctx, readHoldingRegisters{address: address, quantity: quantity})
 }
 
 func (a *Actor) ReadInputRegisters(address, quantity uint16) ([]byte, error) {
-	return sup.Call[readInputRegisters, []byte](
-		a.mailbox,
-		readInputRegisters{
-			address:  address,
-			quantity: quantity,
-		},
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), a.config.timeout)
+	defer cancel()
+
+	return a.inbox.Call(ctx, readInputRegisters{address: address, quantity: quantity})
 }
 
 func (a *Actor) WriteSingleRegister(address, value uint16) ([]byte, error) {
-	return sup.Call[writeSingleRegister, []byte](
-		a.mailbox,
-		writeSingleRegister{
-			address: address,
-			value:   value,
-		},
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), a.config.timeout)
+	defer cancel()
+
+	return a.inbox.Call(ctx, writeSingleRegister{address: address, value: value})
 }
 
 func (a *Actor) WriteMultipleRegisters(address, quantity uint16, value []byte) ([]byte, error) {
-	return sup.Call[writeMultipleRegisters, []byte](
-		a.mailbox,
-		writeMultipleRegisters{
-			address:  address,
-			quantity: quantity,
-			value:    value,
-		},
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), a.config.timeout)
+	defer cancel()
+
+	return a.inbox.Call(ctx, writeMultipleRegisters{address: address, quantity: quantity, value: value})
 }
 
 func (a *Actor) ReadWriteMultipleRegisters(readAddress, readQuantity, writeAddress, writeQuantity uint16, value []byte) ([]byte, error) {
-	return sup.Call[readWriteMultipleRegisters, []byte](
-		a.mailbox,
-		readWriteMultipleRegisters{
-			readAddress:   readAddress,
-			readQuantity:  readQuantity,
-			writeAddress:  writeAddress,
-			writeQuantity: writeQuantity,
-			value:         value,
-		},
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), a.config.timeout)
+	defer cancel()
+
+	return a.inbox.Call(ctx, readWriteMultipleRegisters{
+		readAddress:   readAddress,
+		readQuantity:  readQuantity,
+		writeAddress:  writeAddress,
+		writeQuantity: writeQuantity,
+		value:         value,
+	})
 }
 
 func (a *Actor) MaskWriteRegister(address, andMask, orMask uint16) ([]byte, error) {
-	return sup.Call[maskWriteRegister, []byte](
-		a.mailbox,
-		maskWriteRegister{
-			address: address,
-			andMask: andMask,
-			orMask:  orMask,
-		},
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), a.config.timeout)
+	defer cancel()
+
+	return a.inbox.Call(ctx, maskWriteRegister{address: address, andMask: andMask, orMask: orMask})
 }
 
 func (a *Actor) ReadFIFOQueue(address uint16) ([]byte, error) {
-	return sup.Call[readFIFOQueue, []byte](
-		a.mailbox,
-		readFIFOQueue{
-			address: address,
-		},
-	)
+	ctx, cancel := context.WithTimeout(context.Background(), a.config.timeout)
+	defer cancel()
+
+	return a.inbox.Call(ctx, readFIFOQueue{address: address})
 }
 
 func isFatal(err error) bool {
