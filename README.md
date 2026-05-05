@@ -270,6 +270,50 @@ supervisor := sup.NewSupervisor("root",
 )
 ```
 
+## Router
+
+`Router[F any]` is a small, generic utility for distributing work across a fixed set of routees. It provides low-overhead selection strategies and several helpers for broadcasting or fan-out execution.
+
+Construction
+
+- `NewRouter[F any](strategy RouterStrategy, routees ...F) *Router[F]` — create a router with one of the built-in strategies.
+- Strategies: `RoundRobin`, `Random`.
+
+API
+
+- `(*Router[F]).Len() int` — number of routees.
+- `(*Router[F]).Next() F` — pick the next routee according to the router strategy.
+- `(*Router[F]).Sticky(key uint64) F` — pick a routee deterministically from a key (useful for consistent hashing-like behaviour).
+- `(*Router[F]).Broadcast(fn func(F))` — call `fn` synchronously for every routee.
+- `(*Router[F]).FanOut(fn func(F))` — call `fn` in a separate goroutine for each routee.
+- `(*Router[F]).FanOutWait(fn func(F))` — fan out and wait for all invocations to finish.
+- `(*Router[F]).Retry(limit int, run func(F) error) error` — try `run` on up to `limit` routees until one succeeds; returns the last error if all fail.
+
+### Example
+
+```go
+workers := []*Worker{w1, w2, w3}
+router := sup.NewRouter(sup.RoundRobin, workers...)
+
+// get the next worker (round-robin)
+w := router.Next().Process(task)
+
+// broadcast to all workers
+router.Broadcast(func(w *Worker) {
+	w.Process(task)
+})
+
+// fan-out and wait for all workers to finish
+router.FanOutWait(func(w *Worker) {
+	w.Process(task)
+})
+
+// retry with up to 3 different workers
+err := router.Retry(3, func(w *Worker) error {
+  return w.Process(task)
+})
+```
+
 ## Packages
 
 - `sup` — Core supervisor and typed inbox implementations
@@ -300,6 +344,9 @@ BenchmarkOutbox_Emit/10-10               41823868     28.3 ns/op     0 B/op    0
 BenchmarkOutbox_Emit/100-10               4646634    256.1 ns/op     0 B/op    0 allocs/op
 BenchmarkOutbox_Subscribe-10            100000000     24.0 ns/op    49 B/op    0 allocs/op
 BenchmarkOutbox_EmitFireAndForget-10    337680223      3.6 ns/op     0 B/op    0 allocs/op
+BenchmarkRouter_Next_RoundRobin-10      714396448      1.7 ns/op     0 B/op    0 allocs/op
+BenchmarkRouter_Next_Random-10          236811043      5.1 ns/op     0 B/op    0 allocs/op
+BenchmarkRouter_Next_Parallel-10         30816442     39.7 ns/op     0 B/op    0 allocs/op
 BenchmarkSupervisor_SpawnAndExit-10       1810195    661.4 ns/op   474 B/op   12 allocs/op
 BenchmarkSupervisor_RestartCycle-10       1218945    980.3 ns/op   224 B/op    6 allocs/op
 BenchmarkSupervisor_ParallelSpawn-10      1644014    757.4 ns/op   616 B/op   11 allocs/op

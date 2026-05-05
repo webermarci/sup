@@ -1,4 +1,4 @@
-package hub
+package sup
 
 import (
 	"errors"
@@ -7,18 +7,17 @@ import (
 	"testing"
 )
 
-func TestRoundRobin(t *testing.T) {
+func TestRouter_RoundRobin(t *testing.T) {
 	var calls [3]int
 
-	h := NewRoundRobin(
+	r := NewRouter(RoundRobin,
 		func() { calls[0]++ },
 		func() { calls[1]++ },
 		func() { calls[2]++ },
 	)
 
-	// Execute 4 times: should go 0, 1, 2, 0
 	for range 4 {
-		h.Next()()
+		r.Next()()
 	}
 
 	if calls[0] != 2 || calls[1] != 1 || calls[2] != 1 {
@@ -26,33 +25,34 @@ func TestRoundRobin(t *testing.T) {
 	}
 }
 
-func TestRandom(t *testing.T) {
-	h := NewRandom(func() {}, func() {})
+func TestRouter_Random(t *testing.T) {
+	r := NewRouter(Random, func() {}, func() {})
 
 	for range 100 {
-		fn := h.Next()
+		fn := r.Next()
 		if fn == nil {
 			t.Fatal("Next() returned nil")
 		}
 	}
 }
 
-func TestSticky(t *testing.T) {
-	h := NewRoundRobin(1, 2, 3)
+func TestRouter_Sticky(t *testing.T) {
+	r := NewRouter(RoundRobin, 1, 2, 3)
 
-	if val := h.Sticky(0); val != 1 {
+	if val := r.Sticky(0); val != 1 {
 		t.Errorf("expected 1, got %d", val)
 	}
-	if val := h.Sticky(5); val != 3 { // 5 % 3 = 2 -> routees[2] = 3
+
+	if val := r.Sticky(5); val != 3 {
 		t.Errorf("expected 3, got %d", val)
 	}
 }
 
-func TestBroadcast(t *testing.T) {
+func TestRouter_Broadcast(t *testing.T) {
 	var sum int64
-	h := NewRoundRobin(10, 20, 30)
+	r := NewRouter(RoundRobin, 10, 20, 30)
 
-	h.Broadcast(func(val int) {
+	r.Broadcast(func(val int) {
 		atomic.AddInt64(&sum, int64(val))
 	})
 
@@ -61,11 +61,11 @@ func TestBroadcast(t *testing.T) {
 	}
 }
 
-func TestFanOutWait(t *testing.T) {
+func TestRouter_FanOutWait(t *testing.T) {
 	var sum int64
-	h := NewRoundRobin(1, 1, 1, 1, 1)
+	r := NewRouter(RoundRobin, 1, 1, 1, 1, 1)
 
-	h.FanOutWait(func(val int) {
+	r.FanOutWait(func(val int) {
 		atomic.AddInt64(&sum, int64(val))
 	})
 
@@ -74,11 +74,11 @@ func TestFanOutWait(t *testing.T) {
 	}
 }
 
-func TestRetry(t *testing.T) {
+func TestRouter_Retry(t *testing.T) {
 	errFail := errors.New("fail")
 	var attempts int
 
-	h := NewRoundRobin(func() error {
+	r := NewRouter(RoundRobin, func() error {
 		attempts++
 		if attempts < 3 {
 			return errFail
@@ -86,20 +86,21 @@ func TestRetry(t *testing.T) {
 		return nil
 	})
 
-	err := h.Retry(2, func(f func() error) error { return f() })
+	err := r.Retry(2, func(f func() error) error { return f() })
 	if !errors.Is(err, errFail) {
 		t.Errorf("expected errFail, got %v", err)
 	}
 
 	attempts = 0
-	err = h.Retry(3, func(f func() error) error { return f() })
+
+	err = r.Retry(3, func(f func() error) error { return f() })
 	if err != nil {
 		t.Errorf("expected nil, got %v", err)
 	}
 }
 
-func TestConcurrency(t *testing.T) {
-	h := NewRoundRobin(1, 2)
+func TestRouter_Concurrency(t *testing.T) {
+	r := NewRouter(RoundRobin, 1, 2)
 	const goroutines = 100
 	const increments = 1000
 	var wg sync.WaitGroup
@@ -109,18 +110,18 @@ func TestConcurrency(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			for range increments {
-				h.Next()
+				r.Next()
 			}
 		}()
 	}
 	wg.Wait()
 }
 
-func TestEmptyPanic(t *testing.T) {
+func TestRouter_EmptyPanic(t *testing.T) {
 	defer func() {
 		if r := recover(); r == nil {
 			t.Errorf("expected panic for empty routees")
 		}
 	}()
-	NewRoundRobin[func()]()
+	NewRouter[func()](RoundRobin)
 }
