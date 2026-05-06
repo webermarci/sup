@@ -167,6 +167,50 @@ func main() {
 | `(*CallInbox).Call` | Blocks until reply or `ctx` done | Returns `ErrCallInboxClosed` |
 
 
+## Signals
+
+Signals are actor-backed, reactive values in the main package. They provide a simple API to read the current value, subscribe to updates, and watch for change notifications. Signals implement the `ReadableSignal` / `WritableSignal` interfaces and are also `sup.Actor` instances — run them under a supervisor or as a goroutine.
+
+Common methods:
+
+- `Read() V` — immediate snapshot of the current value
+- `Subscribe(ctx) <-chan V` — receive value updates
+- `Watch(ctx) <-chan struct{}` — receive change notifications (no value)
+- `Write(ctx, v) error` — update writable signals (e.g. `PushedSignal`)
+
+Built-in signal types:
+
+- `PolledSignal` — `NewPolledSignal(name, update func(context.Context) (V, error), interval)`
+  - Periodically calls `update` and broadcasts changes to subscribers.
+
+- `ComputedSignal` — `NewComputedSignal(name, update func() V, deps ...WatcherSignal)`
+  - Recomputes when dependencies notify; supports coalescing via `SetCoalesceWindow`.
+
+- `DebouncedSignal` — `NewDebouncedSignal(name, src ReadableSignal[V], wait time.Duration)`
+  - Debounces bursts of updates from a source; optionally configure `SetMaxWait`.
+
+- `ThrottledSignal` — `NewThrottledSignal(name, src ReadableSignal[V], interval time.Duration)`
+  - Emits at most once per interval (trailing-edge), always sending the most recent value.
+
+- `PushedSignal` — `NewPushedSignal(name, update func(context.Context, V) error)`
+  - External writers call `Write(ctx, v)`; `update` can validate or persist before broadcasting.
+
+Signals are small actors and should be supervised. Example:
+
+```go
+// update once per second and broadcast the value to subscribers
+timeSig := sup.NewPolledSignal("time", func(ctx context.Context) (time.Time, error) {
+  return time.Now(), nil
+}, time.Second)
+
+root := sup.NewSupervisor("signals",
+  sup.WithActor(timeSig),
+  sup.WithPolicy(sup.Permanent),
+)
+
+go root.Run(ctx)
+```
+
 ## Supervisor Trees
 
 Supervisors implement the `Actor` interface, so they can be nested inside one another. Child supervisors/actors inherit the supervisor's logger when spawned.
