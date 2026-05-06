@@ -9,7 +9,7 @@ import (
 
 func staticHandler(dashboard *Dashboard, templ *template.Template) func(w http.ResponseWriter, r *http.Request) {
 	type templateData struct {
-		Cards      []Card
+		Rows       []Row
 		LastValues map[string]string
 	}
 
@@ -18,32 +18,32 @@ func staticHandler(dashboard *Dashboard, templ *template.Template) func(w http.R
 
 		dashboard.mu.RLock()
 
-		sortedCards := make([]Card, len(dashboard.schema))
-		copy(sortedCards, dashboard.schema)
+		sortedRows := make([]Row, len(dashboard.schema))
+		copy(sortedRows, dashboard.schema)
 
-		sort.Slice(sortedCards, func(i, j int) bool {
-			return sortedCards[i].Name < sortedCards[j].Name
+		sort.Slice(sortedRows, func(i, j int) bool {
+			return sortedRows[i].Name < sortedRows[j].Name
 		})
 
 		values := make(map[string]string)
-		for _, card := range sortedCards {
-			if val, exists := dashboard.lastValues[card.Name]; exists {
+		for _, row := range sortedRows {
+			if val, exists := dashboard.lastValues[row.Name]; exists {
 				switch v := val.(type) {
 				case string:
-					values[card.Name] = v
+					values[row.Name] = v
 				case []byte:
-					values[card.Name] = string(v)
+					values[row.Name] = string(v)
 				default:
 					b, _ := json.Marshal(v)
-					values[card.Name] = string(b)
+					values[row.Name] = string(b)
 				}
 			} else {
-				values[card.Name] = ""
+				values[row.Name] = ""
 			}
 		}
 
 		data := templateData{
-			Cards:      sortedCards,
+			Rows:       sortedRows,
 			LastValues: values,
 		}
 		dashboard.mu.RUnlock()

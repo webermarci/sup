@@ -2,8 +2,8 @@ package ui
 
 import "reflect"
 
-// Card represents a single card in the dashboard, with a name and a type.
-type Card struct {
+// Row represents a single row in the dashboard schema, containing the name and type of a provider or state.
+type Row struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
 }

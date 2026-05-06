@@ -11,7 +11,7 @@ import (
 
 func TestDashboard_StaticHandler(t *testing.T) {
 	dashboard := &Dashboard{
-		schema: []Card{
+		schema: []Row{
 			{Name: "sensor-1", Type: "boolean"},
 			{Name: "sensor-2", Type: "number"},
 		},

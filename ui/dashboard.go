@@ -27,7 +27,7 @@ func WithObserve[V any](signal sup.ReadableSignal[V]) DashboardOption {
 	return func(d *Dashboard) {
 		name := signal.Name()
 
-		d.schema = append(d.schema, Card{
+		d.schema = append(d.schema, Row{
 			Name: name,
 			Type: inferType[V](),
 		})
@@ -60,7 +60,7 @@ func WithObserve[V any](signal sup.ReadableSignal[V]) DashboardOption {
 // Dashboard is an actor that serves a web-based dashboard for monitoring various providers and states.
 type Dashboard struct {
 	*sup.BaseActor
-	schema     []Card
+	schema     []Row
 	clients    map[chan []byte]struct{}
 	streams    []func(context.Context) error
 	lastValues map[string]any
