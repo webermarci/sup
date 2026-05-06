@@ -9,7 +9,8 @@ import (
 func TestDebouncedSignal_InitialValue(t *testing.T) {
 	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
-	}).WithInitialValue(42)
+	})
+	pushed.SetInitialValue(42)
 
 	debounced := NewDebouncedSignal("debounced", pushed, 100*time.Millisecond)
 
@@ -24,11 +25,14 @@ func TestDebouncedSignal_Behavior(t *testing.T) {
 
 	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
-	}).WithInitialValue(0)
+	})
+
 	go pushed.Run(ctx)
 
 	// Set wait to 100ms. Disable initial notify so we only test reactive updates.
-	debounced := NewDebouncedSignal("debounced", pushed, 100*time.Millisecond).WithInitialNotify(false)
+	debounced := NewDebouncedSignal("debounced", pushed, 100*time.Millisecond)
+	debounced.SetInitialNotify(false)
+
 	go debounced.Run(ctx)
 
 	time.Sleep(20 * time.Millisecond) // Wait for subscriptions to establish
@@ -65,13 +69,14 @@ func TestDebouncedSignal_MaxWait(t *testing.T) {
 
 	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
-	}).WithInitialValue(0)
+	})
 	go pushed.Run(ctx)
 
 	// Set wait to 200ms, but force a publish if 300ms passes
-	debounced := NewDebouncedSignal("debounced", pushed, 200*time.Millisecond).
-		WithMaxWait(300 * time.Millisecond).
-		WithInitialNotify(false)
+	debounced := NewDebouncedSignal("debounced", pushed, 200*time.Millisecond)
+	debounced.SetMaxWait(300 * time.Millisecond)
+	debounced.SetInitialNotify(false)
+
 	go debounced.Run(ctx)
 
 	time.Sleep(20 * time.Millisecond) // Wait for subscriptions
@@ -111,7 +116,9 @@ func TestDebouncedSignal_MaxWait(t *testing.T) {
 func TestDebouncedSignal_CloseCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error { return nil })
+	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
+		return nil
+	})
 	go pushed.Run(ctx)
 
 	debounced := NewDebouncedSignal("debounced", pushed, 100*time.Millisecond)

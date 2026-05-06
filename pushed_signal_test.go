@@ -22,7 +22,8 @@ func TestPushedSignal_DefaultValue(t *testing.T) {
 func TestPushedSignal_InitialValue(t *testing.T) {
 	signal := NewPushedSignal(t.Name(), func(_ context.Context, v int) error {
 		return nil
-	}).WithInitialValue(42)
+	})
+	signal.SetInitialValue(42)
 
 	go signal.Run(t.Context())
 
@@ -54,7 +55,8 @@ func TestPushedSignal_SetValueRejected(t *testing.T) {
 
 	signal := NewPushedSignal(t.Name(), func(_ context.Context, v int) error {
 		return errors.New("rejected")
-	}).WithInitialValue(5)
+	})
+	signal.SetInitialValue(5)
 
 	go signal.Run(ctx)
 
@@ -160,9 +162,9 @@ func TestPushedSignal_InitialNotifyEnabled(t *testing.T) {
 
 	signal := NewPushedSignal(t.Name(), func(_ context.Context, v int) error {
 		return nil
-	}).
-		WithInitialValue(99).
-		WithInitialNotify(true)
+	})
+	signal.SetInitialValue(99)
+	signal.SetInitialNotify(true)
 
 	go signal.Run(ctx)
 
@@ -183,7 +185,8 @@ func TestPushedSignal_InitialNotifyDisabled(t *testing.T) {
 
 	signal := NewPushedSignal(t.Name(), func(_ context.Context, v int) error {
 		return nil
-	}).WithInitialValue(99)
+	})
+	signal.SetInitialValue(99)
 
 	go signal.Run(ctx)
 

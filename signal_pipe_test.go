@@ -58,10 +58,14 @@ func TestSignalPipe_ForwardsValues(t *testing.T) {
 func TestSignalPipe_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 
-	src := NewPushedSignal("src", func(ctx context.Context, v int) error { return nil })
+	src := NewPushedSignal("src", func(ctx context.Context, v int) error {
+		return nil
+	})
 	go src.Run(ctx)
 
-	dest := NewPushedSignal("dest", func(ctx context.Context, v int) error { return nil })
+	dest := NewPushedSignal("dest", func(ctx context.Context, v int) error {
+		return nil
+	})
 	go src.Run(ctx)
 
 	pipe := NewSignalPipe("pipe", src, dest)

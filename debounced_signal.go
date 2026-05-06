@@ -2,78 +2,38 @@ package sup
 
 import (
 	"context"
-	"sync"
 	"time"
 )
 
 // DebouncedSignal is a reactive value that delays broadcasting updates from its source
 // until the source has stopped changing for a specified wait duration.
 type DebouncedSignal[V any] struct {
-	*BaseActor
-	broadcaster   broadcaster[V]
-	src           ReadableSignal[V]
-	value         V
-	wait          time.Duration
-	maxWait       time.Duration
-	initialNotify bool
-	mu            sync.RWMutex
+	*BaseSignal[V]
+	src     ReadableSignal[V]
+	wait    time.Duration
+	maxWait time.Duration
 }
 
 // NewDebouncedSignal creates a new DebouncedSignal actor attached to a source provider.
 func NewDebouncedSignal[V any](name string, src ReadableSignal[V], wait time.Duration) *DebouncedSignal[V] {
-	return &DebouncedSignal[V]{
-		BaseActor:   NewBaseActor(name),
-		broadcaster: broadcaster[V]{buffer: 16},
-		src:         src,
-		wait:        wait,
-		value:       src.Read(),
+	s := &DebouncedSignal[V]{
+		BaseSignal: NewBaseSignal[V](name),
+		src:        src,
+		wait:       wait,
 	}
-}
+	s.value = src.Read()
 
-// WithMaxWait configures a maximum time to wait before forcing an update,
-// preventing infinite starvation if the source is constantly changing.
-func (s *DebouncedSignal[V]) WithMaxWait(maxWait time.Duration) *DebouncedSignal[V] {
-	s.maxWait = maxWait
 	return s
 }
 
-// WithSubscriberBuffer configures the buffer size for subscriber channels.
-func (s *DebouncedSignal[V]) WithSubscriberBuffer(buffer int) *DebouncedSignal[V] {
-	s.broadcaster.buffer = buffer
-	return s
-}
-
-// WithInitialNotify configures whether new subscribers receive the current value immediately.
-func (s *DebouncedSignal[V]) WithInitialNotify(enabled bool) *DebouncedSignal[V] {
-	s.initialNotify = enabled
-	return s
-}
-
-// Read returns the currently settled value safely.
-func (s *DebouncedSignal[V]) Read() V {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	return s.value
-}
-
-// Subscribe returns a channel that receives the debounced updates.
-func (s *DebouncedSignal[V]) Subscribe(ctx context.Context) <-chan V {
-	s.mu.RLock()
-	current := s.value
-	s.mu.RUnlock()
-	return s.broadcaster.subscribeValues(ctx, current, s.initialNotify)
-}
-
-// Watch returns a channel that receives notifications when the value settles.
-func (s *DebouncedSignal[V]) Watch(ctx context.Context) <-chan struct{} {
-	return s.broadcaster.subscribeNotifications(ctx, s.initialNotify)
-}
-
-func (s *DebouncedSignal[V]) publish(v V) {
+// SetWait configures the duration to wait after receiving an update from
+// the source before broadcasting the new value.
+// This allows for coalescing multiple rapid updates into a single update,
+// improving efficiency. It acquires a lock to ensure thread-safe access to the wait configuration.
+func (s *DebouncedSignal[V]) SetMaxWait(maxWait time.Duration) {
 	s.mu.Lock()
-	s.value = v
+	s.maxWait = maxWait
 	s.mu.Unlock()
-	s.broadcaster.notify(v)
 }
 
 // Run is the main actor loop. It subscribes to the source and manages the sliding window.
@@ -117,7 +77,7 @@ func (s *DebouncedSignal[V]) Run(ctx context.Context) error {
 			}
 
 			if s.maxWait > 0 && now.Sub(burstStart) >= s.maxWait {
-				s.publish(pending)
+				s.set(pending)
 				havePending = false
 
 				timerChan = nil
@@ -134,7 +94,7 @@ func (s *DebouncedSignal[V]) Run(ctx context.Context) error {
 
 		case <-timerChan:
 			if havePending {
-				s.publish(pending)
+				s.set(pending)
 				havePending = false
 			}
 			timerChan = nil

@@ -3,7 +3,6 @@ package sup
 import (
 	"context"
 	"errors"
-	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -11,7 +10,7 @@ import (
 func TestPolledSignal_DefaultValue(t *testing.T) {
 	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 42, nil
-	})
+	}, time.Second)
 
 	go signal.Run(t.Context())
 
@@ -23,7 +22,8 @@ func TestPolledSignal_DefaultValue(t *testing.T) {
 func TestPolledSignal_InitialValue(t *testing.T) {
 	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 99, nil
-	}).WithInitialValue(7)
+	}, time.Second)
+	signal.SetInitialValue(7)
 
 	go signal.Run(t.Context())
 
@@ -35,7 +35,7 @@ func TestPolledSignal_InitialValue(t *testing.T) {
 func TestPolledSignal_Value(t *testing.T) {
 	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 42, nil
-	}).WithInterval(10 * time.Millisecond)
+	}, 10*time.Millisecond)
 
 	go signal.Run(t.Context())
 
@@ -49,9 +49,8 @@ func TestPolledSignal_Value(t *testing.T) {
 func TestPolledSignal_ErrorSkipsUpdate(t *testing.T) {
 	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, errors.New("oops")
-	}).
-		WithInitialValue(5).
-		WithInterval(10 * time.Millisecond)
+	}, 10*time.Millisecond)
+	signal.SetInitialValue(5)
 
 	go signal.Run(t.Context())
 
@@ -67,7 +66,7 @@ func TestPolledSignal_Subscribe(t *testing.T) {
 
 	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 42, nil
-	}).WithInterval(10 * time.Millisecond)
+	}, 10*time.Millisecond)
 
 	go signal.Run(ctx)
 
@@ -88,7 +87,7 @@ func TestPolledSignal_MultipleSubscribers(t *testing.T) {
 
 	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 55, nil
-	}).WithInterval(10 * time.Millisecond)
+	}, 10*time.Millisecond)
 
 	go signal.Run(ctx)
 
@@ -112,7 +111,7 @@ func TestPolledSignal_UnsubscribeOnContextCancel(t *testing.T) {
 
 	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 1, nil
-	}).WithInterval(10 * time.Millisecond)
+	}, 10*time.Millisecond)
 
 	go signal.Run(ctx)
 
@@ -138,10 +137,9 @@ func TestPolledSignal_InitialNotifyEnabled(t *testing.T) {
 
 	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, nil
-	}).
-		WithInitialValue(42).
-		WithInitialNotify(true).
-		WithInterval(time.Hour)
+	}, time.Hour)
+	signal.SetInitialValue(42)
+	signal.SetInitialNotify(true)
 
 	go signal.Run(ctx)
 
@@ -164,9 +162,8 @@ func TestPolledSignal_InitialNotifyDisabled(t *testing.T) {
 	// because we set the interval to 1 Hour and return an error on the initial poll.
 	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, context.Canceled // Return an error so it skips the initial poll broadcast
-	}).
-		WithInitialValue(42).
-		WithInterval(time.Hour)
+	}, time.Hour)
+	signal.SetInitialValue(42)
 
 	// Since InitialNotify is false (by default), subscribing should NOT
 	// send the cached initial value of 42.
@@ -187,60 +184,9 @@ func TestPolledSignal_InitialNotifyDisabled(t *testing.T) {
 func TestPolledSignal_ActorInterface(t *testing.T) {
 	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, errors.New("fail")
-	})
+	}, time.Second)
 
 	if _, ok := any(signal).(Actor); !ok {
 		t.Fatal("signal does not implement sup.Actor interface")
-	}
-}
-
-func TestPolledSignal_WithEqual(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	var pollCount int32
-	var currentVal int32 = 42
-
-	signal := NewPolledSignal("test-signal", func(ctx context.Context) (int, error) {
-		atomic.AddInt32(&pollCount, 1)
-		return int(atomic.LoadInt32(&currentVal)), nil
-	}).
-		WithInterval(10 * time.Millisecond).
-		WithEqual(func(a, b int) bool { return a == b }).
-		WithInitialNotify(false)
-
-	go signal.Run(ctx)
-	time.Sleep(20 * time.Millisecond) // Let it start
-
-	ch := signal.Subscribe(ctx)
-
-	// --- Scenario 1: Same value ---
-	// Wait for several poll cycles (at least 50ms)
-	time.Sleep(50 * time.Millisecond)
-
-	// Ensure the poller is actually running
-	if atomic.LoadInt32(&pollCount) < 3 {
-		t.Fatal("Poller isn't running fast enough for the test")
-	}
-
-	// Verify nothing was broadcast because the value stayed 42
-	select {
-	case v := <-ch:
-		t.Fatalf("Expected no broadcast for identical values, but got %d", v)
-	default:
-		// Success!
-	}
-
-	// --- Scenario 2: Value changes ---
-	atomic.StoreInt32(&currentVal, 99)
-
-	// It should now detect the difference and broadcast
-	select {
-	case v := <-ch:
-		if v != 99 {
-			t.Errorf("Expected updated value 99, got %d", v)
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Timed out waiting for new value after mutation")
 	}
 }

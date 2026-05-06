@@ -13,7 +13,11 @@ type broadcaster[V any] struct {
 }
 
 func (b *broadcaster[V]) subscribeValues(ctx context.Context, initial V, notify bool) <-chan V {
-	ch := make(chan V, b.buffer)
+	b.mu.RLock()
+	buf := b.buffer
+	b.mu.RUnlock()
+
+	ch := make(chan V, buf)
 
 	b.mu.Lock()
 	b.valueSubs = append(b.valueSubs, ch)

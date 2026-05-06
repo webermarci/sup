@@ -9,7 +9,8 @@ import (
 func TestThrottledSignal_InitialValue(t *testing.T) {
 	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
-	}).WithInitialValue(42)
+	})
+	pushed.SetInitialValue(42)
 
 	throttled := NewThrottledSignal("throttle", pushed, 100*time.Millisecond)
 
@@ -24,11 +25,12 @@ func TestThrottledSignal_FiresImmediately(t *testing.T) {
 
 	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
-	}).WithInitialValue(0)
+	})
 	go pushed.Run(ctx)
 
 	// Throttle to 1 second
-	throttled := NewThrottledSignal("throttle", pushed, time.Second).WithInitialNotify(false)
+	throttled := NewThrottledSignal("throttle", pushed, time.Second)
+
 	go throttled.Run(ctx)
 
 	time.Sleep(20 * time.Millisecond) // Wait for subscriptions
@@ -57,10 +59,10 @@ func TestThrottledSignal_TrailingEdge(t *testing.T) {
 
 	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
-	}).WithInitialValue(0)
+	})
 	go pushed.Run(ctx)
 
-	throttled := NewThrottledSignal("throttle", pushed, 200*time.Millisecond).WithInitialNotify(false)
+	throttled := NewThrottledSignal("throttle", pushed, 200*time.Millisecond)
 	go throttled.Run(ctx)
 
 	time.Sleep(20 * time.Millisecond) // Wait for subscriptions
@@ -105,7 +107,9 @@ func TestThrottledSignal_TrailingEdge(t *testing.T) {
 func TestThrottledSignal_CloseCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error { return nil })
+	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
+		return nil
+	})
 	go pushed.Run(ctx)
 
 	throttled := NewThrottledSignal("throttle", pushed, 100*time.Millisecond)

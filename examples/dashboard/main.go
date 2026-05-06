@@ -29,11 +29,11 @@ func main() {
 
 	randomString := sup.NewPolledSignal("random_string", func(context.Context) (string, error) {
 		return rand.Text(), nil
-	}).WithInterval(5 * time.Second)
+	}, 5*time.Second)
 
 	counter := sup.NewPushedSignal("counter", func(ctx context.Context, n int) error {
 		return nil
-	}).WithInitialValue(0)
+	})
 
 	isEven := sup.NewComputedSignal("is_even", func() bool {
 		return counter.Read()%2 == 0

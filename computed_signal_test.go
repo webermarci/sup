@@ -59,7 +59,8 @@ func TestComputedSignal_Subscribe(t *testing.T) {
 	val := int32(10)
 	computed := NewComputedSignal("computed", func() int32 {
 		return atomic.LoadInt32(&val)
-	}, pushed).WithInitialNotify(true)
+	}, pushed)
+	computed.SetInitialNotify(true)
 
 	go computed.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
@@ -102,7 +103,8 @@ func TestComputedSignal_Notify(t *testing.T) {
 
 	computed := NewComputedSignal("computed", func() int {
 		return 0
-	}, pushed).WithInitialNotify(true)
+	}, pushed)
+	computed.SetInitialNotify(true)
 
 	go computed.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
@@ -133,8 +135,12 @@ func TestComputedSignal_MultipleDependencies(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	t1 := NewPushedSignal("t1", func(ctx context.Context, v int) error { return nil })
-	t2 := NewPushedSignal("t2", func(ctx context.Context, v int) error { return nil })
+	t1 := NewPushedSignal("t1", func(ctx context.Context, v int) error {
+		return nil
+	})
+	t2 := NewPushedSignal("t2", func(ctx context.Context, v int) error {
+		return nil
+	})
 	go t1.Run(ctx)
 	go t2.Run(ctx)
 
@@ -178,7 +184,9 @@ func TestComputedSignal_GlitchFreeDiamond(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	root := NewPushedSignal("root", func(ctx context.Context, v int) error { return nil })
+	root := NewPushedSignal("root", func(ctx context.Context, v int) error {
+		return nil
+	})
 	go root.Run(ctx)
 
 	var valB, valC int32
@@ -202,8 +210,8 @@ func TestComputedSignal_GlitchFreeDiamond(t *testing.T) {
 		c := nodeC.Read()
 		return b + c
 	}, nodeB, nodeC)
+	nodeD.SetCoalesceWindow(20 * time.Millisecond)
 
-	nodeD.WithCoalesceWindow(20 * time.Millisecond)
 	go nodeD.Run(ctx)
 
 	time.Sleep(50 * time.Millisecond)
@@ -215,50 +223,5 @@ func TestComputedSignal_GlitchFreeDiamond(t *testing.T) {
 	count := atomic.LoadInt32(&evalCount)
 	if count != 1 {
 		t.Errorf("Glitch detected! Expected node D to evaluate exactly 1 time, but it evaluated %d times", count)
-	}
-}
-
-func TestComputedSignal_WithEqual(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-
-	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error { return nil })
-	go pushed.Run(ctx)
-
-	var currentVal int32 = 10
-
-	// Create a computed with a basic equality check
-	computed := NewComputedSignal("computed", func() int {
-		return int(atomic.LoadInt32(&currentVal))
-	}, pushed).
-		WithEqual(func(a, b int) bool { return a == b }).
-		WithInitialNotify(false)
-
-	go computed.Run(ctx)
-	time.Sleep(20 * time.Millisecond)
-
-	ch := computed.Subscribe(ctx)
-
-	pushed.Write(ctx, 1)
-
-	// It should evaluate, but it MUST NOT broadcast
-	select {
-	case <-ch:
-		t.Fatal("Expected no broadcast because the value evaluated to equal")
-	case <-time.After(100 * time.Millisecond):
-		// Success! The broadcast was suppressed.
-	}
-
-	atomic.StoreInt32(&currentVal, 20)
-	pushed.Write(ctx, 2)
-
-	// It MUST broadcast the new value
-	select {
-	case v := <-ch:
-		if v != 20 {
-			t.Errorf("Expected updated value 20, got %d", v)
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("Timed out waiting for updated value to broadcast")
 	}
 }
