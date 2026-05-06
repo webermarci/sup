@@ -20,12 +20,12 @@ var staticFS embed.FS
 // It allows adding providers to observe, which will be reflected in the real-time UI.
 type DashboardOption func(*Dashboard)
 
-// WithObserve adds a read-only card to the dashboard for the given provider.
-// The dashboard will subscribe to the provider for updates and reflect changes in the UI,
-// but will not allow user input to update the provider.
-func WithObserve[V any](provider sup.ReadableSignal[V]) DashboardOption {
+// WithObserve adds a read-only card to the dashboard for the given signal.
+// The dashboard will subscribe to the signal for updates and reflect changes in the UI,
+// but will not allow user input to update the signal.
+func WithObserve[V any](signal sup.ReadableSignal[V]) DashboardOption {
 	return func(d *Dashboard) {
-		name := provider.Name()
+		name := signal.Name()
 
 		d.schema = append(d.schema, Card{
 			Name: name,
@@ -33,7 +33,7 @@ func WithObserve[V any](provider sup.ReadableSignal[V]) DashboardOption {
 		})
 
 		d.streams = append(d.streams, func(ctx context.Context) error {
-			ch := provider.Subscribe(ctx)
+			ch := signal.Subscribe(ctx)
 			for {
 				select {
 				case <-ctx.Done():
