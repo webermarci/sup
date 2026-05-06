@@ -1,4 +1,4 @@
-package bus
+package sup
 
 import (
 	"context"
@@ -6,10 +6,10 @@ import (
 )
 
 type broadcaster[V any] struct {
-	mu               sync.RWMutex
+	buffer           int
 	valueSubs        []chan V
 	notificationSubs []chan struct{}
-	buffer           int
+	mu               sync.RWMutex
 }
 
 func (b *broadcaster[V]) subscribeValues(ctx context.Context, initial V, notify bool) <-chan V {

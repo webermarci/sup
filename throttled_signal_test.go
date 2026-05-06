@@ -1,4 +1,4 @@
-package bus
+package sup
 
 import (
 	"context"
@@ -6,36 +6,36 @@ import (
 	"time"
 )
 
-func TestThrottle_InitialValue(t *testing.T) {
-	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error {
+func TestThrottledSignal_InitialValue(t *testing.T) {
+	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
 	}).WithInitialValue(42)
 
-	throttle := NewThrottle("throttle", trigger, 100*time.Millisecond)
+	throttled := NewThrottledSignal("throttle", pushed, 100*time.Millisecond)
 
 	// Before any running or updates, it should immediately read the source's initial value
-	if got := throttle.Read(); got != 42 {
+	if got := throttled.Read(); got != 42 {
 		t.Errorf("Expected 42, got %d", got)
 	}
 }
 
-func TestThrottle_FiresImmediately(t *testing.T) {
+func TestThrottledSignal_FiresImmediately(t *testing.T) {
 	ctx := t.Context()
 
-	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error {
+	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
 	}).WithInitialValue(0)
-	go trigger.Run(ctx)
+	go pushed.Run(ctx)
 
 	// Throttle to 1 second
-	throttle := NewThrottle("throttle", trigger, time.Second).WithInitialNotify(false)
-	go throttle.Run(ctx)
+	throttled := NewThrottledSignal("throttle", pushed, time.Second).WithInitialNotify(false)
+	go throttled.Run(ctx)
 
 	time.Sleep(20 * time.Millisecond) // Wait for subscriptions
-	ch := throttle.Subscribe(ctx)
+	ch := throttled.Subscribe(ctx)
 
 	start := time.Now()
-	trigger.Write(ctx, 1)
+	pushed.Write(ctx, 1)
 
 	// Because the throttle window is completely open, the first value
 	// should arrive instantly, well before the 1s interval.
@@ -52,30 +52,30 @@ func TestThrottle_FiresImmediately(t *testing.T) {
 	}
 }
 
-func TestThrottle_TrailingEdge(t *testing.T) {
+func TestThrottledSignal_TrailingEdge(t *testing.T) {
 	ctx := t.Context()
 
-	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error {
+	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
 	}).WithInitialValue(0)
-	go trigger.Run(ctx)
+	go pushed.Run(ctx)
 
-	throttle := NewThrottle("throttle", trigger, 200*time.Millisecond).WithInitialNotify(false)
-	go throttle.Run(ctx)
+	throttled := NewThrottledSignal("throttle", pushed, 200*time.Millisecond).WithInitialNotify(false)
+	go throttled.Run(ctx)
 
 	time.Sleep(20 * time.Millisecond) // Wait for subscriptions
-	ch := throttle.Subscribe(ctx)
+	ch := throttled.Subscribe(ctx)
 
 	// Fire one to close the window
-	trigger.Write(ctx, 1)
+	pushed.Write(ctx, 1)
 	<-ch // drain the immediate first fire
 
 	// Fire three times rapidly while the window is closed
-	trigger.Write(ctx, 2)
+	pushed.Write(ctx, 2)
 	time.Sleep(10 * time.Millisecond)
-	trigger.Write(ctx, 3)
+	pushed.Write(ctx, 3)
 	time.Sleep(10 * time.Millisecond)
-	trigger.Write(ctx, 4)
+	pushed.Write(ctx, 4)
 
 	start := time.Now()
 
@@ -102,17 +102,17 @@ func TestThrottle_TrailingEdge(t *testing.T) {
 	}
 }
 
-func TestThrottle_CloseCleanup(t *testing.T) {
+func TestThrottledSignal_CloseCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error { return nil })
-	go trigger.Run(ctx)
+	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error { return nil })
+	go pushed.Run(ctx)
 
-	throttle := NewThrottle("throttle", trigger, 100*time.Millisecond)
-	go throttle.Run(ctx)
+	throttled := NewThrottledSignal("throttle", pushed, 100*time.Millisecond)
+	go throttled.Run(ctx)
 
 	time.Sleep(20 * time.Millisecond)
-	ch := throttle.Subscribe(ctx)
+	ch := throttled.Subscribe(ctx)
 
 	// Cancel the context to shut down the actor
 	cancel()

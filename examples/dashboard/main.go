@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/webermarci/sup"
-	"github.com/webermarci/sup/bus"
 	"github.com/webermarci/sup/ui"
 )
 
@@ -28,19 +27,19 @@ func main() {
 	)
 	defer cancel()
 
-	randomString := bus.NewSignal("random_string", func(context.Context) (string, error) {
+	randomString := sup.NewPolledSignal("random_string", func(context.Context) (string, error) {
 		return rand.Text(), nil
 	}).WithInterval(5 * time.Second)
 
-	counter := bus.NewTrigger("counter", func(ctx context.Context, n int) error {
+	counter := sup.NewPushedSignal("counter", func(ctx context.Context, n int) error {
 		return nil
 	}).WithInitialValue(0)
 
-	isEven := bus.NewComputed("is_even", func() bool {
+	isEven := sup.NewComputedSignal("is_even", func() bool {
 		return counter.Read()%2 == 0
 	}, counter)
 
-	jsonData := bus.NewComputed("json_data", func() Data {
+	jsonData := sup.NewComputedSignal("json_data", func() Data {
 		return Data{
 			Text:   randomString.Read(),
 			Number: counter.Read(),

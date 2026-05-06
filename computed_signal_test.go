@@ -1,4 +1,4 @@
-package bus
+package sup
 
 import (
 	"context"
@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-func TestComputed_InitialValue(t *testing.T) {
-	d := NewComputed("test", func() int {
+func TestComputedSignal_InitialValue(t *testing.T) {
+	d := NewComputedSignal("test", func() int {
 		return 42
 	})
 
@@ -17,19 +17,19 @@ func TestComputed_InitialValue(t *testing.T) {
 	}
 }
 
-func TestComputed_UpdateOnDependency(t *testing.T) {
+func TestComputedSignal_UpdateOnDependency(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error {
+	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
 	})
-	go trigger.Run(ctx)
+	go pushed.Run(ctx)
 
 	var count int32
-	computed := NewComputed("computed", func() int32 {
+	computed := NewComputedSignal("computed", func() int32 {
 		return atomic.AddInt32(&count, 1)
-	}, trigger)
+	}, pushed)
 
 	go computed.Run(ctx)
 
@@ -37,31 +37,29 @@ func TestComputed_UpdateOnDependency(t *testing.T) {
 	// In a real system, we'd wait for a ready signal, but here we just wait briefly.
 	time.Sleep(20 * time.Millisecond)
 
-	// Initial value should be 1 (from NewComputed)
 	if got := computed.Read(); got != 1 {
 		t.Errorf("Expected initial value 1, got %d", got)
 	}
 
-	// Trigger an update
-	trigger.Write(ctx, 100)
+	pushed.Write(ctx, 100)
 
 	// Wait for update
 	waitForValue(t, computed, 2)
 }
 
-func TestComputed_Subscribe(t *testing.T) {
+func TestComputedSignal_Subscribe(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error {
+	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
 	})
-	go trigger.Run(ctx)
+	go pushed.Run(ctx)
 
 	val := int32(10)
-	computed := NewComputed("computed", func() int32 {
+	computed := NewComputedSignal("computed", func() int32 {
 		return atomic.LoadInt32(&val)
-	}, trigger).WithInitialNotify(true)
+	}, pushed).WithInitialNotify(true)
 
 	go computed.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
@@ -80,7 +78,7 @@ func TestComputed_Subscribe(t *testing.T) {
 
 	// Update dependency
 	atomic.StoreInt32(&val, 20)
-	trigger.Write(ctx, 1)
+	pushed.Write(ctx, 1)
 
 	// Should receive update
 	select {
@@ -93,18 +91,18 @@ func TestComputed_Subscribe(t *testing.T) {
 	}
 }
 
-func TestComputed_Notify(t *testing.T) {
+func TestComputedSignal_Notify(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error {
+	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
 	})
-	go trigger.Run(ctx)
+	go pushed.Run(ctx)
 
-	computed := NewComputed("computed", func() int {
+	computed := NewComputedSignal("computed", func() int {
 		return 0
-	}, trigger).WithInitialNotify(true)
+	}, pushed).WithInitialNotify(true)
 
 	go computed.Run(ctx)
 	time.Sleep(20 * time.Millisecond)
@@ -120,7 +118,7 @@ func TestComputed_Notify(t *testing.T) {
 	}
 
 	// Update dependency
-	trigger.Write(ctx, 1)
+	pushed.Write(ctx, 1)
 
 	// Should receive notification
 	select {
@@ -131,17 +129,17 @@ func TestComputed_Notify(t *testing.T) {
 	}
 }
 
-func TestComputed_MultipleDependencies(t *testing.T) {
+func TestComputedSignal_MultipleDependencies(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	t1 := NewTrigger("t1", func(ctx context.Context, v int) error { return nil })
-	t2 := NewTrigger("t2", func(ctx context.Context, v int) error { return nil })
+	t1 := NewPushedSignal("t1", func(ctx context.Context, v int) error { return nil })
+	t2 := NewPushedSignal("t2", func(ctx context.Context, v int) error { return nil })
 	go t1.Run(ctx)
 	go t2.Run(ctx)
 
 	var count int32
-	computed := NewComputed("computed", func() int32 {
+	computed := NewComputedSignal("computed", func() int32 {
 		return atomic.AddInt32(&count, 1)
 	}, t1, t2)
 
@@ -153,11 +151,9 @@ func TestComputed_MultipleDependencies(t *testing.T) {
 		t.Errorf("Expected 1, got %d", got)
 	}
 
-	// Trigger t1
 	t1.Write(ctx, 1)
 	waitForValue(t, computed, 2)
 
-	// Trigger t2
 	t2.Write(ctx, 1)
 	waitForValue(t, computed, 3)
 }
@@ -178,20 +174,20 @@ func waitForValue[V comparable](t *testing.T, r Reader[V], want V) {
 	}
 }
 
-func TestComputed_GlitchFreeDiamond(t *testing.T) {
+func TestComputedSignal_GlitchFreeDiamond(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	root := NewTrigger("root", func(ctx context.Context, v int) error { return nil })
+	root := NewPushedSignal("root", func(ctx context.Context, v int) error { return nil })
 	go root.Run(ctx)
 
 	var valB, valC int32
-	nodeB := NewComputed("B", func() int32 {
+	nodeB := NewComputedSignal("B", func() int32 {
 		atomic.AddInt32(&valB, 1)
 		return atomic.LoadInt32(&valB)
 	}, root)
 
-	nodeC := NewComputed("C", func() int32 {
+	nodeC := NewComputedSignal("C", func() int32 {
 		atomic.AddInt32(&valC, 1)
 		return atomic.LoadInt32(&valC)
 	}, root)
@@ -200,7 +196,7 @@ func TestComputed_GlitchFreeDiamond(t *testing.T) {
 	go nodeC.Run(ctx)
 
 	var evalCount int32
-	nodeD := NewComputed("D", func() int32 {
+	nodeD := NewComputedSignal("D", func() int32 {
 		atomic.AddInt32(&evalCount, 1)
 		b := nodeB.Read()
 		c := nodeC.Read()
@@ -222,19 +218,19 @@ func TestComputed_GlitchFreeDiamond(t *testing.T) {
 	}
 }
 
-func TestComputed_WithEqual(t *testing.T) {
+func TestComputedSignal_WithEqual(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error { return nil })
-	go trigger.Run(ctx)
+	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error { return nil })
+	go pushed.Run(ctx)
 
 	var currentVal int32 = 10
 
 	// Create a computed with a basic equality check
-	computed := NewComputed("computed", func() int {
+	computed := NewComputedSignal("computed", func() int {
 		return int(atomic.LoadInt32(&currentVal))
-	}, trigger).
+	}, pushed).
 		WithEqual(func(a, b int) bool { return a == b }).
 		WithInitialNotify(false)
 
@@ -243,9 +239,7 @@ func TestComputed_WithEqual(t *testing.T) {
 
 	ch := computed.Subscribe(ctx)
 
-	// --- Scenario 1: Value hasn't changed ---
-	// Trigger the dependency, but leave currentVal as 10
-	trigger.Write(ctx, 1)
+	pushed.Write(ctx, 1)
 
 	// It should evaluate, but it MUST NOT broadcast
 	select {
@@ -255,10 +249,8 @@ func TestComputed_WithEqual(t *testing.T) {
 		// Success! The broadcast was suppressed.
 	}
 
-	// --- Scenario 2: Value changes ---
-	// Update the underlying value to 20 and trigger the dependency
 	atomic.StoreInt32(&currentVal, 20)
-	trigger.Write(ctx, 2)
+	pushed.Write(ctx, 2)
 
 	// It MUST broadcast the new value
 	select {

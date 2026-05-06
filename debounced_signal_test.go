@@ -1,4 +1,4 @@
-package bus
+package sup
 
 import (
 	"context"
@@ -6,41 +6,40 @@ import (
 	"time"
 )
 
-func TestDebounce_InitialValue(t *testing.T) {
-	// Setup a trigger with an initial value
-	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error {
+func TestDebouncedSignal_InitialValue(t *testing.T) {
+	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
 	}).WithInitialValue(42)
 
-	debounce := NewDebounce("debounce", trigger, 100*time.Millisecond)
+	debounced := NewDebouncedSignal("debounced", pushed, 100*time.Millisecond)
 
 	// Before any running or updates, it should immediately read the source's initial value
-	if got := debounce.Read(); got != 42 {
+	if got := debounced.Read(); got != 42 {
 		t.Errorf("Expected 42, got %d", got)
 	}
 }
 
-func TestDebounce_Behavior(t *testing.T) {
+func TestDebouncedSignal_Behavior(t *testing.T) {
 	ctx := t.Context()
 
-	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error {
+	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
 	}).WithInitialValue(0)
-	go trigger.Run(ctx)
+	go pushed.Run(ctx)
 
 	// Set wait to 100ms. Disable initial notify so we only test reactive updates.
-	debounce := NewDebounce("debounce", trigger, 100*time.Millisecond).WithInitialNotify(false)
-	go debounce.Run(ctx)
+	debounced := NewDebouncedSignal("debounced", pushed, 100*time.Millisecond).WithInitialNotify(false)
+	go debounced.Run(ctx)
 
 	time.Sleep(20 * time.Millisecond) // Wait for subscriptions to establish
-	ch := debounce.Subscribe(ctx)
+	ch := debounced.Subscribe(ctx)
 
 	// Fire 3 rapid updates spaced by 30ms (which is less than the 100ms debounce wait)
-	trigger.Write(ctx, 1)
+	pushed.Write(ctx, 1)
 	time.Sleep(30 * time.Millisecond)
-	trigger.Write(ctx, 2)
+	pushed.Write(ctx, 2)
 	time.Sleep(30 * time.Millisecond)
-	trigger.Write(ctx, 3)
+	pushed.Write(ctx, 3)
 
 	// We should not have received anything yet, because the timer keeps resetting
 	select {
@@ -61,29 +60,29 @@ func TestDebounce_Behavior(t *testing.T) {
 	}
 }
 
-func TestDebounce_MaxWait(t *testing.T) {
+func TestDebouncedSignal_MaxWait(t *testing.T) {
 	ctx := t.Context()
 
-	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error {
+	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error {
 		return nil
 	}).WithInitialValue(0)
-	go trigger.Run(ctx)
+	go pushed.Run(ctx)
 
 	// Set wait to 200ms, but force a publish if 300ms passes
-	debounce := NewDebounce("debounce", trigger, 200*time.Millisecond).
+	debounced := NewDebouncedSignal("debounced", pushed, 200*time.Millisecond).
 		WithMaxWait(300 * time.Millisecond).
 		WithInitialNotify(false)
-	go debounce.Run(ctx)
+	go debounced.Run(ctx)
 
 	time.Sleep(20 * time.Millisecond) // Wait for subscriptions
-	ch := debounce.Subscribe(ctx)
+	ch := debounced.Subscribe(ctx)
 
 	start := time.Now()
 
 	// Create an infinite stream of spam that never rests for 200ms
 	go func() {
 		for i := 1; i <= 10; i++ {
-			trigger.Write(ctx, i)
+			pushed.Write(ctx, i)
 			time.Sleep(50 * time.Millisecond)
 		}
 	}()
@@ -109,17 +108,17 @@ func TestDebounce_MaxWait(t *testing.T) {
 	}
 }
 
-func TestDebounce_CloseCleanup(t *testing.T) {
+func TestDebouncedSignal_CloseCleanup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	trigger := NewTrigger("trigger", func(ctx context.Context, v int) error { return nil })
-	go trigger.Run(ctx)
+	pushed := NewPushedSignal("pushed", func(ctx context.Context, v int) error { return nil })
+	go pushed.Run(ctx)
 
-	debounce := NewDebounce("debounce", trigger, 100*time.Millisecond)
-	go debounce.Run(ctx)
+	debounced := NewDebouncedSignal("debounced", pushed, 100*time.Millisecond)
+	go debounced.Run(ctx)
 
 	time.Sleep(20 * time.Millisecond)
-	ch := debounce.Subscribe(ctx)
+	ch := debounced.Subscribe(ctx)
 
 	// Cancel the context, which should shut down the Run loop and close all subscriber channels
 	cancel()

@@ -11,7 +11,6 @@ import (
 	"sync"
 
 	"github.com/webermarci/sup"
-	"github.com/webermarci/sup/bus"
 )
 
 //go:embed static/*
@@ -24,7 +23,7 @@ type DashboardOption func(*Dashboard)
 // WithObserve adds a read-only card to the dashboard for the given provider.
 // The dashboard will subscribe to the provider for updates and reflect changes in the UI,
 // but will not allow user input to update the provider.
-func WithObserve[V any](provider bus.Provider[V]) DashboardOption {
+func WithObserve[V any](provider sup.ReadableSignal[V]) DashboardOption {
 	return func(d *Dashboard) {
 		name := provider.Name()
 

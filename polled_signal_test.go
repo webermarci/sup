@@ -1,4 +1,4 @@
-package bus
+package sup
 
 import (
 	"context"
@@ -6,12 +6,10 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/webermarci/sup"
 )
 
-func TestSignal_DefaultValue(t *testing.T) {
-	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
+func TestPolledSignal_DefaultValue(t *testing.T) {
+	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 42, nil
 	})
 
@@ -22,8 +20,8 @@ func TestSignal_DefaultValue(t *testing.T) {
 	}
 }
 
-func TestSignal_InitialValue(t *testing.T) {
-	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
+func TestPolledSignal_InitialValue(t *testing.T) {
+	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 99, nil
 	}).WithInitialValue(7)
 
@@ -34,8 +32,8 @@ func TestSignal_InitialValue(t *testing.T) {
 	}
 }
 
-func TestSignal_Value(t *testing.T) {
-	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
+func TestPolledSignal_Value(t *testing.T) {
+	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 42, nil
 	}).WithInterval(10 * time.Millisecond)
 
@@ -48,8 +46,8 @@ func TestSignal_Value(t *testing.T) {
 	}
 }
 
-func TestSignal_ErrorSkipsUpdate(t *testing.T) {
-	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
+func TestPolledSignal_ErrorSkipsUpdate(t *testing.T) {
+	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, errors.New("oops")
 	}).
 		WithInitialValue(5).
@@ -64,10 +62,10 @@ func TestSignal_ErrorSkipsUpdate(t *testing.T) {
 	}
 }
 
-func TestSignal_Subscribe(t *testing.T) {
+func TestPolledSignal_Subscribe(t *testing.T) {
 	ctx := t.Context()
 
-	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 42, nil
 	}).WithInterval(10 * time.Millisecond)
 
@@ -85,10 +83,10 @@ func TestSignal_Subscribe(t *testing.T) {
 	}
 }
 
-func TestSignal_MultipleSubscribers(t *testing.T) {
+func TestPolledSignal_MultipleSubscribers(t *testing.T) {
 	ctx := t.Context()
 
-	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 55, nil
 	}).WithInterval(10 * time.Millisecond)
 
@@ -109,10 +107,10 @@ func TestSignal_MultipleSubscribers(t *testing.T) {
 	}
 }
 
-func TestSignal_UnsubscribeOnContextCancel(t *testing.T) {
+func TestPolledSignal_UnsubscribeOnContextCancel(t *testing.T) {
 	ctx := t.Context()
 
-	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 1, nil
 	}).WithInterval(10 * time.Millisecond)
 
@@ -135,10 +133,10 @@ func TestSignal_UnsubscribeOnContextCancel(t *testing.T) {
 	}
 }
 
-func TestSignal_InitialNotifyEnabled(t *testing.T) {
+func TestPolledSignal_InitialNotifyEnabled(t *testing.T) {
 	ctx := t.Context()
 
-	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, nil
 	}).
 		WithInitialValue(42).
@@ -159,12 +157,12 @@ func TestSignal_InitialNotifyEnabled(t *testing.T) {
 	}
 }
 
-func TestSignal_InitialNotifyDisabled(t *testing.T) {
+func TestPolledSignal_InitialNotifyDisabled(t *testing.T) {
 	ctx := t.Context()
 
 	// Create a signal that will NEVER naturally poll during the test
 	// because we set the interval to 1 Hour and return an error on the initial poll.
-	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, context.Canceled // Return an error so it skips the initial poll broadcast
 	}).
 		WithInitialValue(42).
@@ -186,24 +184,24 @@ func TestSignal_InitialNotifyDisabled(t *testing.T) {
 	}
 }
 
-func TestSignal_ActorInterface(t *testing.T) {
-	signal := NewSignal(t.Name(), func(_ context.Context) (int, error) {
+func TestPolledSignal_ActorInterface(t *testing.T) {
+	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, errors.New("fail")
 	})
 
-	if _, ok := any(signal).(sup.Actor); !ok {
+	if _, ok := any(signal).(Actor); !ok {
 		t.Fatal("signal does not implement sup.Actor interface")
 	}
 }
 
-func TestSignal_WithEqual(t *testing.T) {
+func TestPolledSignal_WithEqual(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	var pollCount int32
 	var currentVal int32 = 42
 
-	signal := NewSignal("test-signal", func(ctx context.Context) (int, error) {
+	signal := NewPolledSignal("test-signal", func(ctx context.Context) (int, error) {
 		atomic.AddInt32(&pollCount, 1)
 		return int(atomic.LoadInt32(&currentVal)), nil
 	}).

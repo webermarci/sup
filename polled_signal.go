@@ -1,16 +1,14 @@
-package bus
+package sup
 
 import (
 	"context"
 	"sync"
 	"time"
-
-	"github.com/webermarci/sup"
 )
 
-// Signal represents a value that is periodically updated by a function and can be subscribed to for updates.
-type Signal[V any] struct {
-	*sup.BaseActor
+// PolledSignal represents a value that is periodically updated by a function and can be subscribed to for updates.
+type PolledSignal[V any] struct {
+	*BaseActor
 	broadcaster   broadcaster[V]
 	value         V
 	update        func(context.Context) (V, error)
@@ -20,10 +18,10 @@ type Signal[V any] struct {
 	mu            sync.RWMutex
 }
 
-// NewSignal creates a new Signal with the given name and update function.
-func NewSignal[V any](name string, update func(context.Context) (V, error)) *Signal[V] {
-	return &Signal[V]{
-		BaseActor:   sup.NewBaseActor(name),
+// NewPolledSignal creates a new PolledSignal with the given name and update function.
+func NewPolledSignal[V any](name string, update func(context.Context) (V, error)) *PolledSignal[V] {
+	return &PolledSignal[V]{
+		BaseActor:   NewBaseActor(name),
 		broadcaster: broadcaster[V]{buffer: 16},
 		update:      update,
 		interval:    time.Second,
@@ -31,25 +29,25 @@ func NewSignal[V any](name string, update func(context.Context) (V, error)) *Sig
 }
 
 // WithInitialValue sets the initial value of the Signal before any updates occur.
-func (s *Signal[V]) WithInitialValue(initial V) *Signal[V] {
+func (s *PolledSignal[V]) WithInitialValue(initial V) *PolledSignal[V] {
 	s.value = initial
 	return s
 }
 
 // WithInterval sets the interval at which the Signal's update function is called to refresh its value.
-func (s *Signal[V]) WithInterval(interval time.Duration) *Signal[V] {
+func (s *PolledSignal[V]) WithInterval(interval time.Duration) *PolledSignal[V] {
 	s.interval = interval
 	return s
 }
 
 // WithSubscriberBuffer configures the buffer size for subscriber channels to prevent blocking on updates.
-func (s *Signal[V]) WithSubscriberBuffer(buffer int) *Signal[V] {
+func (s *PolledSignal[V]) WithSubscriberBuffer(buffer int) *PolledSignal[V] {
 	s.broadcaster.buffer = buffer
 	return s
 }
 
 // WithInitialNotify configures whether new subscribers should receive the current value immediately upon subscribing.
-func (s *Signal[V]) WithInitialNotify(enabled bool) *Signal[V] {
+func (s *PolledSignal[V]) WithInitialNotify(enabled bool) *PolledSignal[V] {
 	s.initialNotify = enabled
 	return s
 }
@@ -57,13 +55,13 @@ func (s *Signal[V]) WithInitialNotify(enabled bool) *Signal[V] {
 // WithEqual configures a custom equality function to determine if the Signal's value has changed.
 // If not set, the Signal will use the default equality check (==) to compare old and new values.
 // This can be useful for complex types where a simple equality check may not be sufficient.
-func (s *Signal[V]) WithEqual(eq func(a, b V) bool) *Signal[V] {
+func (s *PolledSignal[V]) WithEqual(eq func(a, b V) bool) *PolledSignal[V] {
 	s.equal = eq
 	return s
 }
 
 // Read returns the current value of the Signal. It acquires a read lock to ensure thread-safe access to the value.
-func (s *Signal[V]) Read() V {
+func (s *PolledSignal[V]) Read() V {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.value
@@ -72,7 +70,7 @@ func (s *Signal[V]) Read() V {
 // Subscribe allows clients to subscribe to updates of the Signal's value.
 // It returns a channel that will receive new values whenever they are updated.
 // The subscription will automatically clean up when the provided context is canceled.
-func (s *Signal[V]) Subscribe(ctx context.Context) <-chan V {
+func (s *PolledSignal[V]) Subscribe(ctx context.Context) <-chan V {
 	s.mu.RLock()
 	current := s.value
 	s.mu.RUnlock()
@@ -83,14 +81,14 @@ func (s *Signal[V]) Subscribe(ctx context.Context) <-chan V {
 // without receiving the actual value.
 // It returns a channel that will receive a notification (empty struct) whenever the value is updated.
 // The subscription will automatically clean up when the provided context is canceled.
-func (s *Signal[V]) Watch(ctx context.Context) <-chan struct{} {
+func (s *PolledSignal[V]) Watch(ctx context.Context) <-chan struct{} {
 	return s.broadcaster.subscribeNotifications(ctx, s.initialNotify)
 }
 
 // Run starts the Signal's update loop,
 // which periodically calls the update function to refresh the Signal's value and notifies subscribers of any changes.
 // The loop continues until the provided context is canceled, at which point it will clean up all subscriber channels.
-func (s *Signal[V]) Run(ctx context.Context) error {
+func (s *PolledSignal[V]) Run(ctx context.Context) error {
 	ticker := time.NewTicker(s.interval)
 	defer ticker.Stop()
 

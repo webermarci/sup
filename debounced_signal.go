@@ -1,19 +1,17 @@
-package bus
+package sup
 
 import (
 	"context"
 	"sync"
 	"time"
-
-	"github.com/webermarci/sup"
 )
 
-// Debounce is a reactive value that delays broadcasting updates from its source
+// DebouncedSignal is a reactive value that delays broadcasting updates from its source
 // until the source has stopped changing for a specified wait duration.
-type Debounce[V any] struct {
-	*sup.BaseActor
+type DebouncedSignal[V any] struct {
+	*BaseActor
 	broadcaster   broadcaster[V]
-	src           Provider[V]
+	src           ReadableSignal[V]
 	value         V
 	wait          time.Duration
 	maxWait       time.Duration
@@ -21,10 +19,10 @@ type Debounce[V any] struct {
 	mu            sync.RWMutex
 }
 
-// NewDebounce creates a new Debounce actor attached to a source provider.
-func NewDebounce[V any](name string, src Provider[V], wait time.Duration) *Debounce[V] {
-	return &Debounce[V]{
-		BaseActor:   sup.NewBaseActor(name),
+// NewDebouncedSignal creates a new DebouncedSignal actor attached to a source provider.
+func NewDebouncedSignal[V any](name string, src ReadableSignal[V], wait time.Duration) *DebouncedSignal[V] {
+	return &DebouncedSignal[V]{
+		BaseActor:   NewBaseActor(name),
 		broadcaster: broadcaster[V]{buffer: 16},
 		src:         src,
 		wait:        wait,
@@ -34,53 +32,53 @@ func NewDebounce[V any](name string, src Provider[V], wait time.Duration) *Debou
 
 // WithMaxWait configures a maximum time to wait before forcing an update,
 // preventing infinite starvation if the source is constantly changing.
-func (d *Debounce[V]) WithMaxWait(maxWait time.Duration) *Debounce[V] {
-	d.maxWait = maxWait
-	return d
+func (s *DebouncedSignal[V]) WithMaxWait(maxWait time.Duration) *DebouncedSignal[V] {
+	s.maxWait = maxWait
+	return s
 }
 
 // WithSubscriberBuffer configures the buffer size for subscriber channels.
-func (d *Debounce[V]) WithSubscriberBuffer(buffer int) *Debounce[V] {
-	d.broadcaster.buffer = buffer
-	return d
+func (s *DebouncedSignal[V]) WithSubscriberBuffer(buffer int) *DebouncedSignal[V] {
+	s.broadcaster.buffer = buffer
+	return s
 }
 
 // WithInitialNotify configures whether new subscribers receive the current value immediately.
-func (d *Debounce[V]) WithInitialNotify(enabled bool) *Debounce[V] {
-	d.initialNotify = enabled
-	return d
+func (s *DebouncedSignal[V]) WithInitialNotify(enabled bool) *DebouncedSignal[V] {
+	s.initialNotify = enabled
+	return s
 }
 
 // Read returns the currently settled value safely.
-func (d *Debounce[V]) Read() V {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	return d.value
+func (s *DebouncedSignal[V]) Read() V {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.value
 }
 
 // Subscribe returns a channel that receives the debounced updates.
-func (d *Debounce[V]) Subscribe(ctx context.Context) <-chan V {
-	d.mu.RLock()
-	current := d.value
-	d.mu.RUnlock()
-	return d.broadcaster.subscribeValues(ctx, current, d.initialNotify)
+func (s *DebouncedSignal[V]) Subscribe(ctx context.Context) <-chan V {
+	s.mu.RLock()
+	current := s.value
+	s.mu.RUnlock()
+	return s.broadcaster.subscribeValues(ctx, current, s.initialNotify)
 }
 
 // Watch returns a channel that receives notifications when the value settles.
-func (d *Debounce[V]) Watch(ctx context.Context) <-chan struct{} {
-	return d.broadcaster.subscribeNotifications(ctx, d.initialNotify)
+func (s *DebouncedSignal[V]) Watch(ctx context.Context) <-chan struct{} {
+	return s.broadcaster.subscribeNotifications(ctx, s.initialNotify)
 }
 
-func (d *Debounce[V]) publish(v V) {
-	d.mu.Lock()
-	d.value = v
-	d.mu.Unlock()
-	d.broadcaster.notify(v)
+func (s *DebouncedSignal[V]) publish(v V) {
+	s.mu.Lock()
+	s.value = v
+	s.mu.Unlock()
+	s.broadcaster.notify(v)
 }
 
 // Run is the main actor loop. It subscribes to the source and manages the sliding window.
-func (d *Debounce[V]) Run(ctx context.Context) error {
-	in := d.src.Subscribe(ctx)
+func (s *DebouncedSignal[V]) Run(ctx context.Context) error {
+	in := s.src.Subscribe(ctx)
 
 	var pending V
 	var havePending bool
@@ -98,12 +96,12 @@ func (d *Debounce[V]) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
-			d.broadcaster.closeAll()
+			s.broadcaster.closeAll()
 			return nil
 
 		case v, ok := <-in:
 			if !ok {
-				d.broadcaster.closeAll()
+				s.broadcaster.closeAll()
 				return nil
 			}
 
@@ -113,13 +111,13 @@ func (d *Debounce[V]) Run(ctx context.Context) error {
 			if !havePending {
 				havePending = true
 				burstStart = now
-				timer.Reset(d.wait)
+				timer.Reset(s.wait)
 				timerChan = timer.C
 				continue
 			}
 
-			if d.maxWait > 0 && now.Sub(burstStart) >= d.maxWait {
-				d.publish(pending)
+			if s.maxWait > 0 && now.Sub(burstStart) >= s.maxWait {
+				s.publish(pending)
 				havePending = false
 
 				timerChan = nil
@@ -132,11 +130,11 @@ func (d *Debounce[V]) Run(ctx context.Context) error {
 				continue
 			}
 
-			timer.Reset(d.wait)
+			timer.Reset(s.wait)
 
 		case <-timerChan:
 			if havePending {
-				d.publish(pending)
+				s.publish(pending)
 				havePending = false
 			}
 			timerChan = nil
