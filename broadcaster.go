@@ -76,18 +76,16 @@ func (b *broadcaster[V]) subscribeNotifications(ctx context.Context, notify bool
 
 func (b *broadcaster[V]) notify(value V) {
 	b.mu.RLock()
-	valueSubs := b.valueSubs
-	notificationSubs := b.notificationSubs
-	b.mu.RUnlock()
+	defer b.mu.RUnlock()
 
-	for _, ch := range valueSubs {
+	for _, ch := range b.valueSubs {
 		select {
 		case ch <- value:
 		default:
 		}
 	}
 
-	for _, ch := range notificationSubs {
+	for _, ch := range b.notificationSubs {
 		select {
 		case ch <- struct{}{}:
 		default:
