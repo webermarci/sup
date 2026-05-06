@@ -13,7 +13,7 @@ type ComputedSignal[V any] struct {
 	broadcaster[V]
 	value          V
 	update         func() V
-	deps           []Watcher
+	deps           []WatcherSignal
 	equal          func(a, b V) bool
 	coalesceWindow time.Duration
 	initialNotify  bool
@@ -23,7 +23,7 @@ type ComputedSignal[V any] struct {
 // NewComputedSignal creates a new ComputedSignal with the given name, update function, and dependencies.
 // The update function is called whenever any of the dependencies notify a change,
 // and the result is broadcast to subscribers.
-func NewComputedSignal[V any](name string, update func() V, deps ...Watcher) *ComputedSignal[V] {
+func NewComputedSignal[V any](name string, update func() V, deps ...WatcherSignal) *ComputedSignal[V] {
 	return &ComputedSignal[V]{
 		BaseActor:      NewBaseActor(name),
 		broadcaster:    broadcaster[V]{buffer: 16},

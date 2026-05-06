@@ -158,7 +158,7 @@ func TestComputedSignal_MultipleDependencies(t *testing.T) {
 	waitForValue(t, computed, 3)
 }
 
-func waitForValue[V comparable](t *testing.T, r Reader[V], want V) {
+func waitForValue[V comparable](t *testing.T, r ReaderSignal[V], want V) {
 	t.Helper()
 	deadline := time.After(500 * time.Millisecond)
 	for {
