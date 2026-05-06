@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"log/slog"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,7 +15,7 @@ import (
 )
 
 type Data struct {
-	Text   string
+	Time   string
 	Number int
 }
 
@@ -27,34 +27,40 @@ func main() {
 	)
 	defer cancel()
 
-	randomString := sup.NewPolledSignal("random_string", func(context.Context) (string, error) {
-		return rand.Text(), nil
-	}, 5*time.Second)
-
-	counter := sup.NewPushedSignal("counter", func(ctx context.Context, n int) error {
+	dateTime := sup.NewPushedSignal("date_time", func(ctx context.Context, s string) error {
 		return nil
 	})
 
+	randomNumber := sup.NewPolledSignal("random_number", func(context.Context) (int, error) {
+		return rand.IntN(100), nil
+	}, 500*time.Millisecond)
+
 	isEven := sup.NewComputedSignal("is_even", func() bool {
-		return counter.Read()%2 == 0
-	}, counter)
+		return randomNumber.Read()%2 == 0
+	}, randomNumber)
 
 	jsonData := sup.NewComputedSignal("json_data", func() Data {
 		return Data{
-			Text:   randomString.Read(),
-			Number: counter.Read(),
+			Time:   dateTime.Read(),
+			Number: randomNumber.Read(),
 		}
-	}, randomString, counter)
+	}, dateTime, randomNumber)
 
 	dashboard := ui.NewDashboard("dashboard",
-		ui.WithObserve(randomString),
-		ui.WithObserve(counter),
+		ui.WithObserve(dateTime),
+		ui.WithObserve(randomNumber),
 		ui.WithObserve(isEven),
 		ui.WithObserve(jsonData),
 	)
 
 	supervisor := sup.NewSupervisor("root",
-		sup.WithActors(dashboard, randomString, counter, isEven, jsonData),
+		sup.WithActors(
+			dashboard,
+			dateTime,
+			randomNumber,
+			isEven,
+			jsonData,
+		),
 		sup.WithLogger(slog.Default()),
 	)
 
@@ -68,7 +74,7 @@ func main() {
 		case <-ctx.Done():
 			return
 		case <-time.NewTicker(time.Second).C:
-			counter.Write(ctx, i)
+			dateTime.Write(ctx, time.Now().Format(time.RFC3339))
 			i++
 		}
 	}

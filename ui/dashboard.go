@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
@@ -8,19 +9,20 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/webermarci/sup"
 )
 
-//go:embed static/*
+//go:embed static
 var staticFS embed.FS
 
 // DashboardOption represents a functional option for configuring the Dashboard.
 // It allows adding providers to observe, which will be reflected in the real-time UI.
 type DashboardOption func(*Dashboard)
 
-// WithObserve adds a read-only card to the dashboard for the given signal.
+// WithObserve adds a read-only row to the dashboard for the given signal.
 // The dashboard will subscribe to the signal for updates and reflect changes in the UI,
 // but will not allow user input to update the signal.
 func WithObserve[V any](signal sup.ReadableSignal[V]) DashboardOption {
@@ -124,7 +126,20 @@ func (d *Dashboard) broadcast(eventType string, data []byte) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 
-	msg := fmt.Appendf(nil, "event: %s\ndata: %s\n\n", eventType, data)
+	var buf bytes.Buffer
+	buf.WriteString("event: ")
+	buf.WriteString(eventType)
+	buf.WriteString("\n")
+
+	// Ensure multiline JSON is sent as multiple data: lines per the SSE spec.
+	s := string(data)
+	s = strings.ReplaceAll(s, "\n", "\ndata: ")
+	buf.WriteString("data: ")
+	buf.WriteString(s)
+	buf.WriteString("\n\n")
+
+	msg := buf.Bytes()
+
 	for ch := range d.clients {
 		select {
 		case ch <- msg:

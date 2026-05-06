@@ -152,3 +152,29 @@ body {
 .state-val[data-type="boolean"][data-value="false"]::before {
     background-color: oklch(70.4% 0.191 22.216);
 }
+
+.state-text {
+    font-weight: 600;
+    color: var(--text-main);
+}
+
+.sparkline {
+    width: 200px;
+    height: 16px;
+    max-height: 16px;
+    display: block;
+    flex-shrink: 0;
+    color: var(--text-muted);
+}
+
+.col-trend .sparkline path {
+    stroke-width: 1.5;
+}
+
+.col-trend:not([data-type="number"]):not([data-type="boolean"]) .sparkline {
+    display: none;
+}
+
+.col-trend {
+    white-space: nowrap;
+}
