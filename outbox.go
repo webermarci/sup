@@ -27,9 +27,10 @@ func (o *Outbox[T]) Subscribe(handler func(context.Context, T)) {
 // they need to perform longer work.
 func (o *Outbox[T]) Emit(ctx context.Context, message T) {
 	o.mu.RLock()
-	defer o.mu.RUnlock()
+	subscribers := append([]func(context.Context, T){}, o.subscribers...)
+	o.mu.RUnlock()
 
-	for _, handler := range o.subscribers {
+	for _, handler := range subscribers {
 		handler(ctx, message)
 	}
 }
