@@ -376,20 +376,23 @@ goos: darwin
 goarch: arm64
 pkg: github.com/webermarci/sup
 cpu: Apple M5
-BenchmarkCallInbox_SingleWorker-10        3318741    346.1 ns/op     0 B/op    0 allocs/op
-BenchmarkCallInbox_Contention-10          1000000    682.5 ns/op     0 B/op    0 allocs/op
-BenchmarkCastInbox_SingleWorker-10       37592265     31.9 ns/op     0 B/op    0 allocs/op
-BenchmarkCastInbox_Parallel-10           24781441     48.6 ns/op     0 B/op    0 allocs/op
-BenchmarkCastInbox_TryCast-10           134381470      8.9 ns/op     0 B/op    0 allocs/op
-BenchmarkOutbox_Emit/1-10               187332144      6.4 ns/op     0 B/op    0 allocs/op
-BenchmarkOutbox_Emit/10-10               41823868     28.3 ns/op     0 B/op    0 allocs/op
-BenchmarkOutbox_Emit/100-10               4646634    256.1 ns/op     0 B/op    0 allocs/op
-BenchmarkOutbox_Subscribe-10            100000000     24.0 ns/op    49 B/op    0 allocs/op
-BenchmarkOutbox_EmitFireAndForget-10    337680223      3.6 ns/op     0 B/op    0 allocs/op
-BenchmarkRouter_Next_RoundRobin-10      714396448      1.7 ns/op     0 B/op    0 allocs/op
-BenchmarkRouter_Next_Random-10          236811043      5.1 ns/op     0 B/op    0 allocs/op
-BenchmarkRouter_Next_Parallel-10         30816442     39.7 ns/op     0 B/op    0 allocs/op
-BenchmarkSupervisor_SpawnAndExit-10       1810195    661.4 ns/op   474 B/op   12 allocs/op
-BenchmarkSupervisor_RestartCycle-10       1218945    980.3 ns/op   224 B/op    6 allocs/op
-BenchmarkSupervisor_ParallelSpawn-10      1644014    757.4 ns/op   616 B/op   11 allocs/op
+BenchmarkBroadcaster_Notify/1-10        123507973       9.6 ns/op     0 B/op    0 allocs/op
+BenchmarkBroadcaster_Notify/10-10        11350057     108.0 ns/op     0 B/op    0 allocs/op
+BenchmarkBroadcaster_Notify/100-10         105594   11447.0 ns/op     0 B/op    0 allocs/op
+BenchmarkCallInbox_SingleWorker-10        3318741     346.1 ns/op     0 B/op    0 allocs/op
+BenchmarkCallInbox_Contention-10          1000000     682.5 ns/op     0 B/op    0 allocs/op
+BenchmarkCastInbox_SingleWorker-10       37592265      31.9 ns/op     0 B/op    0 allocs/op
+BenchmarkCastInbox_Parallel-10           24781441      48.6 ns/op     0 B/op    0 allocs/op
+BenchmarkCastInbox_TryCast-10           134381470       8.9 ns/op     0 B/op    0 allocs/op
+BenchmarkOutbox_Emit/1-10               187332144       6.4 ns/op     0 B/op    0 allocs/op
+BenchmarkOutbox_Emit/10-10               41823868      28.3 ns/op     0 B/op    0 allocs/op
+BenchmarkOutbox_Emit/100-10               4646634     256.1 ns/op     0 B/op    0 allocs/op
+BenchmarkOutbox_Subscribe-10            100000000      24.0 ns/op    49 B/op    0 allocs/op
+BenchmarkOutbox_EmitFireAndForget-10    337680223       3.6 ns/op     0 B/op    0 allocs/op
+BenchmarkRouter_Next_RoundRobin-10      714396448       1.7 ns/op     0 B/op    0 allocs/op
+BenchmarkRouter_Next_Random-10          236811043       5.1 ns/op     0 B/op    0 allocs/op
+BenchmarkRouter_Next_Parallel-10         30816442      39.7 ns/op     0 B/op    0 allocs/op
+BenchmarkSupervisor_SpawnAndExit-10       1810195     661.4 ns/op   474 B/op   12 allocs/op
+BenchmarkSupervisor_RestartCycle-10       1218945     980.3 ns/op   224 B/op    6 allocs/op
+BenchmarkSupervisor_ParallelSpawn-10      1644014     757.4 ns/op   616 B/op   11 allocs/op
 ```
