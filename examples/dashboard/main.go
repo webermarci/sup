@@ -14,11 +14,6 @@ import (
 	"github.com/webermarci/sup/ui"
 )
 
-type Data struct {
-	Time   string
-	Number int
-}
-
 func main() {
 	ctx, cancel := signal.NotifyContext(
 		context.Background(),
@@ -27,39 +22,58 @@ func main() {
 	)
 	defer cancel()
 
-	dateTime := sup.NewPushedSignal("date_time", func(ctx context.Context, s string) error {
+	input := sup.NewPolledSignal("input", func(ctx context.Context) (int, error) {
+		return rand.IntN(255), nil
+	}, 100*time.Millisecond)
+
+	throttledInput := sup.NewThrottledSignal("throttled_input", input, 2*time.Second)
+
+	throttledInputASCII := sup.NewComputedSignal("throttled_input_ascii", func() string {
+		return string(byte(throttledInput.Read()))
+	}, throttledInput)
+
+	throttledInputEven := sup.NewComputedSignal("throttled_input_even", func() bool {
+		return throttledInput.Read()%2 == 0
+	}, throttledInput)
+
+	counter := sup.NewPushedSignal("counter", func(ctx context.Context, i int) error {
 		return nil
 	})
 
-	randomNumber := sup.NewPolledSignal("random_number", func(context.Context) (int, error) {
-		return rand.IntN(100), nil
-	}, 500*time.Millisecond)
-
-	isEven := sup.NewComputedSignal("is_even", func() bool {
-		return randomNumber.Read()%2 == 0
-	}, randomNumber)
-
-	jsonData := sup.NewComputedSignal("json_data", func() Data {
-		return Data{
-			Time:   dateTime.Read(),
-			Number: randomNumber.Read(),
+	combined := sup.NewComputedSignal("combined", func() struct {
+		Input int
+		ASCII string
+		Even  bool
+	} {
+		return struct {
+			Input int
+			ASCII string
+			Even  bool
+		}{
+			Input: throttledInput.Read(),
+			ASCII: throttledInputASCII.Read(),
+			Even:  throttledInputEven.Read(),
 		}
-	}, dateTime, randomNumber)
+	}, throttledInput, throttledInputASCII, throttledInputEven)
 
 	dashboard := ui.NewDashboard("dashboard",
-		ui.WithObserve(dateTime),
-		ui.WithObserve(randomNumber),
-		ui.WithObserve(isEven),
-		ui.WithObserve(jsonData),
+		ui.WithObserve(input),
+		ui.WithObserve(throttledInput),
+		ui.WithObserve(throttledInputASCII),
+		ui.WithObserve(throttledInputEven),
+		ui.WithObserve(counter),
+		ui.WithObserve(combined),
 	)
 
 	supervisor := sup.NewSupervisor("root",
 		sup.WithActors(
 			dashboard,
-			dateTime,
-			randomNumber,
-			isEven,
-			jsonData,
+			input,
+			throttledInput,
+			throttledInputASCII,
+			throttledInputEven,
+			counter,
+			combined,
 		),
 		sup.WithLogger(slog.Default()),
 	)
@@ -74,7 +88,7 @@ func main() {
 		case <-ctx.Done():
 			return
 		case <-time.NewTicker(time.Second).C:
-			dateTime.Write(ctx, time.Now().Format(time.RFC3339))
+			counter.Write(ctx, i)
 			i++
 		}
 	}
