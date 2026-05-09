@@ -1,10 +1,10 @@
 module github.com/webermarci/sup/mesh
 
-go 1.26.2
+go 1.26.3
 
 require (
 	github.com/nats-io/nats.go v1.52.0
-	github.com/webermarci/sup v0.0.41
+	github.com/webermarci/sup v0.0.42
 )
 
 require (
