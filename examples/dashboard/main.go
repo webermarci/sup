@@ -22,7 +22,7 @@ func main() {
 	)
 	defer cancel()
 
-	input := sup.NewPolledSignal("input", func(ctx context.Context) (int, error) {
+	input := sup.NewPeriodicSignal("input", func(ctx context.Context) (int, error) {
 		return rand.IntN(255), nil
 	}, 100*time.Millisecond)
 

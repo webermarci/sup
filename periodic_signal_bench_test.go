@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func BenchmarkPolledSignal_Update(b *testing.B) {
+func BenchmarkPeriodicSignal_Update(b *testing.B) {
 	intervals := []time.Duration{
 		time.Microsecond,
 		10 * time.Microsecond,
@@ -22,7 +22,7 @@ func BenchmarkPolledSignal_Update(b *testing.B) {
 			var count int64
 			updates := make(chan struct{}, b.N)
 
-			s := NewPolledSignal("bench-polled", func(_ context.Context) (int, error) {
+			s := NewPeriodicSignal("bench-periodic", func(_ context.Context) (int, error) {
 				v := atomic.AddInt64(&count, 1)
 				updates <- struct{}{}
 				if v >= int64(b.N) {

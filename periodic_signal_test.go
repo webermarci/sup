@@ -8,7 +8,7 @@ import (
 )
 
 func TestPolledSignal_DefaultValue(t *testing.T) {
-	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 42, nil
 	}, time.Second)
 
@@ -20,7 +20,7 @@ func TestPolledSignal_DefaultValue(t *testing.T) {
 }
 
 func TestPolledSignal_InitialValue(t *testing.T) {
-	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 99, nil
 	}, time.Second)
 	signal.SetInitialValue(7)
@@ -33,7 +33,7 @@ func TestPolledSignal_InitialValue(t *testing.T) {
 }
 
 func TestPolledSignal_Value(t *testing.T) {
-	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 42, nil
 	}, 10*time.Millisecond)
 
@@ -46,8 +46,29 @@ func TestPolledSignal_Value(t *testing.T) {
 	}
 }
 
+func TestPolledSignal_Trigger(t *testing.T) {
+	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
+		return 1, nil
+	}, time.Second)
+	signal.SetInitialValue(0)
+
+	go signal.Run(t.Context())
+
+	if v := signal.Read(); v != 0 {
+		t.Errorf("expected initial value 0, got %d", v)
+	}
+
+	signal.Trigger()
+
+	time.Sleep(50 * time.Millisecond)
+
+	if v := signal.Read(); v != 1 {
+		t.Errorf("expected initial value 1, got %d", v)
+	}
+}
+
 func TestPolledSignal_ErrorSkipsUpdate(t *testing.T) {
-	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, errors.New("oops")
 	}, 10*time.Millisecond)
 	signal.SetInitialValue(5)
@@ -64,7 +85,7 @@ func TestPolledSignal_ErrorSkipsUpdate(t *testing.T) {
 func TestPolledSignal_Subscribe(t *testing.T) {
 	ctx := t.Context()
 
-	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 42, nil
 	}, 10*time.Millisecond)
 
@@ -85,7 +106,7 @@ func TestPolledSignal_Subscribe(t *testing.T) {
 func TestPolledSignal_MultipleSubscribers(t *testing.T) {
 	ctx := t.Context()
 
-	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 55, nil
 	}, 10*time.Millisecond)
 
@@ -109,7 +130,7 @@ func TestPolledSignal_MultipleSubscribers(t *testing.T) {
 func TestPolledSignal_UnsubscribeOnContextCancel(t *testing.T) {
 	ctx := t.Context()
 
-	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 1, nil
 	}, 10*time.Millisecond)
 
@@ -135,7 +156,7 @@ func TestPolledSignal_UnsubscribeOnContextCancel(t *testing.T) {
 func TestPolledSignal_InitialNotifyEnabled(t *testing.T) {
 	ctx := t.Context()
 
-	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, nil
 	}, time.Hour)
 	signal.SetInitialValue(42)
@@ -160,7 +181,7 @@ func TestPolledSignal_InitialNotifyDisabled(t *testing.T) {
 
 	// Create a signal that will NEVER naturally poll during the test
 	// because we set the interval to 1 Hour and return an error on the initial poll.
-	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, context.Canceled // Return an error so it skips the initial poll broadcast
 	}, time.Hour)
 	signal.SetInitialValue(42)
@@ -182,7 +203,7 @@ func TestPolledSignal_InitialNotifyDisabled(t *testing.T) {
 }
 
 func TestPolledSignal_ActorInterface(t *testing.T) {
-	signal := NewPolledSignal(t.Name(), func(_ context.Context) (int, error) {
+	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, errors.New("fail")
 	}, time.Second)
 

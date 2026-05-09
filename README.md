@@ -180,7 +180,7 @@ Common methods:
 
 Built-in signal types:
 
-- `PolledSignal` — `NewPolledSignal(name, update func(context.Context) (V, error), interval)`
+- `PeriodicSignal` — `NewPeriodicSignal(name, update func(context.Context) (V, error), interval)`
   - Periodically calls `update` and broadcasts changes to subscribers.
 
 - `ComputedSignal` — `NewComputedSignal(name, update func() V, deps ...WatcherSignal)`
@@ -199,7 +199,7 @@ Signals are small actors and should be supervised. Example:
 
 ```go
 // update once per second and broadcast the value to subscribers
-timeSig := sup.NewPolledSignal("time", func(ctx context.Context) (time.Time, error) {
+timeSig := sup.NewPeriodicSignal("time", func(ctx context.Context) (time.Time, error) {
   return time.Now(), nil
 }, time.Second)
 
@@ -384,9 +384,9 @@ BenchmarkCallInbox_Contention-10          1000000     682.5 ns/op     0 B/op    
 BenchmarkCastInbox_SingleWorker-10       37592265      31.9 ns/op     0 B/op    0 allocs/op
 BenchmarkCastInbox_Parallel-10           24781441      48.6 ns/op     0 B/op    0 allocs/op
 BenchmarkCastInbox_TryCast-10           134381470       8.9 ns/op     0 B/op    0 allocs/op
-BenchmarkPolledSignal_Update/1µs-10        456361    3542.0 ns/op     0 B/op    0 allocs/op
-BenchmarkPolledSignal_Update/10µs-10       119919   10004.0 ns/op     0 B/op    0 allocs/op
-BenchmarkPolledSignal_Update/100µs-10       12000   99993.0 ns/op     0 B/op    0 allocs/op
+BenchmarkPeriodicSignal_Update/1µs-10      456361    3542.0 ns/op     0 B/op    0 allocs/op
+BenchmarkPeriodicSignal_Update/10µs-10     119919   10004.0 ns/op     0 B/op    0 allocs/op
+BenchmarkPeriodicSignal_Update/100µs-10     12000   99993.0 ns/op     0 B/op    0 allocs/op
 BenchmarkPushedSignal_Write-10          133784850       8.9 ns/op     0 B/op    0 allocs/op
 BenchmarkOutbox_Emit/1-10               187332144       6.4 ns/op     0 B/op    0 allocs/op
 BenchmarkOutbox_Emit/10-10               41823868      28.3 ns/op     0 B/op    0 allocs/op
