@@ -1,10 +1,10 @@
 module github.com/webermarci/sup/modbus
 
-go 1.26.2
+go 1.26.3
 
 require (
 	github.com/goburrow/modbus v0.1.0
-	github.com/webermarci/sup v0.0.41
+	github.com/webermarci/sup v0.0.42
 )
 
 require github.com/goburrow/serial v0.1.0 // indirect
