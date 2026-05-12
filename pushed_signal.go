@@ -36,3 +36,12 @@ func (s *PushedSignal[V]) Run(ctx context.Context) error {
 	s.closeAll()
 	return nil
 }
+
+// Inspect returns the specification.
+func (s *PushedSignal[V]) Inspect() Spec {
+	return Spec{
+		Kind:         "pushed_signal",
+		Dependencies: []string{},
+		Metadata:     map[string]string{},
+	}
+}

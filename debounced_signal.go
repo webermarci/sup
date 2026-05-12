@@ -101,3 +101,15 @@ func (s *DebouncedSignal[V]) Run(ctx context.Context) error {
 		}
 	}
 }
+
+// Inspect returns the specification.
+func (s *DebouncedSignal[V]) Inspect() Spec {
+	return Spec{
+		Kind:         "debounced_signal",
+		Dependencies: []string{s.src.Name()},
+		Metadata: map[string]string{
+			"wait":     s.wait.String(),
+			"max_wait": s.maxWait.String(),
+		},
+	}
+}

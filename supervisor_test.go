@@ -243,3 +243,27 @@ func TestSupervisor_ObserverBasicLifecycle(t *testing.T) {
 		}
 	}
 }
+
+func TestSupervisor_Inspect(t *testing.T) {
+	child1 := sup.ActorFunc("child1", func(ctx context.Context, _ *slog.Logger) error { return nil })
+	child2 := sup.ActorFunc("child2", func(ctx context.Context, _ *slog.Logger) error { return nil })
+
+	s := sup.NewSupervisor("root", sup.WithActor(child1), sup.WithActor(child2))
+	spec := s.Inspect()
+
+	if spec.Kind != "supervisor" {
+		t.Fatalf("expected kind supervisor, got %q", spec.Kind)
+	}
+
+	if got := spec.Metadata["actor_count"]; got != "2" {
+		t.Fatalf("expected actor_count=2, got %q", got)
+	}
+
+	if got := spec.Metadata["restart_delay"]; got != time.Second.String() {
+		t.Fatalf("expected restart_delay=%q, got %q", time.Second.String(), got)
+	}
+
+	if spec.Dependencies == nil || len(spec.Dependencies) != 0 {
+		t.Fatalf("expected no dependencies for supervisor, got %v", spec.Dependencies)
+	}
+}

@@ -64,3 +64,14 @@ func (s *PeriodicSignal[V]) Trigger() {
 	default:
 	}
 }
+
+// Inspect returns the specification.
+func (s *PeriodicSignal[V]) Inspect() Spec {
+	return Spec{
+		Kind:         "periodic_signal",
+		Dependencies: []string{},
+		Metadata: map[string]string{
+			"interval": s.interval.String(),
+		},
+	}
+}

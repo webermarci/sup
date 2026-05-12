@@ -4,12 +4,21 @@ import (
 	"context"
 )
 
+// Signal represents a stream of values that can be observed, transformed,
+// debounced, or combined within the actor system.
+//
+// Signals implement the Actor interface and serve as a foundational primitive
+// for reactive data flows, enabling declarative composition of asynchronous
+// value streams across distributed actors.
+type Signal interface {
+	Actor
+}
+
 // ReadableSignal represents a value that can be read and subscribed to for updates.
 // It also supports watching for changes.
 // ReadableSignal is a sup.Actor,
 // so it can be run as a goroutine and can be stopped by canceling its context.
 type ReadableSignal[V any] interface {
-	Actor
 	ReaderSignal[V]
 	SubscriberSignal[V]
 	WatcherSignal
@@ -20,19 +29,20 @@ type ReadableSignal[V any] interface {
 // WritableSignal is a sup.Actor,
 // so it can be run as a goroutine and can be stopped by canceling its context.
 type WritableSignal[V any] interface {
-	Actor
 	ReadableSignal[V]
 	WriterSignal[V]
 }
 
 // ReaderSignal represents a value that can be read. The Read method returns the current value.
 type ReaderSignal[V any] interface {
+	Signal
 	Read() V
 }
 
 // WriterSignal represents a value that can be updated by writing to it.
 // The Write method may return an error if the update is rejected.
 type WriterSignal[V any] interface {
+	Signal
 	Write(context.Context, V) error
 }
 
@@ -40,6 +50,7 @@ type WriterSignal[V any] interface {
 // The Watch method returns a channel that will receive a notification whenever the value changes.
 // The channel will be closed when the context is canceled.
 type WatcherSignal interface {
+	Signal
 	Watch(ctx context.Context) <-chan struct{}
 }
 
@@ -47,5 +58,6 @@ type WatcherSignal interface {
 // The Subscribe method returns a channel that will receive the updated value whenever it changes.
 // The channel will be closed when the context is canceled.
 type SubscriberSignal[V any] interface {
+	Signal
 	Subscribe(context.Context) <-chan V
 }

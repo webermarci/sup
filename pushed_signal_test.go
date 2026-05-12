@@ -208,3 +208,16 @@ func TestPushedSignal_ActorInterface(t *testing.T) {
 		t.Errorf("signal does not implement sup.Actor interface")
 	}
 }
+
+func TestPushedSignal_Inspect(t *testing.T) {
+	ps := NewPushedSignal("pushed", func(ctx context.Context, v int) error { return nil })
+	spec := ps.Inspect()
+
+	if spec.Kind != "pushed_signal" {
+		t.Fatalf("expected kind pushed_signal, got %q", spec.Kind)
+	}
+
+	if len(spec.Dependencies) != 0 {
+		t.Fatalf("expected no dependencies for pushed signal, got %v", spec.Dependencies)
+	}
+}

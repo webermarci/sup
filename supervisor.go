@@ -101,6 +101,7 @@ type Supervisor struct {
 	onError       func(actor Actor, err error)
 	terminalErr   chan error
 	observer      *SupervisorObserver
+	mu            sync.RWMutex
 }
 
 // NewSupervisor creates a new Supervisor with the given options.
@@ -363,4 +364,29 @@ func (s *Supervisor) Run(ctx context.Context) error {
 // Wait blocks until all supervised actors have stopped.
 func (s *Supervisor) Wait() {
 	s.wg.Wait()
+}
+
+// Inspect returns the specification.
+func (s *Supervisor) Inspect() Spec {
+	return Spec{
+		Kind:         "supervisor",
+		Dependencies: []string{},
+		Metadata: map[string]string{
+			"actor_count":    fmt.Sprintf("%d", len(s.actors)),
+			"restart_window": s.restartWindow.String(),
+			"restart_delay":  s.restartDelay.String(),
+			"max_restarts":   fmt.Sprintf("%d", s.maxRestarts),
+		},
+	}
+}
+
+func (s *Supervisor) Children() []Actor {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var children []Actor
+	for _, c := range s.actors {
+		children = append(children, c)
+	}
+	return children
 }

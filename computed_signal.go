@@ -94,3 +94,19 @@ func (s *ComputedSignal[V]) Run(ctx context.Context) error {
 		}
 	}
 }
+
+// Inspect returns the specification.
+func (s *ComputedSignal[V]) Inspect() Spec {
+	var dependencies []string
+	for _, d := range s.deps {
+		dependencies = append(dependencies, d.Name())
+	}
+
+	return Spec{
+		Kind:         "computed_signal",
+		Dependencies: dependencies,
+		Metadata: map[string]string{
+			"coalesce_window": s.coalesceWindow.String(),
+		},
+	}
+}

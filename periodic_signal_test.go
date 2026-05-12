@@ -211,3 +211,16 @@ func TestPolledSignal_ActorInterface(t *testing.T) {
 		t.Fatal("signal does not implement sup.Actor interface")
 	}
 }
+
+func TestPeriodicSignal_Inspect(t *testing.T) {
+	p := NewPeriodicSignal("polled", func(ctx context.Context) (int, error) { return 0, nil }, 100*time.Millisecond)
+	spec := p.Inspect()
+
+	if spec.Kind != "periodic_signal" {
+		t.Fatalf("expected kind periodic_signal, got %q", spec.Kind)
+	}
+
+	if got := spec.Metadata["interval"]; got != (100 * time.Millisecond).String() {
+		t.Fatalf("expected interval=%q, got %q", (100 * time.Millisecond).String(), got)
+	}
+}

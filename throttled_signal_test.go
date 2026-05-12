@@ -130,3 +130,21 @@ func TestThrottledSignal_CloseCleanup(t *testing.T) {
 		t.Fatal("Channel was not closed during context cancellation")
 	}
 }
+
+func TestThrottledSignal_Inspect(t *testing.T) {
+	src := NewPushedSignal("src2", func(ctx context.Context, v int) error { return nil })
+	th := NewThrottledSignal("th", src, 2*time.Second)
+	spec := th.Inspect()
+
+	if spec.Kind != "throttled_signal" {
+		t.Fatalf("expected kind throttled_signal, got %q", spec.Kind)
+	}
+
+	if len(spec.Dependencies) != 1 || spec.Dependencies[0] != src.Name() {
+		t.Fatalf("expected dependency %q, got %v", src.Name(), spec.Dependencies)
+	}
+
+	if spec.Metadata["interval"] != (2 * time.Second).String() {
+		t.Fatalf("expected interval=%q, got %q", (2 * time.Second).String(), spec.Metadata["interval"])
+	}
+}

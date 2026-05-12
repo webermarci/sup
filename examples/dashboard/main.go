@@ -65,20 +65,26 @@ func main() {
 		ui.WithObserve(combined),
 	)
 
-	supervisor := sup.NewSupervisor("root",
+	uiSupervisor := sup.NewSupervisor("ui_supervisor",
+		sup.WithActors(dashboard),
+	)
+
+	computedSupervisor := sup.NewSupervisor("computed_supervisor",
+		sup.WithActors(combined, throttledInputASCII, throttledInputEven),
+	)
+
+	root := sup.NewSupervisor("root_supervisor",
 		sup.WithActors(
-			dashboard,
+			uiSupervisor,
 			input,
 			throttledInput,
-			throttledInputASCII,
-			throttledInputEven,
 			counter,
-			combined,
+			computedSupervisor,
 		),
 		sup.WithLogger(slog.Default()),
 	)
 
-	go supervisor.Run(ctx)
+	go root.Run(ctx)
 	go http.ListenAndServe(":8080", dashboard.Handler())
 
 	i := 0

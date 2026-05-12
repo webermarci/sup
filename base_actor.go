@@ -30,6 +30,15 @@ func (a *BaseActor) Logger() *slog.Logger {
 	return a.logger
 }
 
+// Inspect returns the specification.
+func (a *BaseActor) Inspect() Spec {
+	return Spec{
+		Kind:         "actor",
+		Dependencies: []string{},
+		Metadata:     map[string]string{},
+	}
+}
+
 func (a *BaseActor) setLogger(logger *slog.Logger) {
 	a.logger = logger.With("actor", a.name)
 }

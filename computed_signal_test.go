@@ -225,3 +225,23 @@ func TestComputedSignal_GlitchFreeDiamond(t *testing.T) {
 		t.Errorf("Glitch detected! Expected node D to evaluate exactly 1 time, but it evaluated %d times", count)
 	}
 }
+
+func TestComputedSignal_Inspect(t *testing.T) {
+	p := NewPushedSignal("p1", func(ctx context.Context, v int) error { return nil })
+	q := NewPushedSignal("p2", func(ctx context.Context, v int) error { return nil })
+	c := NewComputedSignal("comp", func() int { return 42 }, p, q)
+
+	spec := c.Inspect()
+
+	if spec.Kind != "computed_signal" {
+		t.Fatalf("expected kind computed_signal, got %q", spec.Kind)
+	}
+
+	if len(spec.Dependencies) != 2 || spec.Dependencies[0] != p.Name() || spec.Dependencies[1] != q.Name() {
+		t.Fatalf("expected dependencies [%q %q], got %v", p.Name(), q.Name(), spec.Dependencies)
+	}
+
+	if spec.Metadata["coalesce_window"] != (5 * time.Millisecond).String() {
+		t.Fatalf("expected coalesce_window=%q, got %q", (5 * time.Millisecond).String(), spec.Metadata["coalesce_window"])
+	}
+}

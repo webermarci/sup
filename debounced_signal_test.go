@@ -139,3 +139,22 @@ func TestDebouncedSignal_CloseCleanup(t *testing.T) {
 		t.Fatal("Channel was not closed during context cancellation")
 	}
 }
+
+func TestDebouncedSignal_Inspect(t *testing.T) {
+	src := NewPushedSignal("src", func(ctx context.Context, v int) error { return nil })
+	d := NewDebouncedSignal("deb", src, 250*time.Millisecond)
+
+	spec := d.Inspect()
+
+	if spec.Kind != "debounced_signal" {
+		t.Fatalf("expected kind debounced_signal, got %q", spec.Kind)
+	}
+
+	if len(spec.Dependencies) != 1 || spec.Dependencies[0] != src.Name() {
+		t.Fatalf("expected dependency %q, got %v", src.Name(), spec.Dependencies)
+	}
+
+	if spec.Metadata["wait"] != (250 * time.Millisecond).String() {
+		t.Fatalf("expected wait=%q, got %q", (250 * time.Millisecond).String(), spec.Metadata["wait"])
+	}
+}

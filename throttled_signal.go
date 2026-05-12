@@ -10,7 +10,7 @@ import (
 // always emitting the most recent (trailing) value from that interval.
 type ThrottledSignal[V any] struct {
 	*BaseSignal[V]
-	source   ReadableSignal[V]
+	src      ReadableSignal[V]
 	interval time.Duration
 }
 
@@ -18,7 +18,7 @@ type ThrottledSignal[V any] struct {
 func NewThrottledSignal[V any](name string, src ReadableSignal[V], interval time.Duration) *ThrottledSignal[V] {
 	s := &ThrottledSignal[V]{
 		BaseSignal: NewBaseSignal[V](name),
-		source:     src,
+		src:        src,
 		interval:   interval,
 	}
 	s.value = src.Read()
@@ -28,7 +28,7 @@ func NewThrottledSignal[V any](name string, src ReadableSignal[V], interval time
 
 // Run is the main actor loop. It manages the trailing-edge rate limit.
 func (s *ThrottledSignal[V]) Run(ctx context.Context) error {
-	in := s.source.Subscribe(ctx)
+	in := s.src.Subscribe(ctx)
 
 	var pending V
 	var havePending bool
@@ -77,5 +77,16 @@ func (s *ThrottledSignal[V]) Run(ctx context.Context) error {
 				timerChan = nil
 			}
 		}
+	}
+}
+
+// Inspect returns the specification.
+func (s *ThrottledSignal[V]) Inspect() Spec {
+	return Spec{
+		Kind:         "throttled_signal",
+		Dependencies: []string{s.src.Name()},
+		Metadata: map[string]string{
+			"interval": s.interval.String(),
+		},
 	}
 }

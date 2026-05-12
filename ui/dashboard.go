@@ -122,6 +122,17 @@ func (d *Dashboard) Run(ctx context.Context) error {
 	}
 }
 
+// Inspect returns the specification.
+func (d *Dashboard) Inspect() sup.Spec {
+	return sup.Spec{
+		Kind:         "dashboard",
+		Dependencies: []string{},
+		Metadata: map[string]string{
+			"observed_count": fmt.Sprintf("%d", len(d.streams)),
+		},
+	}
+}
+
 func (d *Dashboard) broadcast(eventType string, data []byte) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
