@@ -12,6 +12,7 @@ import (
 // value streams across distributed actors.
 type Signal interface {
 	Actor
+	Inspectable
 }
 
 // ReadableSignal represents a value that can be read and subscribed to for updates.

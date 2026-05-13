@@ -12,48 +12,51 @@
             <table class="data-table">
                 <thead>
                     <tr>
-                        <th class="cell-shrink">Name</th>
-                        <th class="cell-shrink col-type-header">Type</th>
-                        <th>State</th>
-                        <th
-                            class="cell-shrink col-trend"
-                            aria-hidden="true"
-                        ></th>
+                        <th scope="col" class="cell-shrink">Name</th>
+                        <th scope="col" class="cell-shrink col-kind-header">
+                            Kind
+                        </th>
+                        <th scope="col" class="cell-shrink col-type-header">
+                            Type
+                        </th>
+                        <th scope="col">State</th>
                     </tr>
                 </thead>
                 <tbody>
-                    {{range .Rows}}
+                    {{range .Nodes}}
                     <tr>
                         <td class="cell-shrink">
                             <span class="row-name">{{.Name}}</span>
                         </td>
+                        <td class="cell-shrink col-kind">
+                            <span
+                                class="badge badge-kind"
+                                data-kind="{{.Spec.Kind}}"
+                            >
+                                {{.Spec.Kind}}
+                            </span>
+                        </td>
                         <td class="cell-shrink col-type">
-                            <span class="badge" data-type="{{.Type}}">
+                            <span
+                                class="badge badge-type"
+                                data-type="{{.Type}}"
+                            >
                                 {{.Type}}
                             </span>
                         </td>
                         <td class="col-state">
                             <div
-                                id="val-{{.Name}}"
                                 class="state-val"
                                 data-name="{{.Name}}"
+                                data-kind="{{.Spec.Kind}}"
                                 data-type="{{.Type}}"
-                                data-value="{{index $.LastValues .Name}}"
+                                data-value="{{formatValue .Value}}"
+                                title="{{formatValue .Value}}"
                             >
                                 <span class="state-text">
-                                    {{index $.LastValues .Name}}
+                                    {{formatValue .Value}}
                                 </span>
                             </div>
-                        </td>
-                        <td class="cell-shrink col-trend" data-type="{{.Type}}">
-                            <svg
-                                id="spark-{{.Name}}"
-                                class="sparkline"
-                                width="120"
-                                height="24"
-                                viewBox="0 0 120 24"
-                                aria-hidden="true"
-                            ></svg>
                         </td>
                     </tr>
                     {{end}}
@@ -61,196 +64,6 @@
             </table>
         </div>
 
-        <script>
-            document.addEventListener("DOMContentLoaded", function () {
-                const MAX_POINTS = 100;
-                const SMOOTH_TENSION = 0.5;
-
-                const metrics = Object.create(null);
-
-                function parseInitialValue(el) {
-                    const dtype = el.dataset.type;
-                    const raw = el.dataset.value ?? "";
-                    if (dtype === "number") {
-                        const n = Number(raw);
-                        return isNaN(n) ? null : n;
-                    }
-                    if (dtype === "boolean") {
-                        if (raw === "true" || raw === "1" || raw === "True")
-                            return 1;
-                        if (raw === "false" || raw === "0" || raw === "False")
-                            return 0;
-                        return null;
-                    }
-                    return null;
-                }
-
-                function findStateElement(name) {
-                    const esc = name.replace(/"/g, '\\"');
-                    const sel = '.state-val[data-name="' + esc + '"]';
-                    let el = document.querySelector(sel);
-                    if (el) return el;
-
-                    const els = document.querySelectorAll(".state-val");
-                    for (let i = 0; i < els.length; i++) {
-                        if (els[i].dataset.name === name) return els[i];
-                    }
-                    return null;
-                }
-
-                function catmullRom2bezier(pts, tension = 0.5) {
-                    if (!pts || pts.length === 0) return "";
-                    if (pts.length === 1) return `M ${pts[0][0]} ${pts[0][1]}`;
-                    let out = `M ${pts[0][0]} ${pts[0][1]}`;
-                    for (let i = 0; i < pts.length - 1; i++) {
-                        const p0 = i === 0 ? pts[0] : pts[i - 1];
-                        const p1 = pts[i];
-                        const p2 = pts[i + 1];
-                        const p3 = i + 2 < pts.length ? pts[i + 2] : p2;
-                        const cp1x = p1[0] + (p2[0] - p0[0]) * (tension / 6);
-                        const cp1y = p1[1] + (p2[1] - p0[1]) * (tension / 6);
-                        const cp2x = p2[0] - (p3[0] - p1[0]) * (tension / 6);
-                        const cp2y = p2[1] - (p3[1] - p1[1]) * (tension / 6);
-                        out += ` C ${cp1x} ${cp1y}, ${cp2x} ${cp2y}, ${p2[0]} ${p2[1]}`;
-                    }
-                    return out;
-                }
-
-                function renderSparkline(name) {
-                    const svg = document.getElementById("spark-" + name);
-                    if (!svg) return;
-                    const m = metrics[name];
-                    if (!m || !m.values || m.values.length === 0) {
-                        svg.innerHTML = "";
-                        return;
-                    }
-
-                    const values = m.values;
-                    const len = values.length;
-
-                    const rect = svg.getBoundingClientRect();
-                    const w =
-                        rect.width ||
-                        svg.clientWidth ||
-                        parseFloat(svg.getAttribute("width")) ||
-                        120;
-                    const h =
-                        rect.height ||
-                        svg.clientHeight ||
-                        parseFloat(svg.getAttribute("height")) ||
-                        16;
-                    try {
-                        svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-                        svg.removeAttribute("preserveAspectRatio");
-                    } catch (e) {}
-
-                    let min = Math.min(...values);
-                    let max = Math.max(...values);
-                    if (m.type === "boolean") {
-                        min = 0;
-                        max = 1;
-                    } else if (min === max) {
-                        min = min - 1;
-                        max = max + 1;
-                    }
-
-                    const range = max - min || 1;
-                    const margin = Math.min(6, w * 0.08);
-                    const innerW = Math.max(0, w - 2 * margin);
-                    const step = len > 1 ? innerW / (len - 1) : innerW;
-                    const vpad = Math.max(1, Math.min(2, h * 0.08));
-
-                    const pts = new Array(len);
-                    for (let i = 0; i < len; i++) {
-                        const x = margin + i * step;
-                        const y =
-                            h -
-                            vpad -
-                            ((values[i] - min) / range) * (h - 2 * vpad);
-                        pts[i] = [x, y];
-                    }
-
-                    const d = catmullRom2bezier(pts, SMOOTH_TENSION);
-                    const svgns = "http://www.w3.org/2000/svg";
-                    svg.innerHTML = "";
-                    const path = document.createElementNS(svgns, "path");
-                    path.setAttribute("d", d);
-                    path.setAttribute("fill", "none");
-                    path.setAttribute("stroke", "currentColor");
-                    path.setAttribute("stroke-linejoin", "round");
-                    path.setAttribute("stroke-linecap", "round");
-                    svg.appendChild(path);
-                }
-
-                function handleUpdate(evt) {
-                    const name = evt && evt.name;
-                    if (!name) return;
-
-                    const el = findStateElement(name);
-                    if (!el) return;
-
-                    const value = evt.value;
-                    const textEl = el.querySelector(".state-text");
-                    const display =
-                        typeof value === "object" && value !== null
-                            ? JSON.stringify(value)
-                            : String(value);
-                    if (textEl) textEl.textContent = display;
-                    el.dataset.value = display;
-
-                    const dtype = el.dataset.type;
-                    if (dtype === "number") {
-                        const n = Number(value);
-                        if (!isNaN(n)) {
-                            const m = metrics[name] || {
-                                values: [],
-                                type: "number",
-                            };
-                            m.values = m.values || [];
-                            m.values.push(n);
-                            if (m.values.length > MAX_POINTS) m.values.shift();
-                            metrics[name] = m;
-                            renderSparkline(name);
-                        }
-                    } else if (dtype === "boolean") {
-                        const b =
-                            value === true ||
-                            value === "true" ||
-                            value === 1 ||
-                            value === "1";
-                        const n = b ? 1 : 0;
-                        const m = metrics[name] || {
-                            values: [],
-                            type: "boolean",
-                        };
-                        m.values = m.values || [];
-                        m.values.push(n);
-                        if (m.values.length > MAX_POINTS) m.values.shift();
-                        metrics[name] = m;
-                        renderSparkline(name);
-                    }
-                }
-
-                document.querySelectorAll(".state-val").forEach(function (el) {
-                    const name = el.dataset.name;
-                    const dtype = el.dataset.type;
-                    const initial = parseInitialValue(el);
-                    metrics[name] = { values: [], type: dtype };
-                    if (initial !== null) metrics[name].values.push(initial);
-                    renderSparkline(name);
-                });
-
-                const sse = new EventSource("/api/events");
-
-                sse.addEventListener("update", function (e) {
-                    try {
-                        const data = JSON.parse(e.data);
-                        handleUpdate(data);
-                    } catch (err) {
-                        console.error("sse update parse error", err);
-                    }
-                });
-            });
-        </script>
+        <script src="/static/dashboard.js" defer></script>
     </body>
 </html>

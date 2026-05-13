@@ -1,56 +1,30 @@
 package ui
 
 import (
-	"encoding/json"
 	"html/template"
 	"net/http"
 	"sort"
 )
 
-func staticHandler(dashboard *Dashboard, templ *template.Template) func(w http.ResponseWriter, r *http.Request) {
-	type templateData struct {
-		Rows       []Row
-		LastValues map[string]string
+func dashboardPage(dashboard *Dashboard, tmpl *template.Template) http.HandlerFunc {
+	type DashboardPageData struct {
+		Nodes []Node
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-
 		dashboard.mu.RLock()
-
-		sortedRows := make([]Row, len(dashboard.schema))
-		copy(sortedRows, dashboard.schema)
-
-		sort.Slice(sortedRows, func(i, j int) bool {
-			return sortedRows[i].Name < sortedRows[j].Name
-		})
-
-		values := make(map[string]string)
-		for _, row := range sortedRows {
-			if val, exists := dashboard.lastValues[row.Name]; exists {
-				switch v := val.(type) {
-				case string:
-					values[row.Name] = v
-				case []byte:
-					values[row.Name] = string(v)
-				default:
-					b, _ := json.Marshal(v)
-					values[row.Name] = string(b)
-				}
-			} else {
-				values[row.Name] = ""
-			}
-		}
-
-		data := templateData{
-			Rows:       sortedRows,
-			LastValues: values,
-		}
+		nodes := make([]Node, len(dashboard.nodes))
+		copy(nodes, dashboard.nodes)
 		dashboard.mu.RUnlock()
 
-		if err := templ.Execute(w, data); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
+		sort.Slice(nodes, func(i, j int) bool {
+			return nodes[i].Name < nodes[j].Name
+		})
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_ = tmpl.Execute(w, DashboardPageData{
+			Nodes: nodes,
+		})
 	}
 }
 

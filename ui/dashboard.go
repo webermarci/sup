@@ -29,9 +29,12 @@ func WithObserve[V any](signal sup.ReadableSignal[V]) DashboardOption {
 	return func(d *Dashboard) {
 		name := signal.Name()
 
-		d.schema = append(d.schema, Row{
-			Name: name,
-			Type: inferType[V](),
+		index := len(d.nodes)
+		d.nodes = append(d.nodes, Node{
+			Name:  name,
+			Spec:  signal.Inspect(),
+			Type:  inferType[V](),
+			Value: signal.Read(),
 		})
 
 		d.streams = append(d.streams, func(ctx context.Context) error {
@@ -46,7 +49,7 @@ func WithObserve[V any](signal sup.ReadableSignal[V]) DashboardOption {
 					}
 
 					d.mu.Lock()
-					d.lastValues[name] = val
+					d.nodes[index].Value = val
 					d.mu.Unlock()
 
 					update := map[string]any{"name": name, "value": val}
@@ -62,19 +65,17 @@ func WithObserve[V any](signal sup.ReadableSignal[V]) DashboardOption {
 // Dashboard is an actor that serves a web-based dashboard for monitoring various providers and states.
 type Dashboard struct {
 	*sup.BaseActor
-	schema     []Row
-	clients    map[chan []byte]struct{}
-	streams    []func(context.Context) error
-	lastValues map[string]any
-	mu         sync.RWMutex
+	nodes   []Node
+	clients map[chan []byte]struct{}
+	streams []func(context.Context) error
+	mu      sync.RWMutex
 }
 
 // NewDashboard creates a new Dashboard instance with the given name and options.
 func NewDashboard(name string, opts ...DashboardOption) *Dashboard {
 	d := &Dashboard{
-		BaseActor:  sup.NewBaseActor(name),
-		clients:    make(map[chan []byte]struct{}),
-		lastValues: make(map[string]any),
+		BaseActor: sup.NewBaseActor(name),
+		clients:   make(map[chan []byte]struct{}),
 	}
 
 	for _, opt := range opts {
@@ -88,16 +89,22 @@ func NewDashboard(name string, opts ...DashboardOption) *Dashboard {
 func (d *Dashboard) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	tmpl := template.Must(template.ParseFS(staticFS, "static/index.html"))
+	tmpl := template.Must(
+		template.New("index.html").
+			Funcs(template.FuncMap{
+				"formatValue": formatValue,
+			}).
+			ParseFS(staticFS, "static/index.html"),
+	)
 
 	subFS, err := fs.Sub(staticFS, "static")
 	if err != nil {
 		panic(err)
 	}
 
-	mux.HandleFunc("GET /{$}", staticHandler(d, tmpl))
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(subFS))))
+	mux.HandleFunc("GET /{$}", dashboardPage(d, tmpl))
 	mux.HandleFunc("GET /api/events", getEvents(d))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(subFS))))
 
 	return mux
 }

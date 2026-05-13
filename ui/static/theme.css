@@ -49,6 +49,7 @@ body {
     background-color: var(--header-bg);
     height: 36px;
     box-sizing: border-box;
+    white-space: nowrap;
 }
 
 .data-table td {
@@ -77,23 +78,30 @@ body {
     white-space: nowrap;
 }
 
+.col-kind-header,
+.col-kind,
 .col-type-header,
 .col-type {
     text-align: center !important;
+    white-space: nowrap;
 }
 
 .row-name {
     font-weight: 500;
+    white-space: nowrap;
 }
 
 .col-state {
-    overflow-wrap: anywhere;
+    width: 100%;
+    max-width: 0;
+    overflow: hidden;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
     font-weight: 500;
     color: var(--text-main);
 }
 
 .badge {
+    display: inline-block;
     background: var(--bg-page);
     color: var(--text-main);
     padding: 3px 8px;
@@ -102,37 +110,71 @@ body {
     font-weight: 500;
     font-family: ui-monospace, SFMono-Regular, monospace;
     border: 1px solid var(--border);
+    white-space: nowrap;
 }
 
-.badge[data-type="boolean"] {
+.badge-kind {
+    background-color: oklch(97.2% 0.004 258);
+    color: oklch(41% 0.02 262);
+    border-color: oklch(90.5% 0.01 258);
+}
+
+.badge-kind[data-kind="input"] {
+    background-color: oklch(96.8% 0.03 220);
+    color: oklch(43% 0.08 245);
+    border-color: oklch(91.5% 0.05 230);
+}
+
+.badge-kind[data-kind="output"] {
+    background-color: oklch(96.4% 0.032 160);
+    color: oklch(42% 0.1 160);
+    border-color: oklch(91.5% 0.06 160);
+}
+
+.badge-kind[data-kind="derived"] {
+    background-color: oklch(96% 0.035 310);
+    color: oklch(42% 0.11 312);
+    border-color: oklch(90% 0.07 312);
+}
+
+.badge-kind[data-kind="event"] {
+    background-color: oklch(96.5% 0.045 85);
+    color: oklch(48% 0.13 60);
+    border-color: oklch(92% 0.08 86);
+}
+
+.badge-type[data-type="boolean"] {
     background-color: oklch(96.2% 0.044 142.5);
     color: oklch(43.3% 0.119 146.9);
     border-color: oklch(92.5% 0.084 142.5);
 }
 
-.badge[data-type="number"] {
+.badge-type[data-type="number"] {
     background-color: oklch(95.1% 0.026 236.8);
     color: oklch(42.4% 0.076 244);
     border-color: oklch(91.6% 0.053 239.5);
 }
 
-.badge[data-type="string"] {
+.badge-type[data-type="string"] {
     background-color: oklch(96.2% 0.059 86.9);
     color: oklch(50.8% 0.141 53);
     border-color: oklch(92.4% 0.12 86.5);
 }
 
-.badge[data-type="json"],
-.badge[data-type="object"] {
+.badge-type[data-type="json"],
+.badge-type[data-type="object"] {
     background-color: oklch(95% 0.038 314.7);
     color: oklch(40% 0.12 312.2);
     border-color: oklch(89.5% 0.081 315.7);
 }
 
 .state-val {
-    display: inline-flex;
+    display: flex;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
 }
 
 .state-val[data-type="boolean"]::before {
@@ -154,27 +196,12 @@ body {
 }
 
 .state-text {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-weight: 600;
     color: var(--text-main);
-}
-
-.sparkline {
-    width: 200px;
-    height: 16px;
-    max-height: 16px;
-    display: block;
-    flex-shrink: 0;
-    color: var(--text-muted);
-}
-
-.col-trend .sparkline path {
-    stroke-width: 1.5;
-}
-
-.col-trend:not([data-type="number"]):not([data-type="boolean"]) .sparkline {
-    display: none;
-}
-
-.col-trend {
-    white-space: nowrap;
 }
