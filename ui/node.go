@@ -10,10 +10,10 @@ import (
 )
 
 type Node struct {
-	Name  string
-	Spec  sup.Spec
-	Type  string
-	Value any
+	Name  string   `json:"name"`
+	Spec  sup.Spec `json:"spec"`
+	Type  string   `json:"type"`
+	Value any      `json:"value"`
 }
 
 func inferType[V any]() string {

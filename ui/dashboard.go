@@ -3,20 +3,16 @@ package ui
 import (
 	"bytes"
 	"context"
-	"embed"
 	"encoding/json"
 	"fmt"
-	"html/template"
-	"io/fs"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/webermarci/sup"
+	"github.com/webermarci/sup/ui/frontend"
 )
-
-//go:embed static
-var staticFS embed.FS
 
 // DashboardOption represents a functional option for configuring the Dashboard.
 // It allows adding providers to observe, which will be reflected in the real-time UI.
@@ -52,7 +48,7 @@ func WithObserve[V any](signal sup.ReadableSignal[V]) DashboardOption {
 					d.nodes[index].Value = val
 					d.mu.Unlock()
 
-					update := map[string]any{"name": name, "value": val}
+					update := map[string]any{"timestamp": time.Now().UnixMilli(), "name": name, "value": val}
 					if b, err := json.Marshal(update); err == nil {
 						d.broadcast("update", b)
 					}
@@ -89,24 +85,11 @@ func NewDashboard(name string, opts ...DashboardOption) *Dashboard {
 func (d *Dashboard) Handler() http.Handler {
 	mux := http.NewServeMux()
 
-	tmpl := template.Must(
-		template.New("index.html").
-			Funcs(template.FuncMap{
-				"formatValue": formatValue,
-			}).
-			ParseFS(staticFS, "static/index.html"),
-	)
-
-	subFS, err := fs.Sub(staticFS, "static")
-	if err != nil {
-		panic(err)
-	}
-
-	mux.HandleFunc("GET /{$}", dashboardPage(d, tmpl))
+	mux.HandleFunc("GET /api/nodes", getNodes(d))
 	mux.HandleFunc("GET /api/events", getEvents(d))
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(subFS))))
+	mux.Handle("/", svelteKitHandler(frontend.FileSystem(), "/"))
 
-	return mux
+	return cors()(mux)
 }
 
 // Run starts all dashboard streams and blocks until the context is canceled or a stream returns an error.

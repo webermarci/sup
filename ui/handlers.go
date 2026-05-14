@@ -1,17 +1,47 @@
 package ui
 
 import (
-	"html/template"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io/fs"
 	"net/http"
+	"os"
 	"sort"
+	"strings"
 )
 
-func dashboardPage(dashboard *Dashboard, tmpl *template.Template) http.HandlerFunc {
-	type DashboardPageData struct {
-		Nodes []Node
+func cors() func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+			next.ServeHTTP(w, r)
+		})
 	}
+}
 
+func svelteKitHandler(fileSystem fs.FS, path string) http.Handler {
+	httpFileSystem := http.FS(fileSystem)
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, path)
+
+		_, err := httpFileSystem.Open(path)
+		if errors.Is(err, os.ErrNotExist) {
+			path = fmt.Sprintf("%s.html", path)
+		}
+
+		r.URL.Path = path
+		http.FileServer(httpFileSystem).ServeHTTP(w, r)
+	})
+}
+
+func getNodes(dashboard *Dashboard) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+
 		dashboard.mu.RLock()
 		nodes := make([]Node, len(dashboard.nodes))
 		copy(nodes, dashboard.nodes)
@@ -21,10 +51,7 @@ func dashboardPage(dashboard *Dashboard, tmpl *template.Template) http.HandlerFu
 			return nodes[i].Name < nodes[j].Name
 		})
 
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = tmpl.Execute(w, DashboardPageData{
-			Nodes: nodes,
-		})
+		json.NewEncoder(w).Encode(nodes)
 	}
 }
 

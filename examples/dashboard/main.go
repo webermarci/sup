@@ -65,21 +65,15 @@ func main() {
 		ui.WithObserve(combined),
 	)
 
-	uiSupervisor := sup.NewSupervisor("ui_supervisor",
-		sup.WithActors(dashboard),
-	)
-
-	computedSupervisor := sup.NewSupervisor("computed_supervisor",
-		sup.WithActors(combined, throttledInputASCII, throttledInputEven),
-	)
-
 	root := sup.NewSupervisor("root_supervisor",
 		sup.WithActors(
-			uiSupervisor,
+			dashboard,
 			input,
 			throttledInput,
 			counter,
-			computedSupervisor,
+			combined,
+			throttledInputASCII,
+			throttledInputEven,
 		),
 		sup.WithLogger(slog.Default()),
 	)
