@@ -7,10 +7,10 @@ import (
 	"time"
 )
 
-func TestPolledSignal_DefaultValue(t *testing.T) {
+func TestPeriodicSignal_DefaultValue(t *testing.T) {
 	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 42, nil
-	}, time.Second)
+	}, time.Hour)
 
 	go signal.Run(t.Context())
 
@@ -19,10 +19,10 @@ func TestPolledSignal_DefaultValue(t *testing.T) {
 	}
 }
 
-func TestPolledSignal_InitialValue(t *testing.T) {
+func TestPeriodicSignal_InitialValue(t *testing.T) {
 	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 99, nil
-	}, time.Second)
+	}, time.Hour)
 	signal.SetInitialValue(7)
 
 	go signal.Run(t.Context())
@@ -32,7 +32,7 @@ func TestPolledSignal_InitialValue(t *testing.T) {
 	}
 }
 
-func TestPolledSignal_Value(t *testing.T) {
+func TestPeriodicSignal_Value(t *testing.T) {
 	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 42, nil
 	}, 10*time.Millisecond)
@@ -46,7 +46,7 @@ func TestPolledSignal_Value(t *testing.T) {
 	}
 }
 
-func TestPolledSignal_Trigger(t *testing.T) {
+func TestPeriodicSignal_Trigger(t *testing.T) {
 	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 1, nil
 	}, time.Second)
@@ -67,7 +67,7 @@ func TestPolledSignal_Trigger(t *testing.T) {
 	}
 }
 
-func TestPolledSignal_ErrorSkipsUpdate(t *testing.T) {
+func TestPeriodicSignal_ErrorSkipsUpdate(t *testing.T) {
 	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, errors.New("oops")
 	}, 10*time.Millisecond)
@@ -82,7 +82,7 @@ func TestPolledSignal_ErrorSkipsUpdate(t *testing.T) {
 	}
 }
 
-func TestPolledSignal_Subscribe(t *testing.T) {
+func TestPeriodicSignal_Subscribe(t *testing.T) {
 	ctx := t.Context()
 
 	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
@@ -103,7 +103,7 @@ func TestPolledSignal_Subscribe(t *testing.T) {
 	}
 }
 
-func TestPolledSignal_MultipleSubscribers(t *testing.T) {
+func TestPeriodicSignal_MultipleSubscribers(t *testing.T) {
 	ctx := t.Context()
 
 	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
@@ -127,7 +127,7 @@ func TestPolledSignal_MultipleSubscribers(t *testing.T) {
 	}
 }
 
-func TestPolledSignal_UnsubscribeOnContextCancel(t *testing.T) {
+func TestPeriodicSignal_UnsubscribeOnContextCancel(t *testing.T) {
 	ctx := t.Context()
 
 	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
@@ -153,7 +153,7 @@ func TestPolledSignal_UnsubscribeOnContextCancel(t *testing.T) {
 	}
 }
 
-func TestPolledSignal_InitialNotifyEnabled(t *testing.T) {
+func TestPeriodicSignal_InitialNotifyEnabled(t *testing.T) {
 	ctx := t.Context()
 
 	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
@@ -176,7 +176,7 @@ func TestPolledSignal_InitialNotifyEnabled(t *testing.T) {
 	}
 }
 
-func TestPolledSignal_InitialNotifyDisabled(t *testing.T) {
+func TestPeriodicSignal_InitialNotifyDisabled(t *testing.T) {
 	ctx := t.Context()
 
 	// Create a signal that will NEVER naturally poll during the test
@@ -202,7 +202,7 @@ func TestPolledSignal_InitialNotifyDisabled(t *testing.T) {
 	}
 }
 
-func TestPolledSignal_ActorInterface(t *testing.T) {
+func TestPeriodicSignal_ActorInterface(t *testing.T) {
 	signal := NewPeriodicSignal(t.Name(), func(_ context.Context) (int, error) {
 		return 0, errors.New("fail")
 	}, time.Second)
