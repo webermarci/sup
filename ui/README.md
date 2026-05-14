@@ -4,14 +4,16 @@
 [![Test](https://github.com/webermarci/sup/actions/workflows/test.yml/badge.svg)](https://github.com/webermarci/sup/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-`sup/ui` provides an out-of-the-box, beautifully designed web interface to observe the internal state of your actors. By strictly adhering to actor-model principles, the dashboard is **read-only**, ensuring that state mutation remains safely isolated within the actors themselves.
+`sup/ui` provides a web-based dashboard to observe the internal state of your actors. The dashboard is intentionally read-only so that state mutation remains isolated inside the actors themselves and the UI only observes and displays state changes.
 
 ## Features
 
-- **Real-Time Updates:** Uses Server-Sent Events (SSE) to instantly push state changes to the browser.
-- **Zero Dependencies:** No npm, no external CSS frameworks, no frontend build steps. The HTML, CSS, and JS are highly optimized and embedded directly into your Go binary using `embed.FS`.
-- **Actor-Model Compliant:** Purely observational. Actors broadcast their state, and the UI consumes it, preventing external UI mutations from violating actor concurrency guarantees.
-- **Automatic Type Inference:** Automatically detects whether an actor's state is a `boolean`, `number`, `string`, or `json` and formats it accordingly.
+- **Real-Time Updates:** Uses Server-Sent Events (SSE) to push state changes to the browser in real time.
+- **SvelteKit Frontend:** The UI is implemented with SvelteKit and Vite for a modern, component-driven frontend.
+- **Embeddable Static Assets:** Built frontend assets are embedded into the Go binary using `embed.FS`. See `sup/ui/frontend/frontend.go` which contains `//go:embed all:build` and `//go:generate` directives.
+- **Prebuilt:** A `build` directory is included in the repository so you can compile and run the Go binary without having Node installed.
+- **Actor-Model Compliant:** The dashboard only observes and displays state; it does not mutate actor state.
+- **Automatic Type Inference:** Values are automatically shown as `boolean`, `number`, `string`, or `json` for nice formatting.
 
 ## Installation
 
@@ -21,10 +23,7 @@ go get github.com/webermarci/sup/ui
 
 ## Usage
 
-Integrating the dashboard into your `sup` application takes only a few lines of code.
-
-### 1. Create the Dashboard
-Initialize the dashboard and register the providers (actors) you want to observe using `ui.WithObserve()`.
+Integrating the dashboard into your `sup` application requires only a few lines. The dashboard is just another supervised actor and exposes an `http.Handler()` that serves both the API and the frontend.
 
 ```go
 package main
@@ -64,3 +63,5 @@ func main() {
 	supervisor.Run(context.Background())
 }
 ```
+
+With the repository's prebuilt `sup/ui/frontend/build` present, the dashboard will serve the static site embedded in the binary.
