@@ -13,10 +13,10 @@ type PeriodicSignal[V any] struct {
 	trigger  chan struct{}
 }
 
-// NewPeriodicSignal creates a new PeriodicSignal with the given name and update function.
-func NewPeriodicSignal[V any](name string, update func(context.Context) (V, error), interval time.Duration) *PeriodicSignal[V] {
+// NewPeriodicSignal creates a new PeriodicSignal with the given id and update function.
+func NewPeriodicSignal[V any](id string, update func(context.Context) (V, error), interval time.Duration) *PeriodicSignal[V] {
 	return &PeriodicSignal[V]{
-		BaseSignal: NewBaseSignal[V](name),
+		BaseSignal: NewBaseSignal[V](id),
 		update:     update,
 		interval:   interval,
 		trigger:    make(chan struct{}, 1),

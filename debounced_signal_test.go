@@ -150,8 +150,8 @@ func TestDebouncedSignal_Inspect(t *testing.T) {
 		t.Fatalf("expected kind debounced_signal, got %q", spec.Kind)
 	}
 
-	if len(spec.Dependencies) != 1 || spec.Dependencies[0] != src.Name() {
-		t.Fatalf("expected dependency %q, got %v", src.Name(), spec.Dependencies)
+	if len(spec.Dependencies) != 1 || spec.Dependencies[0] != src.ID() {
+		t.Fatalf("expected dependency %q, got %v", src.ID(), spec.Dependencies)
 	}
 
 	if spec.Metadata["wait"] != (250 * time.Millisecond).String() {

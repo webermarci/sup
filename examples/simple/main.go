@@ -25,9 +25,9 @@ type Counter struct {
 	State          int
 }
 
-func NewCounter(name string) *Counter {
+func NewCounter(id string) *Counter {
 	return &Counter{
-		BaseActor:      sup.NewBaseActor(name),
+		BaseActor:      sup.NewBaseActor(id),
 		GetInbox:       sup.NewCallInbox[GetMessage, int](8),
 		IncrementInbox: sup.NewCastInbox[IncrementMessage](8),
 	}

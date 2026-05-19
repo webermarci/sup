@@ -15,9 +15,9 @@ type ThrottledSignal[V any] struct {
 }
 
 // NewThrottledSignal creates a new ThrottledSignal actor attached to a source provider.
-func NewThrottledSignal[V any](name string, src ReadableSignal[V], interval time.Duration) *ThrottledSignal[V] {
+func NewThrottledSignal[V any](id string, src ReadableSignal[V], interval time.Duration) *ThrottledSignal[V] {
 	s := &ThrottledSignal[V]{
-		BaseSignal: NewBaseSignal[V](name),
+		BaseSignal: NewBaseSignal[V](id),
 		src:        src,
 		interval:   interval,
 	}
@@ -84,7 +84,7 @@ func (s *ThrottledSignal[V]) Run(ctx context.Context) error {
 func (s *ThrottledSignal[V]) Inspect() Spec {
 	return Spec{
 		Kind:         "throttled_signal",
-		Dependencies: []string{s.src.Name()},
+		Dependencies: []string{s.src.ID()},
 		Metadata: map[string]string{
 			"interval": s.interval.String(),
 		},

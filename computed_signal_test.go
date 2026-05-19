@@ -237,8 +237,8 @@ func TestComputedSignal_Inspect(t *testing.T) {
 		t.Fatalf("expected kind computed_signal, got %q", spec.Kind)
 	}
 
-	if len(spec.Dependencies) != 2 || spec.Dependencies[0] != p.Name() || spec.Dependencies[1] != q.Name() {
-		t.Fatalf("expected dependencies [%q %q], got %v", p.Name(), q.Name(), spec.Dependencies)
+	if len(spec.Dependencies) != 2 || spec.Dependencies[0] != p.ID() || spec.Dependencies[1] != q.ID() {
+		t.Fatalf("expected dependencies [%q %q], got %v", p.ID(), q.ID(), spec.Dependencies)
 	}
 
 	if spec.Metadata["coalesce_window"] != (5 * time.Millisecond).String() {

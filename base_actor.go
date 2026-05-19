@@ -4,10 +4,10 @@ import "log/slog"
 
 // BaseActor provides a simple implementation of the Actor interface with a name and a logger.
 // It can be embedded in other structs to create more complex actors.
-// The Name and Logger methods are safe to call from inside Run(),
+// The ID and Logger methods are safe to call from inside Run(),
 // and the setLogger method is used internally by the supervisor to inject a logger into the actor.
 type BaseActor struct {
-	name   string
+	id     string
 	logger *slog.Logger
 }
 
@@ -15,14 +15,14 @@ type BaseActor struct {
 // The logger is initialized to a no-op logger and will be set by the supervisor when the actor is spawned.
 func NewBaseActor(name string) *BaseActor {
 	return &BaseActor{
-		name:   name,
+		id:     name,
 		logger: noOpLogger,
 	}
 }
 
-// Name returns the actor's name. It is safe to call from inside Run().
-func (a *BaseActor) Name() string {
-	return a.name
+// ID returns the actor's id. It is safe to call from inside Run().
+func (a *BaseActor) ID() string {
+	return a.id
 }
 
 // Logger returns the actor's logger. It is safe to call from inside Run().
@@ -40,5 +40,5 @@ func (a *BaseActor) Inspect() Spec {
 }
 
 func (a *BaseActor) setLogger(logger *slog.Logger) {
-	a.logger = logger.With("actor", a.name)
+	a.logger = logger.With("actor", a.id)
 }

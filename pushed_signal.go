@@ -10,10 +10,10 @@ type PushedSignal[V any] struct {
 	update func(context.Context, V) error
 }
 
-// NewPushedSignal creates a new PushedSignal with the given name and update function.
-func NewPushedSignal[V any](name string, update func(context.Context, V) error) *PushedSignal[V] {
+// NewPushedSignal creates a new PushedSignal with the given id and update function.
+func NewPushedSignal[V any](id string, update func(context.Context, V) error) *PushedSignal[V] {
 	return &PushedSignal[V]{
-		BaseSignal: NewBaseSignal[V](name),
+		BaseSignal: NewBaseSignal[V](id),
 		update:     update,
 	}
 }

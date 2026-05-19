@@ -101,7 +101,7 @@ func TestSupervisor_OnError(t *testing.T) {
 		t.Errorf("failed to capture error via OnError")
 	}
 
-	if capturedActor == nil || capturedActor.Name() != t.Name() {
+	if capturedActor == nil || capturedActor.ID() != t.Name() {
 		t.Errorf("failed to capture actor identity")
 	}
 }

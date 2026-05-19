@@ -106,9 +106,9 @@ type Supervisor struct {
 
 // NewSupervisor creates a new Supervisor with the given options.
 // Panics if the provided options are invalid.
-func NewSupervisor(name string, opts ...SupervisorOption) *Supervisor {
+func NewSupervisor(id string, opts ...SupervisorOption) *Supervisor {
 	s := &Supervisor{
-		BaseActor:    NewBaseActor(name),
+		BaseActor:    NewBaseActor(id),
 		policy:       Transient,
 		restartDelay: time.Second,
 		terminalErr:  make(chan error, 1),
@@ -219,7 +219,7 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 		panic("sup: cannot spawn nil actor")
 	}
 
-	if actor.Name() == "" {
+	if actor.ID() == "" {
 		panic("sup: actor name cannot be empty")
 	}
 
@@ -235,10 +235,10 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 		restartCount := 0
 
 		for {
-			name := actor.Name()
+			name := actor.ID()
 
 			s.Logger().Info("starting child actor",
-				slog.String("child", actor.Name()),
+				slog.String("child", actor.ID()),
 			)
 
 			s.notifyActorStarted(actor)
@@ -247,7 +247,7 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 
 			if err != nil {
 				s.Logger().Error("child actor failed",
-					slog.String("child", actor.Name()),
+					slog.String("child", actor.ID()),
 					slog.Any("err", err),
 				)
 				if s.onError != nil {
@@ -255,20 +255,20 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 				}
 			} else {
 				s.Logger().Info("child actor exited cleanly",
-					slog.String("child", actor.Name()),
+					slog.String("child", actor.ID()),
 				)
 			}
 
 			if ctx.Err() != nil {
 				s.Logger().Info("supervisor context canceled, stopping child",
-					slog.String("child", actor.Name()),
+					slog.String("child", actor.ID()),
 				)
 				return
 			}
 
 			if s.policy == Temporary || (s.policy == Transient && err == nil) {
 				s.Logger().Info("child actor will not be restarted due to policy",
-					slog.String("child", actor.Name()),
+					slog.String("child", actor.ID()),
 					slog.Int("policy", int(s.policy)),
 				)
 				return
@@ -282,7 +282,7 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 					escErr := fmt.Errorf("actor %s exceeded %d restarts in %v", name, s.maxRestarts, s.restartWindow)
 					s.Logger().Error("supervisor terminal error",
 						slog.String("error", escErr.Error()),
-						slog.String("child", actor.Name()),
+						slog.String("child", actor.ID()),
 						slog.Int("max_restarts", s.maxRestarts),
 						slog.Duration("window", s.restartWindow),
 					)
@@ -301,7 +301,7 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 
 			restartCount++
 			s.Logger().Warn("restarting child actor",
-				slog.String("child", actor.Name()),
+				slog.String("child", actor.ID()),
 				slog.Int("restart_count", restartCount),
 			)
 			s.notifyActorRestarting(actor, restartCount, err)

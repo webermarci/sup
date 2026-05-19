@@ -23,7 +23,7 @@ type DashboardOption func(*Dashboard)
 // but will not allow user input to update the signal.
 func WithObserve[V any](signal sup.ReadableSignal[V]) DashboardOption {
 	return func(d *Dashboard) {
-		name := signal.Name()
+		name := signal.ID()
 
 		index := len(d.nodes)
 		d.nodes = append(d.nodes, Node{

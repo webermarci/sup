@@ -18,9 +18,9 @@ type BaseSignal[V any] struct {
 }
 
 // NewBaseSignal creates a BaseSignal with sane defaults.
-func NewBaseSignal[V any](name string) *BaseSignal[V] {
+func NewBaseSignal[V any](id string) *BaseSignal[V] {
 	return &BaseSignal[V]{
-		BaseActor:   NewBaseActor(name),
+		BaseActor:   NewBaseActor(id),
 		broadcaster: broadcaster[V]{buffer: 32},
 	}
 }

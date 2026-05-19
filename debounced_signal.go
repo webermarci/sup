@@ -15,9 +15,9 @@ type DebouncedSignal[V any] struct {
 }
 
 // NewDebouncedSignal creates a new DebouncedSignal actor attached to a source provider.
-func NewDebouncedSignal[V any](name string, src ReadableSignal[V], wait time.Duration) *DebouncedSignal[V] {
+func NewDebouncedSignal[V any](id string, src ReadableSignal[V], wait time.Duration) *DebouncedSignal[V] {
 	s := &DebouncedSignal[V]{
-		BaseSignal: NewBaseSignal[V](name),
+		BaseSignal: NewBaseSignal[V](id),
 		src:        src,
 		wait:       wait,
 	}
@@ -106,7 +106,7 @@ func (s *DebouncedSignal[V]) Run(ctx context.Context) error {
 func (s *DebouncedSignal[V]) Inspect() Spec {
 	return Spec{
 		Kind:         "debounced_signal",
-		Dependencies: []string{s.src.Name()},
+		Dependencies: []string{s.src.ID()},
 		Metadata: map[string]string{
 			"wait":     s.wait.String(),
 			"max_wait": s.maxWait.String(),

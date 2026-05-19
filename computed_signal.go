@@ -14,12 +14,12 @@ type ComputedSignal[V any] struct {
 	coalesceWindow time.Duration
 }
 
-// NewComputedSignal creates a new ComputedSignal with the given name, update function, and dependencies.
+// NewComputedSignal creates a new ComputedSignal with the given id, update function, and dependencies.
 // The update function is called whenever any of the dependencies notify a change,
 // and the result is broadcast to subscribers.
-func NewComputedSignal[V any](name string, update func() V, deps ...WatcherSignal) *ComputedSignal[V] {
+func NewComputedSignal[V any](id string, update func() V, deps ...WatcherSignal) *ComputedSignal[V] {
 	s := &ComputedSignal[V]{
-		BaseSignal:     NewBaseSignal[V](name),
+		BaseSignal:     NewBaseSignal[V](id),
 		update:         update,
 		deps:           deps,
 		coalesceWindow: 5 * time.Millisecond,
@@ -99,7 +99,7 @@ func (s *ComputedSignal[V]) Run(ctx context.Context) error {
 func (s *ComputedSignal[V]) Inspect() Spec {
 	var dependencies []string
 	for _, d := range s.deps {
-		dependencies = append(dependencies, d.Name())
+		dependencies = append(dependencies, d.ID())
 	}
 
 	return Spec{
