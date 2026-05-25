@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -46,6 +47,7 @@ func WithSignal[V any](signal sup.ReadableSignal[V]) RegistryOption {
 		es := &ExposedSignal{
 			ID:    id,
 			Spec:  signal.Inspect(),
+			Type:  inferType[V](),
 			Value: signal.Read(),
 		}
 
@@ -300,5 +302,21 @@ func (r *Registry) handleCall(w http.ResponseWriter, req *http.Request) {
 
 	if err := json.NewEncoder(w).Encode(res); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+func inferType[V any]() string {
+	t := reflect.TypeFor[V]()
+	switch t.Kind() {
+	case reflect.Bool:
+		return "boolean"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64,
+		reflect.Float32, reflect.Float64:
+		return "number"
+	case reflect.String:
+		return "string"
+	default:
+		return "json"
 	}
 }
