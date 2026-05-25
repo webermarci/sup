@@ -2,7 +2,7 @@ package sup
 
 import "log/slog"
 
-// BaseActor provides a simple implementation of the Actor interface with a name and a logger.
+// BaseActor provides a simple implementation of the Actor interface with a id and a logger.
 // It can be embedded in other structs to create more complex actors.
 // The ID and Logger methods are safe to call from inside Run(),
 // and the setLogger method is used internally by the supervisor to inject a logger into the actor.
@@ -11,11 +11,11 @@ type BaseActor struct {
 	logger *slog.Logger
 }
 
-// NewBaseActor creates a new BaseActor with the given name.
+// NewBaseActor creates a new BaseActor with the given id.
 // The logger is initialized to a no-op logger and will be set by the supervisor when the actor is spawned.
-func NewBaseActor(name string) *BaseActor {
+func NewBaseActor(id string) *BaseActor {
 	return &BaseActor{
-		id:     name,
+		id:     id,
 		logger: noOpLogger,
 	}
 }
