@@ -35,6 +35,9 @@ type SupervisorOption func(*Supervisor)
 // WithActor adds an actor to be supervised. Can be called multiple times to add multiple actors.
 func WithActor(actor Actor) SupervisorOption {
 	return func(s *Supervisor) {
+		if actor == nil {
+			panic("sup: cannot add nil actor")
+		}
 		s.actors = append(s.actors, actor)
 	}
 }
@@ -42,7 +45,12 @@ func WithActor(actor Actor) SupervisorOption {
 // WithActors adds multiple actors to be supervised.
 func WithActors(actors ...Actor) SupervisorOption {
 	return func(s *Supervisor) {
-		s.actors = append(s.actors, actors...)
+		for _, actor := range actors {
+			if actor == nil {
+				panic("sup: cannot add nil actor")
+			}
+			s.actors = append(s.actors, actor)
+		}
 	}
 }
 
@@ -81,7 +89,7 @@ func WithOnError(handler func(actor Actor, err error)) SupervisorOption {
 // This allows external monitoring of actor behavior and supervisor actions.
 func WithObserver(observer *SupervisorObserver) SupervisorOption {
 	return func(s *Supervisor) {
-		s.observer = observer
+		s.observers = append(s.observers, observer)
 	}
 }
 
@@ -103,7 +111,7 @@ type Supervisor struct {
 	wg            sync.WaitGroup
 	onError       func(actor Actor, err error)
 	terminalErr   chan error
-	observer      *SupervisorObserver
+	observers     []*SupervisorObserver
 	mu            sync.RWMutex
 }
 
@@ -141,78 +149,62 @@ func (s *Supervisor) executeSafe(ctx context.Context, fn func(context.Context) e
 }
 
 func (s *Supervisor) notifyActorRegistered(actor Actor) {
-	obs := s.observer
-	if obs == nil || obs.OnActorRegistered == nil {
-		return
-	}
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-			}
-		}()
-		obs.OnActorRegistered(actor)
-	}()
+	s.notify(func(obs *SupervisorObserver) {
+		if obs.OnActorRegistered != nil {
+			obs.OnActorRegistered(actor)
+		}
+	})
 }
 
 func (s *Supervisor) notifyActorStarted(actor Actor) {
-	obs := s.observer
-	if obs == nil || obs.OnActorStarted == nil {
-		return
-	}
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-			}
-		}()
-		obs.OnActorStarted(actor)
-	}()
+	s.notify(func(obs *SupervisorObserver) {
+		if obs.OnActorStarted != nil {
+			obs.OnActorStarted(actor)
+		}
+	})
 }
 
 func (s *Supervisor) notifyActorStopped(actor Actor, err error) {
-	obs := s.observer
-	if obs == nil || obs.OnActorStopped == nil {
-		return
-	}
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-			}
-		}()
-		obs.OnActorStopped(actor, err)
-	}()
+	s.notify(func(obs *SupervisorObserver) {
+		if obs.OnActorStopped != nil {
+			obs.OnActorStopped(actor, err)
+		}
+	})
 }
 
 func (s *Supervisor) notifyActorRestarting(actor Actor, restartCount int, lastErr error) {
-	obs := s.observer
-	if obs == nil || obs.OnActorRestarting == nil {
-		return
-	}
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-			}
-		}()
-		obs.OnActorRestarting(actor, restartCount, lastErr)
-	}()
+	s.notify(func(obs *SupervisorObserver) {
+		if obs.OnActorRestarting != nil {
+			obs.OnActorRestarting(actor, restartCount, lastErr)
+		}
+	})
 }
 
 func (s *Supervisor) notifySupervisorTerminal(err error) {
-	obs := s.observer
-	if obs == nil || obs.OnSupervisorTerminal == nil {
-		return
-	}
+	s.notify(func(obs *SupervisorObserver) {
+		if obs.OnSupervisorTerminal != nil {
+			obs.OnSupervisorTerminal(err)
+		}
+	})
+}
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-			}
-		}()
-		obs.OnSupervisorTerminal(err)
-	}()
+func (s *Supervisor) notify(fn func(*SupervisorObserver)) {
+	s.mu.RLock()
+	observers := append([]*SupervisorObserver(nil), s.observers...)
+	s.mu.RUnlock()
+
+	for _, obs := range observers {
+		if obs == nil {
+			continue
+		}
+
+		go func(obs *SupervisorObserver) {
+			defer func() {
+				_ = recover()
+			}()
+			fn(obs)
+		}(obs)
+	}
 }
 
 // Spawn starts the given actor under supervision.
@@ -359,7 +351,7 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		s.wg.Wait()
 		return err
 	case <-allDone:
-		s.Logger().Info("supervisor shuting down as all actors have stopped")
+		s.Logger().Info("supervisor shutting down as all actors have stopped")
 		return nil
 	}
 }
