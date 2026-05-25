@@ -16,6 +16,7 @@ var noOpLogger = slog.New(slog.NewTextHandler(io.Discard, nil))
 type Actor interface {
 	ID() string
 	Run(context.Context) error
+	Inspect() Spec
 	setLogger(*slog.Logger)
 }
 
@@ -31,6 +32,14 @@ func (a *actorFunc) ID() string {
 
 func (a *actorFunc) Run(ctx context.Context) error {
 	return a.fn(ctx, a.logger)
+}
+
+func (a *actorFunc) Inspect() Spec {
+	return Spec{
+		Kind:         "actor_func",
+		Dependencies: []string{},
+		Metadata:     map[string]string{},
+	}
 }
 
 func (a *actorFunc) setLogger(l *slog.Logger) {

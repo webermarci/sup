@@ -37,12 +37,12 @@ func NewRouter[F any](strategy RouterStrategy, routees ...F) *Router[F] {
 		}
 
 	case RoundRobin:
-		var counter uint64
+		var counter atomic.Uint64
 		n := uint64(len(routees))
 		return &Router[F]{
 			routees: routees,
 			next: func() F {
-				i := atomic.AddUint64(&counter, 1)
+				i := counter.Add(1)
 				return routees[(i-1)%n]
 			},
 		}

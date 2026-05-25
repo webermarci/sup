@@ -19,7 +19,8 @@ const (
 	Temporary                      // Never restart
 )
 
-// SupervisorObserver allows observing lifecycle events of supervised actors and the supervisor itself. This can be used for logging, monitoring, or triggering side effects based on actor behavior.
+// SupervisorObserver allows observing lifecycle events of supervised actors and the supervisor itself.
+// This can be used for logging, monitoring, or triggering side effects based on actor behavior.
 type SupervisorObserver struct {
 	OnActorRegistered    func(actor Actor)
 	OnActorStarted       func(actor Actor)
@@ -68,14 +69,16 @@ func WithRestartLimit(maxRestarts int, window time.Duration) SupervisorOption {
 	}
 }
 
-// WithOnError sets a callback function that will be called whenever a supervised actor returns an error or panics. The callback receives the actor and the error as arguments.
+// WithOnError sets a callback function that will be called whenever a supervised actor returns an error or panics.
+// The callback receives the actor and the error as arguments.
 func WithOnError(handler func(actor Actor, err error)) SupervisorOption {
 	return func(s *Supervisor) {
 		s.onError = handler
 	}
 }
 
-// WithObserver sets a SupervisorObserver to receive lifecycle event notifications for supervised actors and the supervisor itself. This allows external monitoring of actor behavior and supervisor actions.
+// WithObserver sets a SupervisorObserver to receive lifecycle event notifications for supervised actors and the supervisor itself.
+// This allows external monitoring of actor behavior and supervisor actions.
 func WithObserver(observer *SupervisorObserver) SupervisorOption {
 	return func(s *Supervisor) {
 		s.observer = observer
