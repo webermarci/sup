@@ -11,7 +11,7 @@ type ComputedSignal[V any] struct {
 	*BaseSignal[V]
 	update         func() V
 	deps           []WatcherSignal
-	coalesceWindow time.Duration
+	batchingWindow time.Duration
 }
 
 // NewComputedSignal creates a new ComputedSignal with the given id, update function, and dependencies.
@@ -22,19 +22,19 @@ func NewComputedSignal[V any](id string, update func() V, deps ...WatcherSignal)
 		BaseSignal:     NewBaseSignal[V](id),
 		update:         update,
 		deps:           deps,
-		coalesceWindow: 5 * time.Millisecond,
+		batchingWindow: 5 * time.Millisecond,
 	}
 	s.value = update()
 
 	return s
 }
 
-// SetCoalesceWindow configures the duration to wait after receiving a notification from any dependency before triggering an update.
+// SetBatchingWindow configures the duration to wait after receiving a notification from any dependency before triggering an update.
 // This allows for coalescing multiple rapid updates into a single update, improving efficiency.
-// It acquires a lock to ensure thread-safe access to the coalesceWindow configuration.
-func (s *ComputedSignal[V]) SetCoalesceWindow(window time.Duration) {
+// It acquires a lock to ensure thread-safe access to the batchingWindow configuration.
+func (s *ComputedSignal[V]) SetBatchingWindow(window time.Duration) {
 	s.mu.Lock()
-	s.coalesceWindow = window
+	s.batchingWindow = window
 	s.mu.Unlock()
 }
 
@@ -81,7 +81,7 @@ func (s *ComputedSignal[V]) Run(ctx context.Context) error {
 		case <-ping:
 			if !pending {
 				pending = true
-				coalesce.Reset(s.coalesceWindow)
+				coalesce.Reset(s.batchingWindow)
 				coalesceChan = coalesce.C
 			}
 
@@ -106,7 +106,7 @@ func (s *ComputedSignal[V]) Inspect() Spec {
 		Kind:         "computed_signal",
 		Dependencies: dependencies,
 		Metadata: map[string]string{
-			"coalesce_window": s.coalesceWindow.String(),
+			"batching_window": s.batchingWindow.String(),
 		},
 	}
 }

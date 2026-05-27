@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -97,7 +98,9 @@ func NewRegistry(id string, opts ...RegistryOption) *Registry {
 	r := &Registry{
 		BaseActor:   sup.NewBaseActor(id),
 		actorsByID:  make(map[string]*ExposedActor),
+		actors:      make([]*ExposedActor, 0),
 		signalsByID: make(map[string]*ExposedSignal),
+		signals:     make([]*ExposedSignal, 0),
 		clients:     make(map[chan []byte]struct{}),
 	}
 
@@ -136,6 +139,17 @@ func (r *Registry) Handler() http.Handler {
 	mux.HandleFunc("POST /actors/{actorID}/calls/{callName}", r.handleCall)
 
 	return mux
+}
+
+func (r *Registry) Inspect() sup.Spec {
+	return sup.Spec{
+		Kind:         "registry",
+		Dependencies: nil,
+		Metadata: map[string]string{
+			"actor_count":  strconv.Itoa(len(r.actors)),
+			"signal_count": strconv.Itoa(len(r.signals)),
+		},
+	}
 }
 
 func (r *Registry) broadcast(eventType string, value any) {

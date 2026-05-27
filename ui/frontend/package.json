@@ -34,5 +34,11 @@
 		"typescript": "6.0.3",
 		"typescript-eslint": "8.60.0",
 		"vite": "8.0.14"
+	},
+	"dependencies": {
+		"@fontsource-variable/inter": "5.2.8",
+		"@fontsource-variable/jetbrains-mono": "5.2.8",
+		"@picocss/pico": "2.1.1",
+		"remixicon": "4.9.1"
 	}
 }

@@ -1,1 +1,21 @@
+@import '@picocss/pico/css/pico.min.css';
 @import 'tailwindcss';
+
+:root {
+	--app-font-sans:
+		'Inter Variable', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+		sans-serif;
+	--app-font-mono: 'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', 'SF Mono', monospace;
+
+	--font-sans: var(--app-font-sans);
+	--font-mono: var(--app-font-mono);
+
+	--pico-font-family-sans-serif: var(--app-font-sans);
+	--pico-font-family-monospace: var(--app-font-mono);
+
+	--pico-font-size: 87.5%;
+	--pico-line-height: 1.4;
+	--pico-form-element-spacing-vertical: 0.55rem;
+	--pico-form-element-spacing-horizontal: 0.85rem;
+	--pico-border-width: 1px;
+}

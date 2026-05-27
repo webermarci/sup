@@ -210,7 +210,7 @@ func TestComputedSignal_GlitchFreeDiamond(t *testing.T) {
 		c := nodeC.Read()
 		return b + c
 	}, nodeB, nodeC)
-	nodeD.SetCoalesceWindow(20 * time.Millisecond)
+	nodeD.SetBatchingWindow(20 * time.Millisecond)
 
 	go nodeD.Run(ctx)
 

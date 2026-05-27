@@ -184,7 +184,7 @@ Built-in signal types:
   - Periodically calls `update` and broadcasts changes to subscribers.
 
 - `ComputedSignal` — `NewComputedSignal(name, update func() V, deps ...WatcherSignal)`
-  - Recomputes when dependencies notify; supports coalescing via `SetCoalesceWindow`.
+  - Recomputes when dependencies notify; supports batching via `SetBatchingWindow`.
 
 - `DebouncedSignal` — `NewDebouncedSignal(name, src ReadableSignal[V], wait time.Duration)`
   - Debounces bursts of updates from a source; optionally configure `SetMaxWait`.

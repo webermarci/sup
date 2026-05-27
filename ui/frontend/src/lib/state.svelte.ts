@@ -1,21 +1,21 @@
 import { SvelteMap } from 'svelte/reactivity';
-import type { Node, Update } from '$lib/types';
+import type { Nodes, SignalUpdate } from '$lib/types';
 
 const MAX_UPDATES_PER_NODE = 100;
 
 export function createState() {
-	let nodes = $state<Node[]>([]);
-	const updates = new SvelteMap<string, Update[]>();
+	let nodes = $state<Nodes>({ actors: [], signals: [] });
+	const updates = new SvelteMap<string, SignalUpdate[]>();
 
-	function addUpdate(update: Update) {
-		const current = updates.get(update.name) ?? [];
-		const next = [update, ...current];
+	function addSignalUpdate(signalUpdate: SignalUpdate) {
+		const current = updates.get(signalUpdate.id) ?? [];
+		const next = [signalUpdate, ...current];
 
 		if (next.length > MAX_UPDATES_PER_NODE) {
 			next.length = MAX_UPDATES_PER_NODE;
 		}
 
-		updates.set(update.name, next);
+		updates.set(signalUpdate.id, next);
 	}
 
 	return {
@@ -29,7 +29,7 @@ export function createState() {
 		get updates() {
 			return updates;
 		},
-		addUpdate
+		addSignalUpdate
 	};
 }
 
