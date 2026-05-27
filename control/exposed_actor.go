@@ -7,8 +7,10 @@ import (
 	"github.com/webermarci/sup"
 )
 
+// ActorOption defines a function type for configuring the ExposedActor.
 type ActorOption func(*ExposedActor)
 
+// Cast defines a cast action that can be performed on an ExposedActor.
 func Cast[T any](name string, fn func(context.Context, T) error) ActorOption {
 	return func(ea *ExposedActor) {
 		if ea.Control == nil {
@@ -39,6 +41,7 @@ func Cast[T any](name string, fn func(context.Context, T) error) ActorOption {
 	}
 }
 
+// Call defines a call action that can be performed on an ExposedActor.
 func Call[T any, R any](name string, fn func(context.Context, T) (R, error)) ActorOption {
 	return func(ea *ExposedActor) {
 		if ea.Control == nil {
@@ -71,6 +74,7 @@ func Call[T any, R any](name string, fn func(context.Context, T) (R, error)) Act
 	}
 }
 
+// ExposedActor is an actor that exposes control actions to the system.
 type ExposedActor struct {
 	ID      string   `json:"id"`
 	Spec    sup.Spec `json:"spec"`

@@ -14,6 +14,7 @@ var (
 	ErrCallNotFound = errors.New("sup: call not found")
 )
 
+// CastAction defines a cast action that can be performed on a control actor.
 type CastAction struct {
 	Name        string         `json:"name"`
 	InputSchema map[string]any `json:"input_schema"`
@@ -21,6 +22,7 @@ type CastAction struct {
 	fn func(context.Context, json.RawMessage) error
 }
 
+// CallAction defines a call action that can be performed on a control actor.
 type CallAction struct {
 	Name         string         `json:"name"`
 	InputSchema  map[string]any `json:"input_schema"`
@@ -29,6 +31,7 @@ type CallAction struct {
 	fn func(context.Context, json.RawMessage) (any, error)
 }
 
+// Control is an actor that handles control commands for a system.
 type Control struct {
 	Casts []*CastAction `json:"casts"`
 	Calls []*CallAction `json:"calls"`
@@ -37,6 +40,7 @@ type Control struct {
 	callsByName map[string]*CallAction
 }
 
+// NewControl creates a new Control actor.
 func NewControl() *Control {
 	return &Control{
 		castsByName: make(map[string]*CastAction),
@@ -44,6 +48,7 @@ func NewControl() *Control {
 	}
 }
 
+// Cast performs a cast action on the Control actor.
 func (c *Control) Cast(ctx context.Context, name string, raw json.RawMessage) error {
 	action, ok := c.castsByName[name]
 	if !ok {
@@ -53,6 +58,7 @@ func (c *Control) Cast(ctx context.Context, name string, raw json.RawMessage) er
 	return action.fn(ctx, raw)
 }
 
+// Call performs a call action on the Control actor.
 func (c *Control) Call(ctx context.Context, name string, raw json.RawMessage) (any, error) {
 	action, ok := c.callsByName[name]
 	if !ok {

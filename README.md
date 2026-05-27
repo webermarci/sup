@@ -361,6 +361,7 @@ err := router.Retry(3, func(w *Worker) error {
 ## Packages
 
 - `sup` — Core supervisor and typed inbox implementations
+- `sup/control` — HTTP control interface for managing registries and streams
 - `sup/exec` — Actor wrapper around `os/exec` for managing external processes as actors
 - `sup/mesh` — NATS-backed actors for pub/sub messaging with automatic connection management
 - `sup/modbus` — Actor wrapper around Modbus connections (TCP/RTU/ASCII) for thread-safe hardware access with automatic reconnection

@@ -33,6 +33,7 @@ import (
 	"net/http"
 
 	"github.com/webermarci/sup"
+	"github.com/webermarci/sup/control"
 	"github.com/webermarci/sup/ui"
 )
 
@@ -41,18 +42,20 @@ func main() {
 	sensorActor := NewSensorActor("temperature")
 	statusActor := NewStatusActor("status")
 
-	// Create the Dashboard actor and attach your providers
-	dashboard := ui.NewDashboard("dashboard",
-		ui.WithObserve(sensorActor),
-		ui.WithObserve(statusActor),
+	registry := control.NewRegistry("registry",
+		control.WithActor(sensorActor),
+		control.WithActor(statusActor),
 	)
 
 	// Create a supervisor and add your actors
 	supervisor := sup.NewSupervisor("root",
 		sup.WithActor(sensorActor),
 		sup.WithActor(statusActor),
-		sup.WithActor(dashboard), // The dashboard is just another supervised actor!
+		sup.WithActor(registry),
 	)
+
+	// Create the Dashboard actor and attach your providers
+	dashboard := ui.NewDashboard(registry)
 
 	// Start the HTTP server to serve the UI
 	go func() {

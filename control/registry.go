@@ -15,8 +15,10 @@ import (
 	"github.com/webermarci/sup"
 )
 
+// RegistryOption defines a function type for configuring the Registry.
 type RegistryOption func(*Registry)
 
+// WithActor adds an actor to the Registry with the given options.
 func WithActor(actor sup.Actor, opts ...ActorOption) RegistryOption {
 	return func(r *Registry) {
 		id := actor.ID()
@@ -38,6 +40,7 @@ func WithActor(actor sup.Actor, opts ...ActorOption) RegistryOption {
 	}
 }
 
+// WithSignal adds a signal to the Registry.
 func WithSignal[V any](signal sup.ReadableSignal[V]) RegistryOption {
 	return func(r *Registry) {
 		id := signal.ID()
@@ -83,6 +86,7 @@ func WithSignal[V any](signal sup.ReadableSignal[V]) RegistryOption {
 	}
 }
 
+// Registry is the main control registry for the system.
 type Registry struct {
 	*sup.BaseActor
 	actorsByID  map[string]*ExposedActor
@@ -94,6 +98,7 @@ type Registry struct {
 	mu          sync.RWMutex
 }
 
+// NewRegistry creates a new Registry with the given ID and options.
 func NewRegistry(id string, opts ...RegistryOption) *Registry {
 	r := &Registry{
 		BaseActor:   sup.NewBaseActor(id),
@@ -111,6 +116,7 @@ func NewRegistry(id string, opts ...RegistryOption) *Registry {
 	return r
 }
 
+// Run runs the Registry, starting all streams and handling errors.
 func (r *Registry) Run(ctx context.Context) error {
 	errCh := make(chan error, len(r.streams))
 
@@ -130,6 +136,7 @@ func (r *Registry) Run(ctx context.Context) error {
 	}
 }
 
+// Handler returns the HTTP handler for the Registry.
 func (r *Registry) Handler() http.Handler {
 	mux := http.NewServeMux()
 
@@ -141,6 +148,7 @@ func (r *Registry) Handler() http.Handler {
 	return mux
 }
 
+// Inspect returns the specification of the Registry.
 func (r *Registry) Inspect() sup.Spec {
 	return sup.Spec{
 		Kind:         "registry",
