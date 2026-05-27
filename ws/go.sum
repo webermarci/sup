@@ -1,4 +1,4 @@
 github.com/coder/websocket v1.8.14 h1:9L0p0iKiNOibykf283eHkKUHHrpG7f65OE3BhhO7v9g=
 github.com/coder/websocket v1.8.14/go.mod h1:NX3SzP+inril6yawo5CQXx8+fk145lPDC6pumgx0mVg=
-github.com/webermarci/sup v0.0.47 h1:H8DlarQNtVBbKaifR6I+9Sdeh2Sv9P8MRegWL+Hw+Pw=
-github.com/webermarci/sup v0.0.47/go.mod h1:PQV60WGu7EQ16a8K6nvaKkBQMlnhO6Z/JQV0vRUdwx4=
+github.com/webermarci/sup v0.0.49 h1:REtcjuU1BPE9TEq5+W7ig/yusQD/IhYTY4AVVbwE0Fo=
+github.com/webermarci/sup v0.0.49/go.mod h1:PQV60WGu7EQ16a8K6nvaKkBQMlnhO6Z/JQV0vRUdwx4=
