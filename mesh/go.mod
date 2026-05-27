@@ -4,7 +4,7 @@ go 1.26.3
 
 require (
 	github.com/nats-io/nats.go v1.52.0
-	github.com/webermarci/sup v0.0.47
+	github.com/webermarci/sup v0.0.49
 )
 
 require (
