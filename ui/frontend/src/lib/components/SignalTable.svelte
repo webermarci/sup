@@ -1,4 +1,14 @@
 <script lang="ts">
+	import {
+		ArrowRight,
+		CircleX,
+		RadioTower,
+		SquareActivity,
+		SquareFunction,
+		Timer,
+		ToggleLeft,
+		ToggleRight
+	} from '@lucide/svelte';
 	import { globalState } from '$lib/state.svelte';
 	import type { ExposedSignal } from '$lib/types';
 
@@ -20,8 +30,8 @@
 </script>
 
 <div>
-	<h3 class="mb-2!">
-		<i class="ri-signal-tower-line font-normal text-(--pico-primary)"></i>
+	<h3 class="mb-2! flex gap-2 items-center">
+		<RadioTower size={22} color="var(--pico-primary)" />
 		Signals
 	</h3>
 	<div class="overflow-x-auto border rounded-lg border-(--pico-table-border-color)">
@@ -47,18 +57,18 @@
 						<td class="border-r border-(--pico-table-border-color) border-b-0!">
 							<div class="flex items-center">
 								<span
-									class="rounded bg-(--pico-table-border-color) px-2 py-1 whitespace-nowrap font-mono flex gap-1 items-center"
+									class="rounded bg-(--pico-table-border-color) px-2 py-1 whitespace-nowrap font-mono flex gap-1.5 items-center"
 								>
 									{#if signal.spec.kind === 'computed_signal'}
-										<i class="ri-formula text-emerald-500"></i>
+										<SquareFunction size={16} color="oklch(69.6% 0.17 162.48)" />
 									{:else if signal.spec.kind === 'pushed_signal'}
-										<i class="ri-arrow-right-line text-sky-500"></i>
+										<ArrowRight size={16} color="oklch(68.5% 0.169 237.323)" />
 									{:else if signal.spec.kind === 'periodic_signal'}
-										<i class="ri-timer-line text-purple-500"></i>
+										<Timer size={16} color="oklch(62.7% 0.265 303.9)" />
 									{:else if signal.spec.kind === 'throttled_signal'}
-										<i class="ri-pulse-fill text-amber-500"></i>
+										<SquareActivity size={16} color="oklch(76.9% 0.188 70.08)" />
 									{:else if signal.spec.kind === 'debounced_signal'}
-										<i class="ri-pulse-fill text-rose-500"></i>
+										<SquareActivity size={16} color="oklch(64.5% 0.246 16.439)" />
 									{/if}
 									{signal.spec.kind}
 								</span>
@@ -90,9 +100,9 @@
 							{#if signal.type === 'boolean'}
 								<span class="flex items-center gap-2">
 									{#if signal.value}
-										<i class="ri-toggle-fill text-green-500 text-2xl mb-0.5"></i>
+										<ToggleRight size={18} color="oklch(72.3% 0.219 149.579)" />
 									{:else}
-										<i class="ri-toggle-line text-slate-400 text-2xl mb-0.5"></i>
+										<ToggleLeft size={18} color="oklch(70.4% 0.04 256.788)" />
 									{/if}
 									<span class="capitalize font-mono">{displayValue(signal.value)}</span>
 								</span>
@@ -111,12 +121,12 @@
 	{#if selectedSignal}
 		<article>
 			<header class="flex items-center justify-between">
-				<h3 class="ml-2 mb-0!">
-					<i class="ri-signal-tower-line font-normal text-(--pico-primary)"></i>
+				<h3 class="ml-2 mb-0! flex gap-2 items-center">
+					<RadioTower size={22} color="var(--pico-primary)" />
 					{selectedSignal.id}
 				</h3>
-				<button class="secondary" onclick={() => dialog.close()}>
-					<i class="ri-close-fill"></i>
+				<button class="secondary flex gap-2 items-center shrink-0" onclick={() => dialog.close()}>
+					<CircleX size={16} />
 					Close
 				</button>
 			</header>
@@ -153,9 +163,9 @@
 									{:else if selectedSignal.type === 'boolean'}
 										<span class="flex items-center gap-2">
 											{#if update.value}
-												<i class="ri-toggle-fill text-green-500 text-2xl mb-0.5"></i>
+												<ToggleRight size={18} color="oklch(72.3% 0.219 149.579)" />
 											{:else}
-												<i class="ri-toggle-line text-slate-400 text-2xl mb-0.5"></i>
+												<ToggleLeft size={18} color="oklch(70.4% 0.04 256.788)" />
 											{/if}
 											<span class="capitalize font-mono">{displayValue(update.value)}</span>
 										</span>

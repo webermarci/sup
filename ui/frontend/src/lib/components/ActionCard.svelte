@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Send } from '@lucide/svelte';
 	import type { JSONSchema } from '$lib/types';
 
 	type ActionKind = 'cast' | 'call';
@@ -148,8 +149,8 @@
 				</span>
 			</div>
 
-			<button class="mb-0!" disabled={sending} onclick={send}>
-				<i class="ri-send-ins-line"></i>
+			<button class="mb-0! flex gap-2 items-center shrink-0" disabled={sending} onclick={send}>
+				<Send size={16} />
 				Send
 			</button>
 		</header>
@@ -225,8 +226,8 @@
 				</span>
 			</div>
 
-			<button class="mb-0!" disabled={sending} onclick={send}>
-				<i class="ri-send-ins-line"></i>
+			<button class="mb-0! flex gap-2 items-center shrink-0" disabled={sending} onclick={send}>
+				<Send size={16} />
 				Send
 			</button>
 		</header>

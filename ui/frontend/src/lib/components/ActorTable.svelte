@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { Box, CircleX } from '@lucide/svelte';
 	import { globalState } from '$lib/state.svelte';
 	import type { ExposedActor } from '$lib/types';
 	import ActionCard from '$lib/components/ActionCard.svelte';
@@ -39,8 +40,8 @@
 </script>
 
 <div>
-	<h3 class="mb-2!">
-		<i class="ri-instance-line font-normal text-(--pico-primary)"></i>
+	<h3 class="mb-2! flex gap-2 items-center">
+		<Box size={22} color="var(--pico-primary)" />
 		Actors
 	</h3>
 
@@ -105,13 +106,13 @@
 	{#if selectedActor}
 		<article>
 			<header class="flex items-center justify-between">
-				<h3 class="ml-2 mb-0!">
-					<i class="ri-instance-line font-normal text-(--pico-primary)"></i>
+				<h3 class="ml-2 mb-0! flex gap-2 items-center">
+					<Box size={22} color="var(--pico-primary)" />
 					{selectedActor.id}
 				</h3>
 
-				<button class="secondary" onclick={() => dialog.close()}>
-					<i class="ri-close-fill"></i>
+				<button class="secondary flex gap-2 items-center shrink-0" onclick={() => dialog.close()}>
+					<CircleX size={16} />
 					Close
 				</button>
 			</header>
@@ -170,8 +171,11 @@
 					</span>
 				</div>
 
-				<button class="secondary" onclick={() => resultDialog.close()}>
-					<i class="ri-close-fill"></i>
+				<button
+					class="secondary flex gap-2 items-center shrink-0"
+					onclick={() => resultDialog.close()}
+				>
+					<CircleX size={16} />
 					Close
 				</button>
 			</header>

@@ -26,9 +26,9 @@ func TestComputedSignal_UpdateOnDependency(t *testing.T) {
 	})
 	go pushed.Run(ctx)
 
-	var count int32
+	var count atomic.Int32
 	computed := NewComputedSignal("computed", func() int32 {
-		return atomic.AddInt32(&count, 1)
+		return count.Add(1)
 	}, pushed)
 
 	go computed.Run(ctx)
@@ -144,9 +144,9 @@ func TestComputedSignal_MultipleDependencies(t *testing.T) {
 	go t1.Run(ctx)
 	go t2.Run(ctx)
 
-	var count int32
+	var count atomic.Int32
 	computed := NewComputedSignal("computed", func() int32 {
-		return atomic.AddInt32(&count, 1)
+		return count.Add(1)
 	}, t1, t2)
 
 	go computed.Run(ctx)

@@ -1,6 +1,5 @@
 <script lang="ts">
 	import './layout.css';
-	import 'remixicon/fonts/remixicon.css';
 	import '@fontsource-variable/inter';
 	import '@fontsource-variable/jetbrains-mono';
 
