@@ -241,7 +241,7 @@ func TestComputedSignal_Inspect(t *testing.T) {
 		t.Fatalf("expected dependencies [%q %q], got %v", p.ID(), q.ID(), spec.Dependencies)
 	}
 
-	if spec.Metadata["coalesce_window"] != (5 * time.Millisecond).String() {
-		t.Fatalf("expected coalesce_window=%q, got %q", (5 * time.Millisecond).String(), spec.Metadata["coalesce_window"])
+	if spec.Metadata["batching_window"] != (5 * time.Millisecond).String() {
+		t.Fatalf("expected batching_window=%q, got %q", (5 * time.Millisecond).String(), spec.Metadata["batching_window"])
 	}
 }
