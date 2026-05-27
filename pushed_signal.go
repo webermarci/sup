@@ -30,7 +30,9 @@ func (s *PushedSignal[V]) Write(ctx context.Context, value V) error {
 	return nil
 }
 
-// Run starts the PushedSignal's main loop, which waits for the context to be canceled. When the context is canceled, it cleans up all subscriber channels. This method should be run in a separate goroutine.
+// Run starts the PushedSignal's main loop, which waits for the context to be canceled.
+// When the context is canceled, it cleans up all subscriber channels.
+// This method should be run in a separate goroutine.
 func (s *PushedSignal[V]) Run(ctx context.Context) error {
 	<-ctx.Done()
 	s.closeAll()

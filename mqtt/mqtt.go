@@ -71,7 +71,8 @@ func (a *Actor) Publish(topic string, qos byte, retained bool, payload any) erro
 	return token.Error()
 }
 
-// Run starts the Actor, connecting to the MQTT broker and subscribing to topics. It blocks until the context is canceled or a connection error occurs.
+// Run starts the Actor, connecting to the MQTT broker and subscribing to topics.
+// It blocks until the context is canceled or a connection error occurs.
 func (a *Actor) Run(ctx context.Context) error {
 	errChan := make(chan error, 1)
 

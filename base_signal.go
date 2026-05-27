@@ -25,7 +25,8 @@ func NewBaseSignal[V any](id string) *BaseSignal[V] {
 	}
 }
 
-// SetInitialValue sets the initial value of the Signal before any updates occur. It acquires a lock to ensure thread-safe access to the value.
+// SetInitialValue sets the initial value of the Signal before any updates occur.
+// It acquires a lock to ensure thread-safe access to the value.
 func (b *BaseSignal[V]) SetInitialValue(v V) {
 	b.mu.Lock()
 	b.value = v

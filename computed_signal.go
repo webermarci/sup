@@ -38,7 +38,11 @@ func (s *ComputedSignal[V]) SetBatchingWindow(window time.Duration) {
 	s.mu.Unlock()
 }
 
-// Run is the main loop for the Computed actor. It subscribes to all dependencies and listens for notifications. Whenever any dependency notifies a change, it calls the update function to compute the new value, updates its internal state, and broadcasts the new value to subscribers. The loop continues until the context is canceled, at which point it cleans up and exits.
+// Run is the main loop for the Computed actor.
+// It subscribes to all dependencies and listens for notifications.
+// Whenever any dependency notifies a change, it calls the update function to compute the new value,
+// updates its internal state, and broadcasts the new value to subscribers.
+// The loop continues until the context is canceled, at which point it cleans up and exits.
 func (s *ComputedSignal[V]) Run(ctx context.Context) error {
 	ping := make(chan struct{}, 1)
 

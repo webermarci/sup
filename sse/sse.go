@@ -147,7 +147,7 @@ func (a *Actor) Run(ctx context.Context) (err error) {
 	const maxCapacity = 1024 * 1024
 	scanner.Buffer(make([]byte, 64*1024), maxCapacity)
 
-	var timedOut int32
+	var timedOut atomic.Int32
 	var buf bytes.Buffer
 	currentEvent := Event{ID: lastID}
 
@@ -158,9 +158,9 @@ func (a *Actor) Run(ctx context.Context) (err error) {
 		default:
 		}
 
-		atomic.StoreInt32(&timedOut, 0)
+		timedOut.Store(0)
 		timer := time.AfterFunc(a.timeout, func() {
-			atomic.StoreInt32(&timedOut, 1)
+			timedOut.Store(1)
 			_ = res.Body.Close()
 		})
 
@@ -217,7 +217,7 @@ func (a *Actor) Run(ctx context.Context) (err error) {
 		}
 
 		if err := scanner.Err(); err != nil {
-			if atomic.LoadInt32(&timedOut) == 1 {
+			if timedOut.Load() == 1 {
 				return fmt.Errorf("sse stream timed out after %v", a.timeout)
 			}
 			return err

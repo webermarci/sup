@@ -68,24 +68,30 @@ type readFIFOQueue struct {
 	address uint16
 }
 
-// ActorOption defines a function type for configuring the Actor. It allows for flexible configuration of the actor's behavior and settings when creating a new instance.
+// ActorOption defines a function type for configuring the Actor.
+// It allows for flexible configuration of the actor's behavior and settings when creating a new instance.
 type ActorOption func(*Actor)
 
-// WithInboxSize sets the size of the actor's inbox. A larger inbox allows for more concurrent requests to be queued, but may increase memory usage. The default mailbox size is 64.
+// WithInboxSize sets the size of the actor's inbox.
+// A larger inbox allows for more concurrent requests to be queued, but may increase memory usage.
+// The default mailbox size is 64.
 func WithInboxSize(size int) ActorOption {
 	return func(a *Actor) {
 		a.config.inboxSize = size
 	}
 }
 
-// WithTimeout sets the timeout duration for Modbus requests. This timeout applies to all requests made by the Actor and determines how long it will wait for a response before considering the request failed.
+// WithTimeout sets the timeout duration for Modbus requests.
+// This timeout applies to all requests made by the Actor and determines how long it will wait for a response before considering the request failed.
 func WithTimeout(timeout time.Duration) ActorOption {
 	return func(a *Actor) {
 		a.config.timeout = timeout
 	}
 }
 
-// WithSerialConfig configures serial communication settings for RTU and ASCII protocols. It allows setting the baud rate, data bits, stop bits, and parity. These settings are essential for establishing a proper serial connection with Modbus devices.
+// WithSerialConfig configures serial communication settings for RTU and ASCII protocols.
+// It allows setting the baud rate, data bits, stop bits, and parity.
+// These settings are essential for establishing a proper serial connection with Modbus devices.
 func WithSerialConfig(baud int, dataBits int, stopBits int, parity string) ActorOption {
 	return func(a *Actor) {
 		a.config.baudRate = baud
@@ -95,7 +101,8 @@ func WithSerialConfig(baud int, dataBits int, stopBits int, parity string) Actor
 	}
 }
 
-// WithRS485Config configures RS485 settings for RTU protocol. If enabled, it allows setting delays before and after sending data to accommodate RS485 transceiver timing requirements.
+// WithRS485Config configures RS485 settings for RTU protocol.
+// If enabled, it allows setting delays before and after sending data to accommodate RS485 transceiver timing requirements.
 func WithRS485Config(enabled bool, delayRts time.Duration, delayCustom time.Duration) ActorOption {
 	return func(a *Actor) {
 		a.config.rs485Enabled = enabled
@@ -104,21 +111,24 @@ func WithRS485Config(enabled bool, delayRts time.Duration, delayCustom time.Dura
 	}
 }
 
-// WithOnStart allows the caller to provide a callback function that will be invoked when the Actor starts and establishes a connection to the Modbus device. This can be used for logging, metrics, or other side effects related to the actor's startup.
+// WithOnStart allows the caller to provide a callback function that will be invoked when the Actor starts and establishes a connection to the Modbus device.
+// This can be used for logging, metrics, or other side effects related to the actor's startup.
 func WithOnStart(handler func(protocol ModbusProtocol, address string, slaveId byte)) ActorOption {
 	return func(a *Actor) {
 		a.config.onStart = handler
 	}
 }
 
-// WithOnRequest allows the caller to provide a callback function that will be invoked before a Modbus request is executed. This can be used for logging, metrics collection, or other side effects related to outgoing Modbus requests.
+// WithOnRequest allows the caller to provide a callback function that will be invoked before a Modbus request is executed.
+// This can be used for logging, metrics collection, or other side effects related to outgoing Modbus requests.
 func WithOnRequest(handler func(functionCode byte, slaveId byte, address uint16, quantity uint16)) ActorOption {
 	return func(a *Actor) {
 		a.config.onRequest = handler
 	}
 }
 
-// WithOnResponse allows the caller to provide a callback function that will be invoked after a Modbus response is received. This can be used for logging, metrics collection, or other side effects related to incoming Modbus responses, including any errors that may have occurred.
+// WithOnResponse allows the caller to provide a callback function that will be invoked after a Modbus response is received.
+// This can be used for logging, metrics collection, or other side effects related to incoming Modbus responses, including any errors that may have occurred.
 func WithOnResponse(handler func(functionCode byte, slaveId byte, res []byte, err error, duration time.Duration)) ActorOption {
 	return func(a *Actor) {
 		a.config.onResponse = handler
@@ -156,7 +166,8 @@ type actorConfig struct {
 
 // Actor is an actor that handles Modbus communication using the specified protocol and configuration.
 //
-// It processes Modbus requests sequentially and can be configured with various options such as mailbox size, timeouts, serial settings, and an optional observer for monitoring requests and responses.
+// It processes Modbus requests sequentially and can be configured with various options such as mailbox size,
+// timeouts, serial settings, and an optional observer for monitoring requests and responses.
 type Actor struct {
 	*sup.BaseActor
 	inbox   *sup.CallInbox[any, []byte]
@@ -194,7 +205,9 @@ func NewActor(name string, protocol ModbusProtocol, address string, slaveId byte
 	return a
 }
 
-// Run starts the Actor and processes incoming requests. It establishes a connection to the Modbus device based on the configured protocol and handles requests sequentially. The actor will continue running until the context is canceled or an unrecoverable error occurs.
+// Run starts the Actor and processes incoming requests.
+// It establishes a connection to the Modbus device based on the configured protocol and handles requests sequentially.
+// The actor will continue running until the context is canceled or an unrecoverable error occurs.
 func (a *Actor) Run(ctx context.Context) error {
 	switch a.config.protocol {
 	case TCP:

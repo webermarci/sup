@@ -29,7 +29,7 @@ func (m *mockClient) Subscribe(topic string, qos byte, callback mqtt.MessageHand
 	return &mockToken{}
 }
 
-func (m *mockClient) Publish(topic string, qos byte, retained bool, payload interface{}) mqtt.Token {
+func (m *mockClient) Publish(topic string, qos byte, retained bool, payload any) mqtt.Token {
 	m.published <- topic
 	return &mockToken{}
 }

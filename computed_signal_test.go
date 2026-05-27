@@ -203,9 +203,9 @@ func TestComputedSignal_GlitchFreeDiamond(t *testing.T) {
 	go nodeB.Run(ctx)
 	go nodeC.Run(ctx)
 
-	var evalCount int32
+	var evalCount atomic.Int32
 	nodeD := NewComputedSignal("D", func() int32 {
-		atomic.AddInt32(&evalCount, 1)
+		evalCount.Add(1)
 		b := nodeB.Read()
 		c := nodeC.Read()
 		return b + c
@@ -216,11 +216,11 @@ func TestComputedSignal_GlitchFreeDiamond(t *testing.T) {
 
 	time.Sleep(50 * time.Millisecond)
 
-	atomic.StoreInt32(&evalCount, 0)
+	evalCount.Store(0)
 	root.Write(ctx, 1)
 	waitForValue(t, nodeD, 4)
 
-	count := atomic.LoadInt32(&evalCount)
+	count := evalCount.Load()
 	if count != 1 {
 		t.Errorf("Glitch detected! Expected node D to evaluate exactly 1 time, but it evaluated %d times", count)
 	}
