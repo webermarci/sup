@@ -107,7 +107,7 @@
 		sending = true;
 
 		try {
-			const res = await fetch(`http://localhost:8080/api/actors/${actorID}/${kind}s/${name}`, {
+			const res = await fetch(`/api/actors/${actorID}/${kind}s/${name}`, {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json'

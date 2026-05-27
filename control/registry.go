@@ -116,6 +116,34 @@ func NewRegistry(id string, opts ...RegistryOption) *Registry {
 	return r
 }
 
+// ExposedActors returns a copy of the exposed actors.
+func (r *Registry) ExposedActors() []ExposedActor {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	actors := make([]ExposedActor, len(r.actors))
+
+	for i, actor := range r.actors {
+		actors[i] = *actor
+	}
+
+	return actors
+}
+
+// ExposedSignals returns a copy of the exposed signals.
+func (r *Registry) ExposedSignals() []ExposedSignal {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	signals := make([]ExposedSignal, len(r.signals))
+
+	for i, signal := range r.signals {
+		signals[i] = *signal
+	}
+
+	return signals
+}
+
 // Run runs the Registry, starting all streams and handling errors.
 func (r *Registry) Run(ctx context.Context) error {
 	errCh := make(chan error, len(r.streams))

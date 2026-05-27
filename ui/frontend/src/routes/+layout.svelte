@@ -18,7 +18,7 @@
 	}
 
 	onMount(() => {
-		eventSource = new EventSource('http://localhost:8080/api/events');
+		eventSource = new EventSource('/api/events');
 
 		eventSource.addEventListener('error', (e) => {
 			console.error(e);
