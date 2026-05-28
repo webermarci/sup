@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"runtime/debug"
+	"slices"
 	"sync"
 	"time"
 )
@@ -64,6 +65,9 @@ func WithPolicy(policy RestartPolicy) SupervisorOption {
 // WithRestartDelay sets the delay between restarts.
 func WithRestartDelay(d time.Duration) SupervisorOption {
 	return func(s *Supervisor) {
+		if d < 0 {
+			panic("sup: restart delay must be non-negative")
+		}
 		s.restartDelay = d
 	}
 }
@@ -72,6 +76,9 @@ func WithRestartDelay(d time.Duration) SupervisorOption {
 // Both maxRestarts and window must be positive; otherwise NewSupervisor panics.
 func WithRestartLimit(maxRestarts int, window time.Duration) SupervisorOption {
 	return func(s *Supervisor) {
+		if maxRestarts <= 0 || window <= 0 {
+			panic("sup: maxRestarts and window must be positive")
+		}
 		s.maxRestarts = maxRestarts
 		s.restartWindow = window
 	}
@@ -81,14 +88,22 @@ func WithRestartLimit(maxRestarts int, window time.Duration) SupervisorOption {
 // The callback receives the actor and the error as arguments.
 func WithOnError(handler func(actor Actor, err error)) SupervisorOption {
 	return func(s *Supervisor) {
+		if handler == nil {
+			panic("sup: cannot add nil handler")
+		}
 		s.onError = handler
 	}
 }
 
 // WithObserver sets a SupervisorObserver to receive lifecycle event notifications for supervised actors and the supervisor itself.
 // This allows external monitoring of actor behavior and supervisor actions.
+//
+// The observers from the parent supervisors are propagated to the child supervisors.
 func WithObserver(observer *SupervisorObserver) SupervisorOption {
 	return func(s *Supervisor) {
+		if observer == nil {
+			panic("sup: cannot add nil observer")
+		}
 		s.observers = append(s.observers, observer)
 	}
 }
@@ -96,6 +111,9 @@ func WithObserver(observer *SupervisorObserver) SupervisorOption {
 // WithLogger sets a logger for the supervisor.
 func WithLogger(logger *slog.Logger) SupervisorOption {
 	return func(s *Supervisor) {
+		if logger == nil {
+			panic("sup: cannot add nil logger")
+		}
 		s.setLogger(logger)
 	}
 }
@@ -103,16 +121,17 @@ func WithLogger(logger *slog.Logger) SupervisorOption {
 // Supervisor manages the lifecycle of actor Run loops.
 type Supervisor struct {
 	*BaseActor
-	policy        RestartPolicy
-	actors        []Actor
-	restartDelay  time.Duration
-	maxRestarts   int
-	restartWindow time.Duration
-	wg            sync.WaitGroup
-	onError       func(actor Actor, err error)
-	terminalErr   chan error
-	observers     []*SupervisorObserver
-	mu            sync.RWMutex
+	policy             RestartPolicy
+	actors             []Actor
+	restartDelay       time.Duration
+	maxRestarts        int
+	restartWindow      time.Duration
+	wg                 sync.WaitGroup
+	onError            func(actor Actor, err error)
+	terminalErr        chan error
+	observers          []*SupervisorObserver
+	inheritedObservers []*SupervisorObserver
+	mu                 sync.RWMutex
 }
 
 // NewSupervisor creates a new Supervisor with the given options.
@@ -129,82 +148,7 @@ func NewSupervisor(id string, opts ...SupervisorOption) *Supervisor {
 		opt(s)
 	}
 
-	if (s.maxRestarts > 0) != (s.restartWindow > 0) {
-		panic("sup: WithRestartLimit requires both maxRestarts and window to be positive")
-	}
-
 	return s
-}
-
-func (s *Supervisor) executeSafe(ctx context.Context, fn func(context.Context) error) (err error) {
-	defer func() {
-		if r := recover(); r != nil {
-			err = errors.Join(
-				fmt.Errorf("%v", r),
-				fmt.Errorf("%s", debug.Stack()),
-			)
-		}
-	}()
-	return fn(ctx)
-}
-
-func (s *Supervisor) notifyActorRegistered(actor Actor) {
-	s.notify(func(obs *SupervisorObserver) {
-		if obs.OnActorRegistered != nil {
-			obs.OnActorRegistered(actor)
-		}
-	})
-}
-
-func (s *Supervisor) notifyActorStarted(actor Actor) {
-	s.notify(func(obs *SupervisorObserver) {
-		if obs.OnActorStarted != nil {
-			obs.OnActorStarted(actor)
-		}
-	})
-}
-
-func (s *Supervisor) notifyActorStopped(actor Actor, err error) {
-	s.notify(func(obs *SupervisorObserver) {
-		if obs.OnActorStopped != nil {
-			obs.OnActorStopped(actor, err)
-		}
-	})
-}
-
-func (s *Supervisor) notifyActorRestarting(actor Actor, restartCount int, lastErr error) {
-	s.notify(func(obs *SupervisorObserver) {
-		if obs.OnActorRestarting != nil {
-			obs.OnActorRestarting(actor, restartCount, lastErr)
-		}
-	})
-}
-
-func (s *Supervisor) notifySupervisorTerminal(err error) {
-	s.notify(func(obs *SupervisorObserver) {
-		if obs.OnSupervisorTerminal != nil {
-			obs.OnSupervisorTerminal(err)
-		}
-	})
-}
-
-func (s *Supervisor) notify(fn func(*SupervisorObserver)) {
-	s.mu.RLock()
-	observers := append([]*SupervisorObserver(nil), s.observers...)
-	s.mu.RUnlock()
-
-	for _, obs := range observers {
-		if obs == nil {
-			continue
-		}
-
-		go func(obs *SupervisorObserver) {
-			defer func() {
-				_ = recover()
-			}()
-			fn(obs)
-		}(obs)
-	}
 }
 
 // Spawn starts the given actor under supervision.
@@ -219,6 +163,11 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 	}
 
 	actor.setLogger(s.Logger())
+
+	if child, ok := actor.(*Supervisor); ok {
+		child.inheritObservers(s.allObservers()...)
+	}
+
 	s.notifyActorRegistered(actor)
 
 	s.wg.Go(func() {
@@ -375,6 +324,7 @@ func (s *Supervisor) Inspect() Spec {
 	}
 }
 
+// Children returns a copy of the list of supervised actors.
 func (s *Supervisor) Children() []Actor {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -384,4 +334,122 @@ func (s *Supervisor) Children() []Actor {
 		children = append(children, c)
 	}
 	return children
+}
+
+func (s *Supervisor) executeSafe(ctx context.Context, fn func(context.Context) error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = errors.Join(
+				fmt.Errorf("%v", r),
+				fmt.Errorf("%s", debug.Stack()),
+			)
+		}
+	}()
+	return fn(ctx)
+}
+
+func (s *Supervisor) notifyActorRegistered(actor Actor) {
+	s.notify(func(obs *SupervisorObserver) {
+		if obs.OnActorRegistered != nil {
+			obs.OnActorRegistered(actor)
+		}
+	})
+}
+
+func (s *Supervisor) notifyActorStarted(actor Actor) {
+	s.notify(func(obs *SupervisorObserver) {
+		if obs.OnActorStarted != nil {
+			obs.OnActorStarted(actor)
+		}
+	})
+}
+
+func (s *Supervisor) notifyActorStopped(actor Actor, err error) {
+	s.notify(func(obs *SupervisorObserver) {
+		if obs.OnActorStopped != nil {
+			obs.OnActorStopped(actor, err)
+		}
+	})
+}
+
+func (s *Supervisor) notifyActorRestarting(actor Actor, restartCount int, lastErr error) {
+	s.notify(func(obs *SupervisorObserver) {
+		if obs.OnActorRestarting != nil {
+			obs.OnActorRestarting(actor, restartCount, lastErr)
+		}
+	})
+}
+
+func (s *Supervisor) notifySupervisorTerminal(err error) {
+	s.notify(func(obs *SupervisorObserver) {
+		if obs.OnSupervisorTerminal != nil {
+			obs.OnSupervisorTerminal(err)
+		}
+	})
+}
+
+func (s *Supervisor) notify(fn func(*SupervisorObserver)) {
+	s.mu.RLock()
+	observers := make([]*SupervisorObserver, 0, len(s.inheritedObservers)+len(s.observers))
+	observers = append(observers, s.inheritedObservers...)
+	observers = append(observers, s.observers...)
+	s.mu.RUnlock()
+
+	for _, obs := range observers {
+		if obs == nil {
+			continue
+		}
+
+		go func(obs *SupervisorObserver) {
+			defer func() {
+				_ = recover()
+			}()
+			fn(obs)
+		}(obs)
+	}
+}
+
+func (s *Supervisor) allObservers() []*SupervisorObserver {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.inheritedObservers) == 0 && len(s.observers) == 0 {
+		return []*SupervisorObserver{}
+	}
+
+	observers := make([]*SupervisorObserver, 0, len(s.inheritedObservers)+len(s.observers))
+	observers = append(observers, s.inheritedObservers...)
+	observers = append(observers, s.observers...)
+
+	return observers
+}
+
+func (s *Supervisor) inheritObservers(observers ...*SupervisorObserver) {
+	s.mu.Lock()
+
+	var added []*SupervisorObserver
+	for _, obs := range observers {
+		if obs == nil {
+			continue
+		}
+		if slices.Contains(s.observers, obs) || slices.Contains(s.inheritedObservers, obs) {
+			continue
+		}
+
+		s.inheritedObservers = append(s.inheritedObservers, obs)
+		added = append(added, obs)
+	}
+
+	children := append([]Actor(nil), s.actors...)
+	s.mu.Unlock()
+
+	if len(added) == 0 {
+		return
+	}
+
+	for _, actor := range children {
+		if child, ok := actor.(*Supervisor); ok {
+			child.inheritObservers(added...)
+		}
+	}
 }

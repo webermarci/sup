@@ -284,6 +284,8 @@ supervisor.Wait()
 
 `sup` exposes a minimal observer mechanism via `SupervisorObserver` and the `WithObserver` option. Observers receive small, optional callbacks for lifecycle events. Callbacks are invoked asynchronously and panics are recovered — observers cannot block or crash the supervisor.
 
+Also the observers from the parent supervisors are propagated to the child supervisors.
+
 - `OnActorRegistered(actor Actor)`
 - `OnActorStarted(actor Actor)`
 - `OnActorStopped(actor Actor, err error)`

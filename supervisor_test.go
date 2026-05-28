@@ -267,3 +267,193 @@ func TestSupervisor_Inspect(t *testing.T) {
 		t.Fatalf("expected no dependencies for supervisor, got %v", spec.Dependencies)
 	}
 }
+
+func TestSupervisor_ObserverPropagatesToChildSupervisor(t *testing.T) {
+	var rootObservedWorkerStarted atomic.Int32
+
+	worker := sup.ActorFunc("worker", func(ctx context.Context, _ *slog.Logger) error {
+		return nil
+	})
+
+	child := sup.NewSupervisor("child",
+		sup.WithActor(worker),
+		sup.WithPolicy(sup.Transient),
+	)
+
+	rootObserver := &sup.SupervisorObserver{
+		OnActorStarted: func(a sup.Actor) {
+			if a.ID() == "worker" {
+				rootObservedWorkerStarted.Add(1)
+			}
+		},
+	}
+
+	root := sup.NewSupervisor("root",
+		sup.WithObserver(rootObserver),
+		sup.WithActor(child),
+		sup.WithPolicy(sup.Transient),
+	)
+
+	if err := root.Run(t.Context()); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		if rootObservedWorkerStarted.Load() == 1 {
+			return
+		}
+
+		select {
+		case <-deadline:
+			t.Fatalf("expected root observer to see worker start, got %d", rootObservedWorkerStarted.Load())
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
+func TestSupervisor_ObserverPropagatesThroughSupervisorTree(t *testing.T) {
+	var observedLeafWorkerStarted atomic.Int32
+
+	worker := sup.ActorFunc("leaf-worker", func(ctx context.Context, _ *slog.Logger) error {
+		return nil
+	})
+
+	leaf := sup.NewSupervisor("leaf",
+		sup.WithActor(worker),
+		sup.WithPolicy(sup.Transient),
+	)
+
+	middle := sup.NewSupervisor("middle",
+		sup.WithActor(leaf),
+		sup.WithPolicy(sup.Transient),
+	)
+
+	rootObserver := &sup.SupervisorObserver{
+		OnActorStarted: func(a sup.Actor) {
+			if a.ID() == "leaf-worker" {
+				observedLeafWorkerStarted.Add(1)
+			}
+		},
+	}
+
+	root := sup.NewSupervisor("root",
+		sup.WithObserver(rootObserver),
+		sup.WithActor(middle),
+		sup.WithPolicy(sup.Transient),
+	)
+
+	if err := root.Run(t.Context()); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		if observedLeafWorkerStarted.Load() == 1 {
+			return
+		}
+
+		select {
+		case <-deadline:
+			t.Fatalf("expected root observer to see leaf worker start, got %d", observedLeafWorkerStarted.Load())
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
+func TestSupervisor_ObserverPropagationDoesNotDependOnOptionOrder(t *testing.T) {
+	var observed atomic.Int32
+
+	worker := sup.ActorFunc("worker", func(ctx context.Context, _ *slog.Logger) error {
+		return nil
+	})
+
+	child := sup.NewSupervisor("child",
+		sup.WithActor(worker),
+		sup.WithPolicy(sup.Transient),
+	)
+
+	observer := &sup.SupervisorObserver{
+		OnActorStarted: func(a sup.Actor) {
+			if a.ID() == "worker" {
+				observed.Add(1)
+			}
+		},
+	}
+
+	root := sup.NewSupervisor("root",
+		sup.WithActor(child),
+		sup.WithObserver(observer),
+		sup.WithPolicy(sup.Transient),
+	)
+
+	if err := root.Run(t.Context()); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		if observed.Load() == 1 {
+			return
+		}
+
+		select {
+		case <-deadline:
+			t.Fatalf("expected observer to propagate despite option order, got %d", observed.Load())
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
+
+func TestSupervisor_ObserverPropagationDoesNotDuplicateObserver(t *testing.T) {
+	var observed atomic.Int32
+
+	observer := &sup.SupervisorObserver{
+		OnActorStarted: func(a sup.Actor) {
+			if a.ID() == "worker" {
+				observed.Add(1)
+			}
+		},
+	}
+
+	worker := sup.ActorFunc("worker", func(ctx context.Context, _ *slog.Logger) error {
+		return nil
+	})
+
+	child := sup.NewSupervisor("child",
+		sup.WithObserver(observer),
+		sup.WithActor(worker),
+		sup.WithPolicy(sup.Transient),
+	)
+
+	root := sup.NewSupervisor("root",
+		sup.WithObserver(observer),
+		sup.WithActor(child),
+		sup.WithPolicy(sup.Transient),
+	)
+
+	if err := root.Run(t.Context()); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	deadline := time.After(500 * time.Millisecond)
+	for {
+		if observed.Load() == 1 {
+			return
+		}
+
+		if observed.Load() > 1 {
+			t.Fatalf("expected observer to fire once, got %d", observed.Load())
+		}
+
+		select {
+		case <-deadline:
+			t.Fatalf("expected observer to fire once, got %d", observed.Load())
+		default:
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+}
