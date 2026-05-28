@@ -23,11 +23,11 @@ const (
 // SupervisorObserver allows observing lifecycle events of supervised actors and the supervisor itself.
 // This can be used for logging, monitoring, or triggering side effects based on actor behavior.
 type SupervisorObserver struct {
-	OnActorRegistered    func(actor Actor)
-	OnActorStarted       func(actor Actor)
-	OnActorStopped       func(actor Actor, err error)
-	OnActorRestarting    func(actor Actor, restartCount int, lastErr error)
-	OnSupervisorTerminal func(err error)
+	OnActorRegistered    func(supervisor *Supervisor, actor Actor)
+	OnActorStarted       func(supervisor *Supervisor, actor Actor)
+	OnActorStopped       func(supervisor *Supervisor, actor Actor, err error)
+	OnActorRestarting    func(supervisor *Supervisor, actor Actor, restartCount int, lastErr error)
+	OnSupervisorTerminal func(supervisor *Supervisor, err error)
 }
 
 // SupervisorOption configures a Supervisor.
@@ -351,7 +351,7 @@ func (s *Supervisor) executeSafe(ctx context.Context, fn func(context.Context) e
 func (s *Supervisor) notifyActorRegistered(actor Actor) {
 	s.notify(func(obs *SupervisorObserver) {
 		if obs.OnActorRegistered != nil {
-			obs.OnActorRegistered(actor)
+			obs.OnActorRegistered(s, actor)
 		}
 	})
 }
@@ -359,7 +359,7 @@ func (s *Supervisor) notifyActorRegistered(actor Actor) {
 func (s *Supervisor) notifyActorStarted(actor Actor) {
 	s.notify(func(obs *SupervisorObserver) {
 		if obs.OnActorStarted != nil {
-			obs.OnActorStarted(actor)
+			obs.OnActorStarted(s, actor)
 		}
 	})
 }
@@ -367,7 +367,7 @@ func (s *Supervisor) notifyActorStarted(actor Actor) {
 func (s *Supervisor) notifyActorStopped(actor Actor, err error) {
 	s.notify(func(obs *SupervisorObserver) {
 		if obs.OnActorStopped != nil {
-			obs.OnActorStopped(actor, err)
+			obs.OnActorStopped(s, actor, err)
 		}
 	})
 }
@@ -375,7 +375,7 @@ func (s *Supervisor) notifyActorStopped(actor Actor, err error) {
 func (s *Supervisor) notifyActorRestarting(actor Actor, restartCount int, lastErr error) {
 	s.notify(func(obs *SupervisorObserver) {
 		if obs.OnActorRestarting != nil {
-			obs.OnActorRestarting(actor, restartCount, lastErr)
+			obs.OnActorRestarting(s, actor, restartCount, lastErr)
 		}
 	})
 }
@@ -383,7 +383,7 @@ func (s *Supervisor) notifyActorRestarting(actor Actor, restartCount int, lastEr
 func (s *Supervisor) notifySupervisorTerminal(err error) {
 	s.notify(func(obs *SupervisorObserver) {
 		if obs.OnSupervisorTerminal != nil {
-			obs.OnSupervisorTerminal(err)
+			obs.OnSupervisorTerminal(s, err)
 		}
 	})
 }

@@ -192,19 +192,19 @@ func TestSupervisor_ObserverBasicLifecycle(t *testing.T) {
 	var terminal atomic.Int32
 
 	observer := &sup.SupervisorObserver{
-		OnActorRegistered: func(a sup.Actor) {
+		OnActorRegistered: func(s *sup.Supervisor, a sup.Actor) {
 			registered.Add(1)
 		},
-		OnActorStarted: func(a sup.Actor) {
+		OnActorStarted: func(s *sup.Supervisor, a sup.Actor) {
 			started.Add(1)
 		},
-		OnActorStopped: func(a sup.Actor, err error) {
+		OnActorStopped: func(s *sup.Supervisor, a sup.Actor, err error) {
 			stopped.Add(1)
 		},
-		OnActorRestarting: func(a sup.Actor, restartCount int, lastErr error) {
+		OnActorRestarting: func(s *sup.Supervisor, a sup.Actor, restartCount int, lastErr error) {
 			restarting.Add(1)
 		},
-		OnSupervisorTerminal: func(err error) {
+		OnSupervisorTerminal: func(s *sup.Supervisor, err error) {
 			terminal.Add(1)
 		},
 	}
@@ -281,7 +281,7 @@ func TestSupervisor_ObserverPropagatesToChildSupervisor(t *testing.T) {
 	)
 
 	rootObserver := &sup.SupervisorObserver{
-		OnActorStarted: func(a sup.Actor) {
+		OnActorStarted: func(s *sup.Supervisor, a sup.Actor) {
 			if a.ID() == "worker" {
 				rootObservedWorkerStarted.Add(1)
 			}
@@ -331,7 +331,7 @@ func TestSupervisor_ObserverPropagatesThroughSupervisorTree(t *testing.T) {
 	)
 
 	rootObserver := &sup.SupervisorObserver{
-		OnActorStarted: func(a sup.Actor) {
+		OnActorStarted: func(s *sup.Supervisor, a sup.Actor) {
 			if a.ID() == "leaf-worker" {
 				observedLeafWorkerStarted.Add(1)
 			}
@@ -376,7 +376,7 @@ func TestSupervisor_ObserverPropagationDoesNotDependOnOptionOrder(t *testing.T) 
 	)
 
 	observer := &sup.SupervisorObserver{
-		OnActorStarted: func(a sup.Actor) {
+		OnActorStarted: func(s *sup.Supervisor, a sup.Actor) {
 			if a.ID() == "worker" {
 				observed.Add(1)
 			}
@@ -412,7 +412,7 @@ func TestSupervisor_ObserverPropagationDoesNotDuplicateObserver(t *testing.T) {
 	var observed atomic.Int32
 
 	observer := &sup.SupervisorObserver{
-		OnActorStarted: func(a sup.Actor) {
+		OnActorStarted: func(s *sup.Supervisor, a sup.Actor) {
 			if a.ID() == "worker" {
 				observed.Add(1)
 			}

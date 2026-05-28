@@ -286,27 +286,27 @@ supervisor.Wait()
 
 Also the observers from the parent supervisors are propagated to the child supervisors.
 
-- `OnActorRegistered(actor Actor)`
-- `OnActorStarted(actor Actor)`
-- `OnActorStopped(actor Actor, err error)`
-- `OnActorRestarting(actor Actor, restartCount int, lastErr error)`
-- `OnSupervisorTerminal(err error)`
+- `OnActorRegistered(supervisor *Supervisor, actor Actor)`
+- `OnActorStarted(supervisor *Supervisor, actor Actor)`
+- `OnActorStopped(supervisor *Supervisor, actor Actor, err error)`
+- `OnActorRestarting(supervisor *Supervisor, actor Actor, restartCount int, lastErr error)`
+- `OnSupervisorTerminal(supervisor *Supervisor, err error)`
 
 ```go
 observer := &sup.SupervisorObserver{
-	OnActorRegistered: func(a sup.Actor) {
+	OnActorRegistered: func(s *sup.Supervisor, a sup.Actor) {
 		fmt.Printf("registered: %s\n", a.Name())
 	},
-	OnActorStarted: func(a sup.Actor) {
+	OnActorStarted: func(s *sup.Supervisor, a sup.Actor) {
 		fmt.Printf("started: %s\n", a.Name())
 	},
-	OnActorStopped: func(a sup.Actor, err error) {
+	OnActorStopped: func(s *sup.Supervisor, a sup.Actor, err error) {
 		fmt.Printf("stopped: %s err=%v\n", a.Name(), err)
 	},
-	OnActorRestarting: func(a sup.Actor, count int, lastErr error) {
+	OnActorRestarting: func(s *sup.Supervisor, a sup.Actor, count int, lastErr error) {
 		fmt.Printf("restarting: %s count=%d lastErr=%v\n", a.Name(), count, lastErr)
 	},
-	OnSupervisorTerminal: func(err error) {
+	OnSupervisorTerminal: func(s *sup.Supervisor, err error) {
 		fmt.Printf("supervisor terminal: err=%v\n", err)
 	},
 }
