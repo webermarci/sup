@@ -39,14 +39,13 @@ func wsURL(server *httptest.Server) string {
 	return "ws" + strings.TrimPrefix(server.URL, "http")
 }
 
-func runSupervisor(ctx context.Context, actor sup.Actor, opts ...sup.SupervisorOption) <-chan error {
+func runSupervisor(ctx context.Context, actor sup.Actor, configure ...func(*sup.Supervisor)) <-chan error {
 	done := make(chan error, 1)
 
-	supervisorOpts := append([]sup.SupervisorOption{
-		sup.WithActor(actor),
-	}, opts...)
-
-	supervisor := sup.NewSupervisor("root", supervisorOpts...)
+	supervisor := sup.NewSupervisor("root").Actor(actor)
+	for _, fn := range configure {
+		fn(supervisor)
+	}
 
 	go func() {
 		done <- supervisor.Run(ctx)
@@ -94,7 +93,7 @@ func TestWSActorReceivesTextMessage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	done := runSupervisor(ctx, actor, sup.WithPolicy(sup.Temporary))
+	done := runSupervisor(ctx, actor, func(s *sup.Supervisor) { s.Policy(sup.Temporary) })
 
 	wait(t, accepted, time.Second, "server accept")
 	msg := wait(t, received, 2*time.Second, "received text message")
@@ -137,7 +136,7 @@ func TestWSActorReceivesBinaryMessage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	done := runSupervisor(ctx, actor, sup.WithPolicy(sup.Temporary))
+	done := runSupervisor(ctx, actor, func(s *sup.Supervisor) { s.Policy(sup.Temporary) })
 
 	wait(t, accepted, time.Second, "server accept")
 	msg := wait(t, received, 2*time.Second, "received binary message")
@@ -181,7 +180,7 @@ func TestWSActorSend(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	done := runSupervisor(ctx, actor, sup.WithPolicy(sup.Temporary))
+	done := runSupervisor(ctx, actor, func(s *sup.Supervisor) { s.Policy(sup.Temporary) })
 
 	wait(t, accepted, time.Second, "server accept")
 
@@ -235,7 +234,7 @@ func TestWSActorObserver(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	done := runSupervisor(ctx, actor, sup.WithPolicy(sup.Temporary))
+	done := runSupervisor(ctx, actor, func(s *sup.Supervisor) { s.Policy(sup.Temporary) })
 
 	url := wait(t, connectCh, time.Second, "observer connect")
 	if url == "" {
@@ -287,8 +286,8 @@ func TestWSActorReconnectsUnderSupervisor(t *testing.T) {
 	done := runSupervisor(
 		ctx,
 		actor,
-		sup.WithPolicy(sup.Permanent),
-		sup.WithRestartDelay(50*time.Millisecond),
+		func(s *sup.Supervisor) { s.Policy(sup.Permanent) },
+		func(s *sup.Supervisor) { s.RestartDelay(50 * time.Millisecond) },
 	)
 
 	first := wait(t, connected, time.Second, "first connection")
@@ -321,10 +320,9 @@ func TestWSActorReturnsContextErrorOnCancel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	supervisor := sup.NewSupervisor("root",
-		sup.WithActor(actor),
-		sup.WithPolicy(sup.Temporary),
-	)
+	supervisor := sup.NewSupervisor("root").
+		Actor(actor).
+		Policy(sup.Temporary)
 
 	supervisorDone := make(chan error, 1)
 	go func() {

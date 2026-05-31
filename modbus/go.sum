@@ -2,5 +2,5 @@ github.com/goburrow/modbus v0.1.0 h1:DejRZY73nEM6+bt5JSP6IsFolJ9dVcqxsYbpLbeW/ro
 github.com/goburrow/modbus v0.1.0/go.mod h1:Kx552D5rLIS8E7TyUwQ/UdHEqvX5T8tyiGBTlzMcZBg=
 github.com/goburrow/serial v0.1.0 h1:v2T1SQa/dlUqQiYIT8+Cu7YolfqAi3K96UmhwYyuSrA=
 github.com/goburrow/serial v0.1.0/go.mod h1:sAiqG0nRVswsm1C97xsttiYCzSLBmUZ/VSlVLZJ8haA=
-github.com/webermarci/sup v0.0.51 h1:hwg0bMdiogy6JmrjQmpEirnp1ySnUZ4S0fOYUra8TsM=
-github.com/webermarci/sup v0.0.51/go.mod h1:PQV60WGu7EQ16a8K6nvaKkBQMlnhO6Z/JQV0vRUdwx4=
+github.com/webermarci/sup v0.0.52 h1:o7d5F37NNnBB6Pb0F0Fa1j80ral42pGBF8AYbNYlM4s=
+github.com/webermarci/sup v0.0.52/go.mod h1:PQV60WGu7EQ16a8K6nvaKkBQMlnhO6Z/JQV0vRUdwx4=
