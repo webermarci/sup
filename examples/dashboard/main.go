@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"math/rand/v2"
 	"net/http"
 	"os"
@@ -12,8 +11,7 @@ import (
 	"time"
 
 	"github.com/webermarci/sup"
-	"github.com/webermarci/sup/control"
-	"github.com/webermarci/sup/ui"
+	"github.com/webermarci/sup/hub"
 )
 
 type GetMessage struct{}
@@ -27,7 +25,7 @@ type Counter struct {
 	GetInbox       *sup.CallInbox[GetMessage, int]
 	IncrementInbox *sup.CastInbox[IncrementMessage]
 	State          int
-	StateSignal    *sup.PushedSignal[int]
+	StateSignal    *sup.Signal[int]
 }
 
 func NewCounter(id string) *Counter {
@@ -35,9 +33,7 @@ func NewCounter(id string) *Counter {
 		BaseActor:      sup.NewBaseActor(id),
 		GetInbox:       sup.NewCallInbox[GetMessage, int](8),
 		IncrementInbox: sup.NewCastInbox[IncrementMessage](8),
-		StateSignal: sup.NewPushedSignal(fmt.Sprintf("%s_signal", id), func(ctx context.Context, i int) error {
-			return nil
-		}),
+		StateSignal:    sup.NewSignal(fmt.Sprintf("%s_signal", id), 0),
 	}
 }
 
@@ -49,6 +45,13 @@ func (c *Counter) Get() int {
 func (c *Counter) Increment(amount int) {
 	c.IncrementInbox.Cast(context.Background(), IncrementMessage{Amount: amount})
 	c.StateSignal.Write(context.Background(), c.Get())
+}
+
+func (c *Counter) Controls() []sup.Control {
+	return []sup.Control{
+		sup.NewCastControl("increment", c.IncrementInbox),
+		sup.NewCallControl("get", c.GetInbox),
+	}
 }
 
 func (c *Counter) Run(ctx context.Context) error {
@@ -67,11 +70,11 @@ func (c *Counter) Run(ctx context.Context) error {
 }
 
 type CombinedMessage struct {
-	Counter                  int
-	ThrottledRandom          int
-	ThrottledRandomEven      bool
-	ThrottledRandomCharacter string
-	Quotient                 float64
+	Counter         int
+	Random          int
+	RandomEven      bool
+	RandomCharacter string
+	Quotient        float64
 }
 
 func main() {
@@ -84,76 +87,63 @@ func main() {
 
 	counter := NewCounter("counter")
 
-	random := sup.NewPeriodicSignal("random", func(ctx context.Context) (int, error) {
-		return rand.IntN(100) + 1, nil
-	}, 100*time.Millisecond)
+	random := sup.NewSignal("random", 0).
+		Poll(200*time.Millisecond, func(ctx context.Context) (int, error) {
+			return rand.IntN(100) + 1, nil
+		}).
+		Throttle(time.Second)
 
-	throttledRandom := sup.NewThrottledSignal("throttled_random", random, time.Second)
+	isRandomEven := sup.NewDerived("is_random_even", func() bool {
+		return random.Read()%2 == 0
+	}, random)
 
-	isThrottledRandomEven := sup.NewComputedSignal("is_throttled_random_even", func() bool {
-		return throttledRandom.Read()%2 == 0
-	}, throttledRandom)
+	randomCharacter := sup.NewDerived("random_character", func() string {
+		return string(rune(random.Read()%26 + 'a'))
+	}, random)
 
-	throttledRandomCharacter := sup.NewComputedSignal("throttled_random_character", func() string {
-		return string(rune(throttledRandom.Read()%26 + 'a'))
-	}, throttledRandom)
-
-	quotient := sup.NewComputedSignal("quotient", func() float64 {
-		divisor := throttledRandom.Read()
+	quotient := sup.NewDerived("quotient", func() float64 {
+		divisor := random.Read()
 		if divisor == 0 {
 			return 0
 		}
 		return float64(counter.StateSignal.Read()) / float64(divisor)
-	}, counter.StateSignal, throttledRandom)
+	}, counter.StateSignal, random)
 
-	combined := sup.NewComputedSignal("combined", func() CombinedMessage {
+	combined := sup.NewDerived("combined", func() CombinedMessage {
 		return CombinedMessage{
-			Counter:                  counter.StateSignal.Read(),
-			ThrottledRandom:          throttledRandom.Read(),
-			ThrottledRandomEven:      isThrottledRandomEven.Read(),
-			ThrottledRandomCharacter: throttledRandomCharacter.Read(),
-			Quotient:                 quotient.Read(),
+			Counter:         counter.StateSignal.Read(),
+			Random:          random.Read(),
+			RandomEven:      isRandomEven.Read(),
+			RandomCharacter: randomCharacter.Read(),
+			Quotient:        quotient.Read(),
 		}
 	}, quotient)
 
-	registry := control.NewRegistry("registry",
-		control.WithActor(counter,
-			control.Cast("increment", func(ctx context.Context, input IncrementMessage) error {
-				counter.Increment(input.Amount)
-				return nil
-			}),
-			control.Call("get", func(ctx context.Context, input GetMessage) (int, error) {
-				return counter.Get(), nil
-			}),
-		),
-		control.WithSignal(counter.StateSignal),
-		control.WithSignal(random),
-		control.WithSignal(throttledRandom),
-		control.WithSignal(isThrottledRandomEven),
-		control.WithSignal(throttledRandomCharacter),
-		control.WithSignal(quotient),
-		control.WithSignal(combined),
+	registry := hub.New("registry",
+		hub.WithActor(counter),
+		hub.WithSignal(counter.StateSignal),
+		hub.WithSignal(random),
+		hub.WithSignal(isRandomEven),
+		hub.WithSignal(randomCharacter),
+		hub.WithSignal(quotient),
+		hub.WithSignal(combined),
 	)
 
-	root := sup.NewSupervisor("root",
-		sup.WithActors(
+	root := sup.NewSupervisor("root").
+		Observer(registry.Observer()).
+		Actors(
 			counter,
 			counter.StateSignal,
 			random,
-			throttledRandom,
-			isThrottledRandomEven,
-			throttledRandomCharacter,
+			isRandomEven,
+			randomCharacter,
 			quotient,
 			combined,
 			registry,
-		),
-		sup.WithLogger(slog.Default()),
-	)
-
-	dashboard := ui.NewDashboard(registry)
+		)
 
 	go root.Run(ctx)
-	go http.ListenAndServe(":8080", dashboard.Handler())
+	go http.ListenAndServe(":8080", registry.Handler())
 
 	for {
 		select {

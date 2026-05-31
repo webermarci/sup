@@ -1,15 +1,17 @@
-package sup
+package sup_test
 
 import (
 	"context"
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/webermarci/sup"
 )
 
 func TestCallInbox_Success(t *testing.T) {
 	ctx := t.Context()
-	inbox := NewCallInbox[string, int](10)
+	inbox := sup.NewCallInbox[string, int](10)
 	msg := "calculate_length"
 
 	go func() {
@@ -36,7 +38,7 @@ func TestCallInbox_ContextTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
 	defer cancel()
 
-	inbox := NewCallInbox[string, int](1)
+	inbox := sup.NewCallInbox[string, int](1)
 
 	_, err := inbox.Call(ctx, "hang_me")
 
@@ -47,11 +49,11 @@ func TestCallInbox_ContextTimeout(t *testing.T) {
 
 func TestCallInbox_Closed(t *testing.T) {
 	ctx := t.Context()
-	inbox := NewCallInbox[string, int](1)
+	inbox := sup.NewCallInbox[string, int](1)
 	inbox.Close()
 
 	_, err := inbox.Call(ctx, "test")
-	if !errors.Is(err, ErrCallInboxClosed) {
+	if !errors.Is(err, sup.ErrCallInboxClosed) {
 		t.Errorf("expected ErrCallInboxClosed, got %v", err)
 	}
 }
@@ -60,7 +62,7 @@ func TestCallInbox_Full(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 
-	inbox := NewCallInbox[string, int](1)
+	inbox := sup.NewCallInbox[string, int](1)
 
 	go func() {
 		inbox.Call(context.Background(), "first")
@@ -77,7 +79,7 @@ func TestCallInbox_Full(t *testing.T) {
 
 func TestCallInbox_ActorError(t *testing.T) {
 	ctx := t.Context()
-	inbox := NewCallInbox[string, string](1)
+	inbox := sup.NewCallInbox[string, string](1)
 	expectedErr := errors.New("hardware_failure")
 
 	go func() {
@@ -93,12 +95,49 @@ func TestCallInbox_ActorError(t *testing.T) {
 }
 
 func TestCallInbox_CloseSafety(t *testing.T) {
-	inbox := NewCallInbox[int, int](1)
+	inbox := sup.NewCallInbox[int, int](1)
 
 	inbox.Close()
 	inbox.Close()
 
-	if !inbox.closed.Load() {
+	if !inbox.Closed() {
 		t.Error("expected closed to be true")
+	}
+}
+
+func TestCallInbox_LenCap(t *testing.T) {
+	inbox := sup.NewCallInbox[string, int](2)
+
+	if got := inbox.Cap(); got != 2 {
+		t.Fatalf("expected cap 2, got %d", got)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = inbox.Call(context.Background(), "first")
+		close(done)
+	}()
+
+	deadline := time.After(time.Second)
+	for inbox.Len() != 1 {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for len 1, got %d", inbox.Len())
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+
+	select {
+	case req := <-inbox.Receive():
+		req.Reply(1, nil)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for request")
+	}
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for call to finish")
 	}
 }

@@ -1,15 +1,17 @@
-package sup
+package sup_test
 
 import (
 	"context"
 	"testing"
+
+	"github.com/webermarci/sup"
 )
 
 // BenchmarkCastInbox_SingleWorker measures the latency of casting a message
 // when there is a dedicated consumer clearing the queue.
 func BenchmarkCastInbox_SingleWorker(b *testing.B) {
 	ctx := context.Background()
-	inbox := NewCastInbox[int](128)
+	inbox := sup.NewCastInbox[int](128)
 
 	// Start a "sink" goroutine to drain the inbox as fast as possible
 	go func() {
@@ -30,7 +32,7 @@ func BenchmarkCastInbox_SingleWorker(b *testing.B) {
 // writers (multiple goroutines calling Cast at once).
 func BenchmarkCastInbox_Parallel(b *testing.B) {
 	ctx := context.Background()
-	inbox := NewCastInbox[int](1024)
+	inbox := sup.NewCastInbox[int](1024)
 
 	go func() {
 		for range inbox.Receive() {
@@ -52,7 +54,7 @@ func BenchmarkCastInbox_Parallel(b *testing.B) {
 // path which avoids some of the select logic.
 func BenchmarkCastInbox_TryCast(b *testing.B) {
 	ctx := context.Background()
-	inbox := NewCastInbox[int](b.N + 1) // Buffer large enough to never block
+	inbox := sup.NewCastInbox[int](b.N + 1) // Buffer large enough to never block
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

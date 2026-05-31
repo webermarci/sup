@@ -7,25 +7,27 @@ import (
 )
 
 var (
-	ErrCastInboxFull   = errors.New("sup: cast inbox is full")
+	// ErrCastInboxFull is returned when a non-blocking cast cannot be queued.
+	ErrCastInboxFull = errors.New("sup: cast inbox is full")
+
+	// ErrCastInboxClosed is returned when a cast is made after the inbox is closed.
 	ErrCastInboxClosed = errors.New("sup: cast inbox is closed")
 )
 
-// CastInbox is a type-safe, write-only entry point for fire-and-forget messages.
+// CastInbox queues asynchronous messages for an actor.
 type CastInbox[T any] struct {
 	channel chan T
 	closed  atomic.Bool
 }
 
-// NewCastInbox creates a new inbox for a specific message type.
+// NewCastInbox creates a cast inbox with the given buffer size.
 func NewCastInbox[T any](size int) *CastInbox[T] {
 	return &CastInbox[T]{
 		channel: make(chan T, size),
 	}
 }
 
-// Cast pushes a message into the inbox with context for cancellation.
-// It blocks if the inbox is full, but returns ctx.Err() if the context expires before the message is enqueued.
+// Cast sends a message, blocking until it is queued or the context is canceled.
 func (i *CastInbox[T]) Cast(ctx context.Context, message T) error {
 	if i.closed.Load() {
 		return ErrCastInboxClosed
@@ -39,7 +41,7 @@ func (i *CastInbox[T]) Cast(ctx context.Context, message T) error {
 	}
 }
 
-// TryCastContext attempts to push a message without blocking, but returns ctx.Err() if ctx is done.
+// TryCast sends a message without blocking when the inbox is full.
 func (i *CastInbox[T]) TryCast(ctx context.Context, message T) error {
 	if i.closed.Load() {
 		return ErrCastInboxClosed
@@ -64,11 +66,16 @@ func (i *CastInbox[T]) Receive() <-chan T {
 	return i.channel
 }
 
-// Close safely shuts down the inbox.
+// Close closes the inbox and prevents future casts.
 func (i *CastInbox[T]) Close() {
 	if i.closed.CompareAndSwap(false, true) {
 		close(i.channel)
 	}
+}
+
+// Closed reports whether the inbox is closed.
+func (i *CastInbox[T]) Closed() bool {
+	return i.closed.Load()
 }
 
 // Len returns the number of messages currently in the inbox.

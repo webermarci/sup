@@ -3,7 +3,6 @@ package sup_test
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -16,13 +15,12 @@ import (
 func TestSupervisor_Temporary(t *testing.T) {
 	var runs atomic.Int32
 
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context, _ *slog.Logger) error {
+	supervisor := sup.NewSupervisor("sup").
+		Policy(sup.Temporary).
+		Actor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
 			runs.Add(1)
 			panic("fatal error")
-		})),
-		sup.WithPolicy(sup.Temporary),
-	)
+		}))
 
 	// In Temporary policy, Run should exit cleanly even after a panic
 	supervisor.Run(t.Context())
@@ -35,17 +33,16 @@ func TestSupervisor_Temporary(t *testing.T) {
 func TestSupervisor_Transient(t *testing.T) {
 	var runs atomic.Int32
 
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context, _ *slog.Logger) error {
+	supervisor := sup.NewSupervisor("sup").
+		Policy(sup.Transient).
+		RestartDelay(time.Millisecond).
+		Actor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
 			count := runs.Add(1)
 			if count == 1 {
 				return errors.New("abnormal exit")
 			}
 			return nil
-		})),
-		sup.WithPolicy(sup.Transient),
-		sup.WithRestartDelay(1*time.Millisecond),
-	)
+		}))
 
 	// Should restart once then exit cleanly on nil
 	supervisor.Run(t.Context())
@@ -58,15 +55,14 @@ func TestSupervisor_Transient(t *testing.T) {
 func TestSupervisor_MaxRestartsEscalation(t *testing.T) {
 	var runs atomic.Int32
 
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context, _ *slog.Logger) error {
+	supervisor := sup.NewSupervisor("sup").
+		Actor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
 			runs.Add(1)
 			return errors.New("constant fail")
-		})),
-		sup.WithPolicy(sup.Permanent),
-		sup.WithRestartDelay(1*time.Millisecond),
-		sup.WithRestartLimit(3, time.Second),
-	)
+		})).
+		Policy(sup.Permanent).
+		RestartDelay(1*time.Millisecond).
+		RestartLimit(3, time.Second)
 
 	// Run should return the terminal error when limits are exceeded
 	err := supervisor.Run(t.Context())
@@ -84,16 +80,15 @@ func TestSupervisor_OnError(t *testing.T) {
 	var capturedErr error
 	var capturedActor sup.Actor
 
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context, _ *slog.Logger) error {
+	supervisor := sup.NewSupervisor("sup").
+		Actor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
 			return errors.New("boom")
-		})),
-		sup.WithPolicy(sup.Temporary),
-		sup.WithOnError(func(a sup.Actor, err error) {
+		})).
+		Policy(sup.Temporary).
+		OnError(func(a sup.Actor, err error) {
 			capturedActor = a
 			capturedErr = err
-		}),
-	)
+		})
 
 	supervisor.Run(t.Context())
 
@@ -114,7 +109,7 @@ func TestSupervisor_NoGoroutineLeaks(t *testing.T) {
 
 	// Spawn multiple long-running actors
 	for range 10 {
-		supervisor.Spawn(ctx, sup.ActorFunc(t.Name(), func(aCtx context.Context, _ *slog.Logger) error {
+		supervisor.Spawn(ctx, sup.ActorFunc(t.Name(), func(aCtx context.Context) error {
 			<-aCtx.Done()
 			return nil
 		}))
@@ -139,8 +134,8 @@ func TestSupervisor_RestartLimit_WindowReset(t *testing.T) {
 
 	// Limit is 2 restarts in 50ms.
 	// We will fail, wait 100ms, fail again. Window should reset.
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context, _ *slog.Logger) error {
+	supervisor := sup.NewSupervisor("sup").
+		Actor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
 			n := runs.Add(1)
 			if n == 3 {
 				time.Sleep(100 * time.Millisecond)
@@ -149,11 +144,10 @@ func TestSupervisor_RestartLimit_WindowReset(t *testing.T) {
 				return errors.New("fail")
 			}
 			return nil
-		})),
-		sup.WithPolicy(sup.Transient),
-		sup.WithRestartDelay(1*time.Millisecond),
-		sup.WithRestartLimit(2, 50*time.Millisecond),
-	)
+		})).
+		Policy(sup.Transient).
+		RestartDelay(1*time.Millisecond).
+		RestartLimit(2, 50*time.Millisecond)
 
 	err := supervisor.Run(t.Context())
 	if err != nil {
@@ -167,15 +161,15 @@ func TestSupervisor_RestartLimit_WindowReset(t *testing.T) {
 
 func TestSupervisor_PanicStackTrace(t *testing.T) {
 	var capturedErr error
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithActor(sup.ActorFunc(t.Name(), func(ctx context.Context, _ *slog.Logger) error {
+
+	supervisor := sup.NewSupervisor("sup").
+		Actor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
 			panic("extreme failure")
-		})),
-		sup.WithPolicy(sup.Temporary),
-		sup.WithOnError(func(a sup.Actor, err error) {
+		})).
+		Policy(sup.Temporary).
+		OnError(func(a sup.Actor, err error) {
 			capturedErr = err
-		}),
-	)
+		})
 
 	supervisor.Run(t.Context())
 
@@ -210,7 +204,7 @@ func TestSupervisor_ObserverBasicLifecycle(t *testing.T) {
 	}
 
 	var runs atomic.Int32
-	actor := sup.ActorFunc(t.Name(), func(ctx context.Context, _ *slog.Logger) error {
+	actor := sup.ActorFunc(t.Name(), func(ctx context.Context) error {
 		n := runs.Add(1)
 		if n == 1 {
 			return errors.New("boom")
@@ -218,12 +212,11 @@ func TestSupervisor_ObserverBasicLifecycle(t *testing.T) {
 		return nil
 	})
 
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithActor(actor),
-		sup.WithPolicy(sup.Transient),
-		sup.WithRestartDelay(5*time.Millisecond),
-		sup.WithObserver(observer),
-	)
+	supervisor := sup.NewSupervisor("sup").
+		Actor(actor).
+		Policy(sup.Transient).
+		RestartDelay(5 * time.Millisecond).
+		Observer(observer)
 
 	if err := supervisor.Run(t.Context()); err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -245,10 +238,12 @@ func TestSupervisor_ObserverBasicLifecycle(t *testing.T) {
 }
 
 func TestSupervisor_Inspect(t *testing.T) {
-	child1 := sup.ActorFunc("child1", func(ctx context.Context, _ *slog.Logger) error { return nil })
-	child2 := sup.ActorFunc("child2", func(ctx context.Context, _ *slog.Logger) error { return nil })
+	child1 := sup.ActorFunc("child1", func(ctx context.Context) error { return nil })
+	child2 := sup.ActorFunc("child2", func(ctx context.Context) error { return nil })
 
-	s := sup.NewSupervisor("root", sup.WithActor(child1), sup.WithActor(child2))
+	s := sup.NewSupervisor("root").
+		Actors(child1, child2)
+
 	spec := s.Inspect()
 
 	if spec.Kind != "supervisor" {
@@ -268,17 +263,83 @@ func TestSupervisor_Inspect(t *testing.T) {
 	}
 }
 
+func TestSupervisor_ChildrenReturnsCopy(t *testing.T) {
+	child1 := sup.ActorFunc("child1", func(ctx context.Context) error { return nil })
+	child2 := sup.ActorFunc("child2", func(ctx context.Context) error { return nil })
+	replacement := sup.ActorFunc("replacement", func(ctx context.Context) error { return nil })
+
+	s := sup.NewSupervisor("root").
+		Actors(child1, child2)
+
+	children := s.Children()
+	if len(children) != 2 || children[0].ID() != "child1" || children[1].ID() != "child2" {
+		t.Fatalf("unexpected children: %v", children)
+	}
+
+	children[0] = replacement
+
+	children = s.Children()
+	if children[0].ID() != "child1" {
+		t.Fatalf("expected Children to return a copy, got first child %q", children[0].ID())
+	}
+}
+
+func TestSupervisor_WaitBlocksUntilSpawnedActorStops(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	started := make(chan struct{})
+	stopped := make(chan struct{})
+
+	s := sup.NewSupervisor("root")
+	s.Spawn(ctx, sup.ActorFunc("worker", func(ctx context.Context) error {
+		close(started)
+		<-ctx.Done()
+		close(stopped)
+		return nil
+	}))
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for actor to start")
+	}
+
+	waitDone := make(chan struct{})
+	go func() {
+		s.Wait()
+		close(waitDone)
+	}()
+
+	select {
+	case <-waitDone:
+		t.Fatal("Wait returned before actor stopped")
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	cancel()
+
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for actor to stop")
+	}
+
+	select {
+	case <-waitDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Wait to return")
+	}
+}
+
 func TestSupervisor_ObserverPropagatesToChildSupervisor(t *testing.T) {
 	var rootObservedWorkerStarted atomic.Int32
 
-	worker := sup.ActorFunc("worker", func(ctx context.Context, _ *slog.Logger) error {
+	worker := sup.ActorFunc("worker", func(ctx context.Context) error {
 		return nil
 	})
 
-	child := sup.NewSupervisor("child",
-		sup.WithActor(worker),
-		sup.WithPolicy(sup.Transient),
-	)
+	child := sup.NewSupervisor("child").
+		Actor(worker).
+		Policy(sup.Transient)
 
 	rootObserver := &sup.SupervisorObserver{
 		OnActorStarted: func(s *sup.Supervisor, a sup.Actor) {
@@ -288,11 +349,10 @@ func TestSupervisor_ObserverPropagatesToChildSupervisor(t *testing.T) {
 		},
 	}
 
-	root := sup.NewSupervisor("root",
-		sup.WithObserver(rootObserver),
-		sup.WithActor(child),
-		sup.WithPolicy(sup.Transient),
-	)
+	root := sup.NewSupervisor("root").
+		Observer(rootObserver).
+		Actor(child).
+		Policy(sup.Transient)
 
 	if err := root.Run(t.Context()); err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -316,19 +376,17 @@ func TestSupervisor_ObserverPropagatesToChildSupervisor(t *testing.T) {
 func TestSupervisor_ObserverPropagatesThroughSupervisorTree(t *testing.T) {
 	var observedLeafWorkerStarted atomic.Int32
 
-	worker := sup.ActorFunc("leaf-worker", func(ctx context.Context, _ *slog.Logger) error {
+	worker := sup.ActorFunc("leaf-worker", func(ctx context.Context) error {
 		return nil
 	})
 
-	leaf := sup.NewSupervisor("leaf",
-		sup.WithActor(worker),
-		sup.WithPolicy(sup.Transient),
-	)
+	leaf := sup.NewSupervisor("leaf").
+		Actor(worker).
+		Policy(sup.Transient)
 
-	middle := sup.NewSupervisor("middle",
-		sup.WithActor(leaf),
-		sup.WithPolicy(sup.Transient),
-	)
+	middle := sup.NewSupervisor("middle").
+		Actor(leaf).
+		Policy(sup.Transient)
 
 	rootObserver := &sup.SupervisorObserver{
 		OnActorStarted: func(s *sup.Supervisor, a sup.Actor) {
@@ -338,11 +396,10 @@ func TestSupervisor_ObserverPropagatesThroughSupervisorTree(t *testing.T) {
 		},
 	}
 
-	root := sup.NewSupervisor("root",
-		sup.WithObserver(rootObserver),
-		sup.WithActor(middle),
-		sup.WithPolicy(sup.Transient),
-	)
+	root := sup.NewSupervisor("root").
+		Observer(rootObserver).
+		Actor(middle).
+		Policy(sup.Transient)
 
 	if err := root.Run(t.Context()); err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -363,17 +420,16 @@ func TestSupervisor_ObserverPropagatesThroughSupervisorTree(t *testing.T) {
 	}
 }
 
-func TestSupervisor_ObserverPropagationDoesNotDependOnOptionOrder(t *testing.T) {
+func TestSupervisor_ObserverPropagationDoesNotDependOnConfigurationOrder(t *testing.T) {
 	var observed atomic.Int32
 
-	worker := sup.ActorFunc("worker", func(ctx context.Context, _ *slog.Logger) error {
+	worker := sup.ActorFunc("worker", func(ctx context.Context) error {
 		return nil
 	})
 
-	child := sup.NewSupervisor("child",
-		sup.WithActor(worker),
-		sup.WithPolicy(sup.Transient),
-	)
+	child := sup.NewSupervisor("child").
+		Actor(worker).
+		Policy(sup.Transient)
 
 	observer := &sup.SupervisorObserver{
 		OnActorStarted: func(s *sup.Supervisor, a sup.Actor) {
@@ -383,11 +439,10 @@ func TestSupervisor_ObserverPropagationDoesNotDependOnOptionOrder(t *testing.T) 
 		},
 	}
 
-	root := sup.NewSupervisor("root",
-		sup.WithActor(child),
-		sup.WithObserver(observer),
-		sup.WithPolicy(sup.Transient),
-	)
+	root := sup.NewSupervisor("root").
+		Actor(child).
+		Observer(observer).
+		Policy(sup.Transient)
 
 	if err := root.Run(t.Context()); err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -401,7 +456,7 @@ func TestSupervisor_ObserverPropagationDoesNotDependOnOptionOrder(t *testing.T) 
 
 		select {
 		case <-deadline:
-			t.Fatalf("expected observer to propagate despite option order, got %d", observed.Load())
+			t.Fatalf("expected observer to propagate despite configuration order, got %d", observed.Load())
 		default:
 			time.Sleep(5 * time.Millisecond)
 		}
@@ -419,21 +474,19 @@ func TestSupervisor_ObserverPropagationDoesNotDuplicateObserver(t *testing.T) {
 		},
 	}
 
-	worker := sup.ActorFunc("worker", func(ctx context.Context, _ *slog.Logger) error {
+	worker := sup.ActorFunc("worker", func(ctx context.Context) error {
 		return nil
 	})
 
-	child := sup.NewSupervisor("child",
-		sup.WithObserver(observer),
-		sup.WithActor(worker),
-		sup.WithPolicy(sup.Transient),
-	)
+	child := sup.NewSupervisor("child").
+		Observer(observer).
+		Actor(worker).
+		Policy(sup.Transient)
 
-	root := sup.NewSupervisor("root",
-		sup.WithObserver(observer),
-		sup.WithActor(child),
-		sup.WithPolicy(sup.Transient),
-	)
+	root := sup.NewSupervisor("root").
+		Observer(observer).
+		Actor(child).
+		Policy(sup.Transient)
 
 	if err := root.Run(t.Context()); err != nil {
 		t.Fatalf("Run returned error: %v", err)

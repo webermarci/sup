@@ -1,18 +1,20 @@
-package sup
+package sup_test
 
 import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/webermarci/sup"
 )
 
 type mockActor struct {
-	*BaseActor
+	*sup.BaseActor
 	runFunc func(context.Context) error
 }
 
 func newMockActor(name string, fn func(context.Context) error) *mockActor {
-	return &mockActor{BaseActor: NewBaseActor(name), runFunc: fn}
+	return &mockActor{BaseActor: sup.NewBaseActor(name), runFunc: fn}
 }
 
 func (m *mockActor) Run(ctx context.Context) error {
@@ -24,8 +26,8 @@ func (m *mockActor) Run(ctx context.Context) error {
 func BenchmarkSupervisor_SpawnAndExit(b *testing.B) {
 	ctx := b.Context()
 
-	s := NewSupervisor("bench_sup")
-	s.policy = Temporary
+	s := sup.NewSupervisor("bench_sup").
+		Policy(sup.Temporary)
 
 	actor := newMockActor("churn", func(ctx context.Context) error {
 		return nil
@@ -42,10 +44,9 @@ func BenchmarkSupervisor_SpawnAndExit(b *testing.B) {
 func BenchmarkSupervisor_RestartCycle(b *testing.B) {
 	// We want to measure how fast the supervisor can process restarts
 	// when the policy is set to Permanent.
-	s := NewSupervisor("bench_sup",
-		WithPolicy(Permanent),
-		WithRestartDelay(0), // Fast as possible
-	)
+	s := sup.NewSupervisor("bench_sup").
+		Policy(sup.Permanent).
+		RestartDelay(0)
 
 	// We use a counter to stop the actor after b.N restarts
 	count := 0
@@ -78,7 +79,8 @@ func BenchmarkSupervisor_RestartCycle(b *testing.B) {
 // goroutines try to spawn actors on the same supervisor.
 func BenchmarkSupervisor_ParallelSpawn(b *testing.B) {
 	ctx := b.Context()
-	s := NewSupervisor("bench_sup", WithPolicy(Temporary))
+	s := sup.NewSupervisor("bench_sup").
+		Policy(sup.Temporary)
 	actor := newMockActor("p", func(ctx context.Context) error { return nil })
 
 	b.ResetTimer()

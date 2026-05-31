@@ -8,18 +8,21 @@ import (
 )
 
 var (
-	ErrCallInboxFull   = errors.New("sup: call inbox is full")
+	// ErrCallInboxFull is returned when a non-blocking call cannot be queued.
+	ErrCallInboxFull = errors.New("sup: call inbox is full")
+
+	// ErrCallInboxClosed is returned when a call is made after the inbox is closed.
 	ErrCallInboxClosed = errors.New("sup: call inbox is closed")
 )
 
-// CallInbox manages request-response communication.
+// CallInbox queues synchronous requests and delivers replies to callers.
 type CallInbox[T any, R any] struct {
 	channel chan CallRequest[T, R]
 	pool    sync.Pool
 	closed  atomic.Bool
 }
 
-// NewCastInbox creates a new inbox for a specific message type.
+// NewCallInbox creates a call inbox with the given buffer size.
 func NewCallInbox[T any, R any](size int) *CallInbox[T, R] {
 	return &CallInbox[T, R]{
 		channel: make(chan CallRequest[T, R], size),
@@ -31,7 +34,7 @@ func NewCallInbox[T any, R any](size int) *CallInbox[T, R] {
 	}
 }
 
-// Call sends a request and waits for the response.
+// Call sends a request and waits for a reply or context cancellation.
 func (i *CallInbox[T, R]) Call(ctx context.Context, message T) (R, error) {
 	var zero R
 	if i.closed.Load() {
@@ -67,16 +70,21 @@ func (i *CallInbox[T, R]) Call(ctx context.Context, message T) (R, error) {
 	}
 }
 
-// Receive returns the read-only channel for the actor's internal loop.
+// Receive returns the read-only request channel for the actor's internal loop.
 func (i *CallInbox[T, R]) Receive() <-chan CallRequest[T, R] {
 	return i.channel
 }
 
-// Close safely shuts down the inbox.
+// Close closes the inbox and prevents future calls.
 func (i *CallInbox[T, R]) Close() {
 	if i.closed.CompareAndSwap(false, true) {
 		close(i.channel)
 	}
+}
+
+// Closed reports whether the inbox is closed.
+func (i *CallInbox[T, R]) Closed() bool {
+	return i.closed.Load()
 }
 
 // Len returns the number of messages currently in the inbox.

@@ -1,7 +1,9 @@
-package sup
+package sup_test
 
 import (
 	"testing"
+
+	"github.com/webermarci/sup"
 )
 
 // BenchmarkCallInbox_SingleWorker measures the overhead of a single caller
@@ -9,7 +11,7 @@ import (
 func BenchmarkCallInbox_SingleWorker(b *testing.B) {
 	ctx := b.Context()
 
-	inbox := NewCallInbox[int, int](128)
+	inbox := sup.NewCallInbox[int, int](128)
 
 	go func() {
 		for req := range inbox.Receive() {
@@ -27,7 +29,7 @@ func BenchmarkCallInbox_SingleWorker(b *testing.B) {
 func BenchmarkCallInbox_Contention(b *testing.B) {
 	ctx := b.Context()
 
-	inbox := NewCallInbox[int, int](1024)
+	inbox := sup.NewCallInbox[int, int](1024)
 
 	go func() {
 		for req := range inbox.Receive() {

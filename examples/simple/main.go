@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -67,10 +66,8 @@ func main() {
 
 	actor := NewCounter("counter")
 
-	supervisor := sup.NewSupervisor("root",
-		sup.WithActor(actor),
-		sup.WithLogger(slog.Default()),
-	)
+	supervisor := sup.NewSupervisor("root").
+		Actor(actor)
 
 	go supervisor.Run(ctx)
 

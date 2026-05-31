@@ -1,11 +1,13 @@
-package sup
+package sup_test
 
 import (
 	"testing"
+
+	"github.com/webermarci/sup"
 )
 
 func TestBaseActor_Inspect(t *testing.T) {
-	a := NewBaseActor("base")
+	a := sup.NewBaseActor("base")
 	s := a.Inspect()
 
 	if s.Kind != "actor" {
