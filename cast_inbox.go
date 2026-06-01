@@ -55,6 +55,12 @@ func (i *CastInbox[T]) TryCast(ctx context.Context, message T) error {
 	}
 
 	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	select {
 	case i.channel <- message:
 		return nil
 	case <-ctx.Done():
