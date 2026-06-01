@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 )
 
 var (
@@ -18,55 +17,93 @@ var (
 // CallInbox queues synchronous requests and delivers replies to callers.
 type CallInbox[T any, R any] struct {
 	channel chan CallRequest[T, R]
-	pool    sync.Pool
-	closed  atomic.Bool
+	closed  bool
+	mu      sync.RWMutex
 }
 
 // NewCallInbox creates a call inbox with the given buffer size.
 func NewCallInbox[T any, R any](size int) *CallInbox[T, R] {
 	return &CallInbox[T, R]{
 		channel: make(chan CallRequest[T, R], size),
-		pool: sync.Pool{
-			New: func() any {
-				return make(chan result[R], 1)
-			},
-		},
 	}
 }
 
 // Call sends a request and waits for a reply or context cancellation.
 func (i *CallInbox[T, R]) Call(ctx context.Context, message T) (R, error) {
 	var zero R
-	if i.closed.Load() {
-		return zero, ErrCallInboxClosed
-	}
 
-	ch := i.pool.Get().(chan result[R])
-
-	select {
-	case <-ch:
-	default:
-	}
+	replyTo := make(chan result[R], 1)
 
 	req := CallRequest[T, R]{
 		payload: message,
-		replyTo: ch,
+		replyTo: replyTo,
+	}
+
+	if err := i.send(ctx, req, true); err != nil {
+		return zero, err
+	}
+
+	select {
+	case res := <-replyTo:
+		return res.value, res.err
+
+	case <-ctx.Done():
+		return zero, ctx.Err()
+	}
+}
+
+// TryCall attempts to queue a request without blocking on inbox capacity.
+// If the request is queued, it still waits for a reply or context cancellation.
+func (i *CallInbox[T, R]) TryCall(ctx context.Context, message T) (R, error) {
+	var zero R
+
+	replyTo := make(chan result[R], 1)
+
+	req := CallRequest[T, R]{
+		payload: message,
+		replyTo: replyTo,
+	}
+
+	if err := i.send(ctx, req, false); err != nil {
+		return zero, err
+	}
+
+	select {
+	case res := <-replyTo:
+		return res.value, res.err
+
+	case <-ctx.Done():
+		return zero, ctx.Err()
+	}
+}
+
+func (i *CallInbox[T, R]) send(ctx context.Context, req CallRequest[T, R], blocking bool) error {
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+
+	if i.closed {
+		return ErrCallInboxClosed
+	}
+
+	if blocking {
+		select {
+		case i.channel <- req:
+			return nil
+
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
 	select {
 	case i.channel <- req:
-	case <-ctx.Done():
-		i.pool.Put(ch)
-		return zero, ctx.Err()
-	}
+		return nil
 
-	select {
-	case res := <-ch:
-		i.pool.Put(ch)
-		return res.value, res.err
 	case <-ctx.Done():
-		i.pool.Put(ch)
-		return zero, ctx.Err()
+		return ctx.Err()
+
+	default:
+		return ErrCallInboxFull
 	}
 }
 
@@ -76,15 +113,26 @@ func (i *CallInbox[T, R]) Receive() <-chan CallRequest[T, R] {
 }
 
 // Close closes the inbox and prevents future calls.
+//
+// Already queued requests may still be received by the actor loop before the
+// Receive channel is drained and closed.
 func (i *CallInbox[T, R]) Close() {
-	if i.closed.CompareAndSwap(false, true) {
-		close(i.channel)
+	i.mu.Lock()
+	defer i.mu.Unlock()
+
+	if i.closed {
+		return
 	}
+
+	i.closed = true
+	close(i.channel)
 }
 
 // Closed reports whether the inbox is closed.
 func (i *CallInbox[T, R]) Closed() bool {
-	return i.closed.Load()
+	i.mu.RLock()
+	defer i.mu.RUnlock()
+	return i.closed
 }
 
 // Len returns the number of messages currently in the inbox.
