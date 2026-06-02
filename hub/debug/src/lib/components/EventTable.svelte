@@ -30,11 +30,11 @@
 </script>
 
 <section class="flex flex-col gap-4">
-	<div class="flex gap-2 items-center">
+	<div class="flex items-center gap-2">
 		<div class="relative">
-			<input type="text" class="input pl-9 pr-20" placeholder="Search..." bind:value={search} />
+			<input type="text" class="input pr-20 pl-9" placeholder="Search..." bind:value={search} />
 			<div
-				class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground [&>svg]:size-4"
+				class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground [&>svg]:size-4"
 			>
 				<svg
 					xmlns="http://www.w3.org/2000/svg"
@@ -52,7 +52,7 @@
 				</svg>
 			</div>
 			<div
-				class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground text-sm"
+				class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm text-muted-foreground"
 			>
 				{#if filteredEvents.length > 1}
 					{filteredEvents.length} results
@@ -64,7 +64,7 @@
 			</div>
 		</div>
 
-		<div class="flex gap-2 items-center">
+		<div class="flex items-center gap-2">
 			<button type="button" class="btn-outline" onclick={handlePause}>
 				{#if eventsSnapshot.length === 0}
 					<Pause color="var(--muted-foreground)" />
@@ -77,20 +77,20 @@
 		</div>
 	</div>
 
-	<div class="overflow-auto border dark:border-(--foreground)/20 rounded-lg shadow-xs">
+	<div class="overflow-auto rounded-lg border shadow-xs dark:border-(--foreground)/20">
 		<table class="table">
 			<thead>
 				<tr class="bg-mist-50 dark:bg-mist-950">
-					<th class="font-semibold border-r">Timestamp</th>
-					<th class="font-semibold border-r">Source ID</th>
-					<th class="font-semibold border-r">Type</th>
-					<th class="font-semibold w-full">Payload</th>
+					<th class="border-r font-semibold">Timestamp</th>
+					<th class="border-r font-semibold">Source ID</th>
+					<th class="border-r font-semibold">Type</th>
+					<th class="w-full font-semibold">Payload</th>
 				</tr>
 			</thead>
 			<tbody>
 				{#each filteredEvents as event (event)}
 					<tr>
-						<td class="font-mono border-r text-(--muted-foreground)">
+						<td class="border-r font-mono text-(--muted-foreground)">
 							{new Date(event.timestamp).toLocaleTimeString(undefined, {
 								hour: '2-digit',
 								minute: '2-digit',
@@ -98,7 +98,7 @@
 								fractionalSecondDigits: 3
 							})}
 						</td>
-						<td class="font-medium border-r">
+						<td class="border-r font-medium">
 							{event.source_id}
 						</td>
 						<td class="border-r">

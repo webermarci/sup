@@ -30,11 +30,11 @@
 </script>
 
 <section class="flex flex-col gap-4">
-	<div class="flex gap-2 items-center">
+	<div class="flex items-center gap-2">
 		<div class="relative">
-			<input type="text" class="input pl-9 pr-20" placeholder="Search..." bind:value={search} />
+			<input type="text" class="input pr-20 pl-9" placeholder="Search..." bind:value={search} />
 			<div
-				class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground [&>svg]:size-4"
+				class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted-foreground [&>svg]:size-4"
 			>
 				<svg
 					xmlns="http://www.w3.org/2000/svg"
@@ -52,7 +52,7 @@
 				</svg>
 			</div>
 			<div
-				class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground text-sm"
+				class="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 text-sm text-muted-foreground"
 			>
 				{#if filteredSignals.length > 1}
 					{filteredSignals.length} results
@@ -65,21 +65,21 @@
 		</div>
 	</div>
 
-	<div class="overflow-auto border dark:border-(--foreground)/20 rounded-lg shadow-xs">
+	<div class="overflow-auto rounded-lg border shadow-xs dark:border-(--foreground)/20">
 		<table class="table">
 			<thead>
 				<tr class="bg-mist-50 dark:bg-mist-950">
-					<th class="font-semibold border-r">ID</th>
-					<th class="font-semibold border-r">Kind</th>
-					<th class="font-semibold border-r">Metadata</th>
-					<th class="font-semibold border-r">Dependencies</th>
-					<th class="font-semibold w-full">Value</th>
+					<th class="border-r font-semibold">ID</th>
+					<th class="border-r font-semibold">Kind</th>
+					<th class="border-r font-semibold">Metadata</th>
+					<th class="border-r font-semibold">Dependencies</th>
+					<th class="w-full font-semibold">Value</th>
 				</tr>
 			</thead>
 			<tbody>
 				{#each filteredSignals as signal (signal.id)}
 					<tr class="cursor-pointer" onclick={() => handleSignalClick(signal)}>
-						<td class="font-medium border-r">
+						<td class="border-r font-medium">
 							{signal.id}
 						</td>
 						<td class="border-r">
@@ -114,7 +114,7 @@
 						</td>
 						<td class="font-mono font-medium text-(--muted-foreground)">
 							{#if signal.type === 'boolean'}
-								<span class="flex gap-2 items-center capitalize">
+								<span class="flex items-center gap-2 capitalize">
 									{#if signal.value}
 										<ToggleRight size={16} color="oklch(72.3% 0.219 149.579)" />
 									{:else}
@@ -151,13 +151,13 @@
 
 		<section class="flex min-h-0 flex-1 flex-col">
 			<div
-				class="min-h-0 flex-1 overflow-auto border dark:border-(--foreground)/20 rounded-lg shadow-xs"
+				class="min-h-0 flex-1 overflow-auto rounded-lg border shadow-xs dark:border-(--foreground)/20"
 			>
 				<table class="table">
 					<thead>
 						<tr class="bg-mist-50 dark:bg-mist-950">
-							<th class="font-semibold border-r">Timestamp</th>
-							<th class="font-semibold w-full">Value</th>
+							<th class="border-r font-semibold">Timestamp</th>
+							<th class="w-full font-semibold">Value</th>
 						</tr>
 					</thead>
 					<tbody>
@@ -165,7 +165,7 @@
 							.get(selectedSignal?.id || '')
 							?.filter((e) => e.type === 'signal:updated') || [] as event (event)}
 							<tr>
-								<td class="border-r text-(--muted-foreground) font-mono">
+								<td class="border-r font-mono text-(--muted-foreground)">
 									{new Date(event.timestamp).toLocaleTimeString(undefined, {
 										hour: '2-digit',
 										minute: '2-digit',
@@ -175,7 +175,7 @@
 								</td>
 								<td class="font-mono font-medium">
 									{#if selectedSignal?.type === 'boolean'}
-										<span class="flex gap-2 items-center capitalize">
+										<span class="flex items-center gap-2 capitalize">
 											{#if event.payload.value}
 												<ToggleRight size={16} color="oklch(72.3% 0.219 149.579)" />
 											{:else}

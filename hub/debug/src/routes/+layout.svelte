@@ -62,14 +62,14 @@
 </svelte:head>
 
 <main>
-	<nav class="flex gap-8 w-full border-b p-4 overflow-x-auto">
-		<h1 class="font-bold tracking-wide flex items-center gap-1">
+	<nav class="flex w-full gap-8 overflow-x-auto border-b p-4">
+		<h1 class="flex items-center gap-1 font-bold tracking-wide">
 			<Bug size={18} class="mt-0.5 shrink-0" />
 			sup/debug
 		</h1>
 		<div class="flex gap-2">
 			<a
-				class="font-medium text-sm flex items-center gap-1 border px-3 py-2 rounded-lg"
+				class="flex items-center gap-1 rounded-lg border px-3 py-2 text-sm font-medium"
 				class:text-(--foreground)={page.url.toString().includes('/signals')}
 				class:bg-(--secondary)={page.url.toString().includes('/signals')}
 				class:text-(--muted-foreground)={!page.url.toString().includes('/signals')}
@@ -80,7 +80,7 @@
 				Signals
 			</a>
 			<a
-				class="font-medium text-sm flex items-center gap-1 border px-3 py-2 rounded-lg"
+				class="flex items-center gap-1 rounded-lg border px-3 py-2 text-sm font-medium"
 				class:text-(--foreground)={page.url.toString().includes('/events')}
 				class:bg-(--secondary)={page.url.toString().includes('/events')}
 				class:text-(--muted-foreground)={!page.url.toString().includes('/events')}
