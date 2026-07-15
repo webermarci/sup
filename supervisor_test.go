@@ -52,6 +52,28 @@ func TestSupervisor_Transient(t *testing.T) {
 	}
 }
 
+func TestSupervisor_SmallRestartDelayDoesNotPanic(t *testing.T) {
+	var runs atomic.Int32
+
+	supervisor := sup.NewSupervisor("sup").
+		Policy(sup.Transient).
+		RestartDelay(time.Nanosecond).
+		Actor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
+			if runs.Add(1) == 1 {
+				return errors.New("retry")
+			}
+			return nil
+		}))
+
+	if err := supervisor.Run(t.Context()); err != nil {
+		t.Fatalf("expected clean exit after retry, got %v", err)
+	}
+
+	if runs.Load() != 2 {
+		t.Fatalf("expected 2 runs, got %d", runs.Load())
+	}
+}
+
 func TestSupervisor_MaxRestartsEscalation(t *testing.T) {
 	var runs atomic.Int32
 

@@ -214,11 +214,14 @@ func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
 
 			delay := s.restartDelay
 			if delay > 0 {
-				jitter := time.Duration(rand.Int64N(int64(delay) / 10))
-				if rand.N(2) == 0 {
-					delay += jitter
-				} else {
-					delay -= jitter
+				jitterRange := int64(delay) / 10
+				if jitterRange > 0 {
+					jitter := time.Duration(rand.Int64N(jitterRange))
+					if rand.N(2) == 0 {
+						delay += jitter
+					} else {
+						delay -= jitter
+					}
 				}
 
 				t := time.NewTimer(delay)
