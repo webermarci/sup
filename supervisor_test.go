@@ -352,6 +352,39 @@ func TestSupervisor_WaitBlocksUntilSpawnedActorStops(t *testing.T) {
 	}
 }
 
+func TestSupervisor_DynamicRunWaitsForContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	supervisor := sup.NewSupervisor("sup").Policy(sup.Temporary)
+	runDone := make(chan error, 1)
+	go func() {
+		runDone <- supervisor.Run(ctx)
+	}()
+
+	select {
+	case err := <-runDone:
+		t.Fatalf("Run returned before a dynamic actor was spawned: %v", err)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	supervisor.Spawn(ctx, sup.ActorFunc("worker", func(ctx context.Context) error {
+		<-ctx.Done()
+		return nil
+	}))
+
+	cancel()
+
+	select {
+	case err := <-runDone:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not stop after context cancellation")
+	}
+}
+
 func TestSupervisor_ObserverPropagatesToChildSupervisor(t *testing.T) {
 	var rootObservedWorkerStarted atomic.Int32
 

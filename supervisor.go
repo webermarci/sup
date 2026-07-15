@@ -249,6 +249,18 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		s.Spawn(childCtx, actor)
 	}
 
+	if len(actors) == 0 {
+		select {
+		case <-ctx.Done():
+			s.wg.Wait()
+			return ctx.Err()
+		case err := <-s.terminalErr:
+			cancel()
+			s.wg.Wait()
+			return err
+		}
+	}
+
 	allDone := make(chan struct{})
 	go func() {
 		s.wg.Wait()

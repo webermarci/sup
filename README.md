@@ -186,14 +186,25 @@ Use `Spawn` to start an actor after the supervisor already exists:
 
 ```go
 supervisor := sup.NewSupervisor("jobs").Policy(sup.Temporary)
-go supervisor.Run(ctx)
+runCtx, cancel := context.WithCancel(ctx)
+defer cancel()
+
+runDone := make(chan error, 1)
+go func() {
+	runDone <- supervisor.Run(runCtx)
+}()
 
 for _, job := range jobs {
-	supervisor.Spawn(ctx, newJobActor(job))
+	supervisor.Spawn(runCtx, newJobActor(job))
 }
 
 supervisor.Wait()
+cancel()
+<-runDone
 ```
+
+When a supervisor has only dynamically spawned actors, `Run` stays active
+until its context is canceled or the supervisor reaches a terminal error.
 
 ### Observers
 
