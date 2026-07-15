@@ -290,19 +290,15 @@ func (h *Hub) publish(event sup.Event) {
 	}
 
 	h.mu.Lock()
+	defer h.mu.Unlock()
+
 	key := event.SourceID
 	h.events[key] = append(h.events[key], event)
 	if h.eventLimit > 0 && len(h.events[key]) > h.eventLimit {
 		h.events[key] = h.events[key][len(h.events[key])-h.eventLimit:]
 	}
 
-	clients := make([]chan []byte, 0, len(h.clients))
 	for ch := range h.clients {
-		clients = append(clients, ch)
-	}
-	h.mu.Unlock()
-
-	for _, ch := range clients {
 		select {
 		case ch <- msg:
 		default:
