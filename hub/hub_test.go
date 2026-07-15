@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -283,6 +284,32 @@ func TestHubSignalUpdatesValueAndPublishesEvent(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("hub did not stop")
+	}
+}
+
+func TestHubRunCancelsSiblingStreamsOnError(t *testing.T) {
+	hub := New("hub")
+	expectedErr := errors.New("signal stream failed")
+	siblingStopped := make(chan struct{})
+
+	hub.registerSignal(hubSignal{ID: "failing"}, func(context.Context) error {
+		return expectedErr
+	})
+
+	hub.registerSignal(hubSignal{ID: "sibling"}, func(ctx context.Context) error {
+		<-ctx.Done()
+		close(siblingStopped)
+		return nil
+	})
+
+	if err := hub.Run(context.Background()); !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got %v", expectedErr, err)
+	}
+
+	select {
+	case <-siblingStopped:
+	case <-time.After(time.Second):
+		t.Fatal("sibling stream was not canceled")
 	}
 }
 

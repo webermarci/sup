@@ -215,22 +215,36 @@ func (h *Hub) Run(ctx context.Context) error {
 		return nil
 	}
 
+	streamCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	errCh := make(chan error, len(streams))
 	for _, stream := range streams {
-		go func() {
-			errCh <- stream(ctx)
-		}()
+		go func(stream func(context.Context) error) {
+			errCh <- stream(streamCtx)
+		}(stream)
 	}
 
 	remaining := len(streams)
+	waitForStreams := func() {
+		for remaining > 0 {
+			<-errCh
+			remaining--
+		}
+	}
+
 	for remaining > 0 {
 		select {
 		case <-ctx.Done():
+			cancel()
+			waitForStreams()
 			return nil
 
 		case err := <-errCh:
 			remaining--
 			if err != nil {
+				cancel()
+				waitForStreams()
 				return err
 			}
 		}
