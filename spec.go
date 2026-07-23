@@ -4,7 +4,7 @@ package sup
 // It captures the component's kind, its dependency names, and arbitrary
 // configuration metadata for visualization and debugging purposes.
 type Spec struct {
-	Kind         string            `json:"kind"`
-	Dependencies []string          `json:"dependencies"`
-	Metadata     map[string]string `json:"metadata"`
+	Kind         string         `json:"kind"`
+	Dependencies []string       `json:"dependencies"`
+	Metadata     map[string]any `json:"metadata"`
 }

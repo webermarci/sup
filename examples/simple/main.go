@@ -18,7 +18,7 @@ type IncrementMessage struct {
 }
 
 type Counter struct {
-	*sup.BaseActor
+	id             string
 	GetInbox       *sup.CallInbox[GetMessage, int]
 	IncrementInbox *sup.CastInbox[IncrementMessage]
 	State          int
@@ -26,10 +26,14 @@ type Counter struct {
 
 func NewCounter(id string) *Counter {
 	return &Counter{
-		BaseActor:      sup.NewBaseActor(id),
+		id:             id,
 		GetInbox:       sup.NewCallInbox[GetMessage, int](8),
 		IncrementInbox: sup.NewCastInbox[IncrementMessage](8),
 	}
+}
+
+func (c *Counter) ID() string {
+	return c.id
 }
 
 func (c *Counter) Get() int {
@@ -66,8 +70,7 @@ func main() {
 
 	actor := NewCounter("counter")
 
-	supervisor := sup.NewSupervisor("root").
-		Actor(actor)
+	supervisor := sup.NewSupervisor("root", sup.WithActors(actor))
 
 	go supervisor.Run(ctx)
 

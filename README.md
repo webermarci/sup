@@ -4,20 +4,21 @@
 [![Test](https://github.com/webermarci/sup/actions/workflows/test.yml/badge.svg)](https://github.com/webermarci/sup/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-**sup** is a small actor supervision and reactive signal toolkit for Go.
+**sup** is a small actor supervision toolkit for Go, with an optional reactive
+signal package.
 
-It provides typed inboxes for actor communication, OTP-style supervision with restart policies, reactive values that can be composed and observed, and an optional HTTP hub for inspecting actors, controls, signals, and events.
+It provides typed inboxes for actor communication, OTP-style supervision with restart policies, reactive values that can be composed and observed, and an optional HTTP hub for inspecting actors, signals, supervision, and events.
 
 ## Features
 
-- **Idiomatic actors** — An actor is any value that implements `ID()`, `Run(context.Context) error`, and `Inspect() Spec`.
+- **Idiomatic actors** — An actor is any value that implements `ID()` and `Run(context.Context) error`.
 - **Supervisor trees** — Supervisors are actors too, so they can supervise actors or other supervisors.
 - **Restart policies** — `Permanent`, `Transient`, and `Temporary` policies control when actors restart.
 - **Panic recovery** — Panics are recovered, wrapped with a stack trace, reported, and handled by the restart policy.
 - **Typed inboxes** — `CastInbox[T]` and `CallInbox[T, R]` provide type-safe asynchronous and request/reply messaging.
-- **Reactive signals** — `Signal`, `Derived`, and `Effect` model readable values, computed values, and side effects.
-- **Signal processors** — Built-in `Map`, `Filter`, `Debounce`, and `Throttle` processors transform or rate-limit signal updates.
-- **Runtime inspection** — `Spec`, controls, supervisor observers, and `hub` expose useful metadata for debugging and dashboards.
+- **Reactive signals** — The `rx` package provides passive signals and supervised derived state.
+- **Channel helpers** — `Map`, `Filter`, `Distinct`, `Debounce`, and explicit throttle helpers compose ordinary channels.
+- **Runtime inspection** — Optional `Inspect`, runtime events, and `hub` expose useful metadata for debugging and dashboards.
 
 ## Installation
 
@@ -50,7 +51,7 @@ type IncrementMessage struct {
 }
 
 type Counter struct {
-	*sup.BaseActor
+	id             string
 	GetInbox       *sup.CallInbox[GetMessage, int]
 	IncrementInbox *sup.CastInbox[IncrementMessage]
 	State          int
@@ -58,10 +59,14 @@ type Counter struct {
 
 func NewCounter(id string) *Counter {
 	return &Counter{
-		BaseActor:      sup.NewBaseActor(id),
+		id:             id,
 		GetInbox:       sup.NewCallInbox[GetMessage, int](8),
 		IncrementInbox: sup.NewCastInbox[IncrementMessage](8),
 	}
+}
+
+func (c *Counter) ID() string {
+	return c.id
 }
 
 func (c *Counter) Get(ctx context.Context) (int, error) {
@@ -93,20 +98,20 @@ func main() {
 
 	counter := NewCounter("counter")
 
-	supervisor := sup.NewSupervisor("root").
-		Policy(sup.Permanent).
-		RestartDelay(time.Second).
-		RestartLimit(5, 10*time.Second).
-		OnError(func(actor sup.Actor, err error) {
-			fmt.Printf("actor %s failed: %v\n", actor.ID(), err)
-		}).
-		Actor(counter)
+	supervisor := sup.NewSupervisor("root",
+		sup.WithPolicy(sup.Permanent),
+		sup.WithRestartDelay(time.Second),
+		sup.WithRestartLimit(5, 10*time.Second),
+		sup.WithEventSink(sup.EventSinkFunc(func(event sup.Event) {
+			if event.Type == sup.EventActorStopped && event.Err != nil {
+				fmt.Printf("actor %s failed: %v\n", event.Actor.ID(), event.Err)
+			}
+		})),
+		sup.WithActors(counter),
+	)
 
-	go func() {
-		if err := supervisor.Run(ctx); err != nil && ctx.Err() == nil {
-			fmt.Println("supervisor stopped:", err)
-		}
-	}()
+	done := make(chan error, 1)
+	go func() { done <- supervisor.Run(ctx) }()
 
 	_ = counter.Increment(ctx, 10)
 	_ = counter.Increment(ctx, 32)
@@ -119,7 +124,9 @@ func main() {
 	fmt.Println("count:", count)
 
 	cancel()
-	supervisor.Wait()
+	if err := <-done; err != nil {
+		fmt.Println("supervisor stopped:", err)
+	}
 }
 ```
 
@@ -131,19 +138,30 @@ An actor implements the `Actor` interface:
 type Actor interface {
 	ID() string
 	Run(context.Context) error
+}
+```
+
+Inspection is an optional capability:
+
+```go
+type Inspectable interface {
 	Inspect() sup.Spec
 }
 ```
 
-Embed `*sup.BaseActor` when you only need a stable id and a default `Inspect` implementation:
+Actor identity is ordinary application state:
 
 ```go
 type Worker struct {
-	*sup.BaseActor
+	id string
 }
 
 func NewWorker(id string) *Worker {
-	return &Worker{BaseActor: sup.NewBaseActor(id)}
+	return &Worker{id: id}
+}
+
+func (w *Worker) ID() string {
+	return w.id
 }
 ```
 
@@ -156,19 +174,50 @@ worker := sup.ActorFunc("health", func(ctx context.Context) error {
 })
 ```
 
+Actor functions are inspectable by default with kind `"actor"`. Use
+`WithSpec` to declare a more specific description:
+
+```go
+poller := sup.ActorFunc(
+	"temperature.poller",
+	runPoller,
+	sup.WithSpec(sup.Spec{
+		Kind:         "poller",
+		Dependencies: []string{"temperature"},
+		Metadata: map[string]any{
+			"interval": time.Second.String(),
+		},
+	}),
+)
+```
+
+### Lifecycle contract
+
+Every actor follows the same `Run` contract:
+
+- Context cancellation is a clean shutdown and returns `nil`.
+- Intentional completion returns `nil`.
+- A failure that may require a restart returns a non-nil error.
+- A panic is recovered by the supervisor and treated as a failure.
+
+`Supervisor.Run` follows the same contract, so supervisors can be nested as
+ordinary actors. It returns an error when a restart limit is exceeded or when
+the same supervisor is run concurrently.
+
 ## Supervisors
 
 Supervisors run actors and restart them according to a restart policy.
 
 ```go
-supervisor := sup.NewSupervisor("root").
-	Policy(sup.Transient).
-	RestartDelay(500 * time.Millisecond).
-	RestartLimit(3, time.Minute).
-	Actors(actorA, actorB)
+supervisor := sup.NewSupervisor("root",
+	sup.WithPolicy(sup.Transient),
+	sup.WithRestartDelay(500*time.Millisecond),
+	sup.WithRestartLimit(3, time.Minute),
+	sup.WithActors(actorA, actorB),
+)
 
 if err := supervisor.Run(ctx); err != nil {
-	// Run returns ctx.Err() when ctx is canceled, or a terminal supervisor error.
+	// A restart limit or concurrent Run stopped the supervisor.
 }
 ```
 
@@ -180,57 +229,32 @@ if err := supervisor.Run(ctx); err != nil {
 | `Transient` | stop | restart |
 | `Temporary` | stop | stop |
 
-### Dynamic spawning
+### Runtime events
 
-Use `Spawn` to start an actor after the supervisor already exists:
-
-```go
-supervisor := sup.NewSupervisor("jobs").Policy(sup.Temporary)
-runCtx, cancel := context.WithCancel(ctx)
-defer cancel()
-
-runDone := make(chan error, 1)
-go func() {
-	runDone <- supervisor.Run(runCtx)
-}()
-
-for _, job := range jobs {
-	supervisor.Spawn(runCtx, newJobActor(job))
-}
-
-supervisor.Wait()
-cancel()
-<-runDone
-```
-
-When a supervisor has only dynamically spawned actors, `Run` stays active
-until its context is canceled or the supervisor reaches a terminal error.
-
-### Observers
-
-`SupervisorObserver` receives asynchronous lifecycle callbacks. Parent supervisor observers are inherited by child supervisors.
+An `EventSink` receives lifecycle events from a supervisor and all of its
+descendant supervisors. Different actors may call event sinks concurrently, so
+event sinks should return promptly and synchronize their own state. Sink
+panics are recovered and do not interrupt supervision.
 
 ```go
-observer := &sup.SupervisorObserver{
-	OnActorRegistered: func(s *sup.Supervisor, a sup.Actor) {
-		fmt.Println("registered", a.ID())
-	},
-	OnActorStarted: func(s *sup.Supervisor, a sup.Actor) {
-		fmt.Println("started", a.ID())
-	},
-	OnActorStopped: func(s *sup.Supervisor, a sup.Actor, err error) {
-		fmt.Println("stopped", a.ID(), err)
-	},
-	OnActorRestarting: func(s *sup.Supervisor, a sup.Actor, count int, lastErr error) {
-		fmt.Println("restarting", a.ID(), count, lastErr)
-	},
-	OnSupervisorTerminal: func(s *sup.Supervisor, err error) {
-		fmt.Println("terminal", s.ID(), err)
-	},
-}
+events := sup.EventSinkFunc(func(event sup.Event) {
+	fmt.Printf("%s %s\n", event.Type, event.Actor.ID())
 
-root := sup.NewSupervisor("root").Observer(observer).Actor(worker)
+	if event.Err != nil {
+		fmt.Println("error:", event.Err)
+	}
+})
+
+root := sup.NewSupervisor("root",
+	sup.WithEventSink(events),
+	sup.WithActors(worker),
+)
 ```
+
+Each event carries its occurrence time, actor, supervisor, error, and restart
+count as native Go values. Presentation layers such as `hub` decide how to
+serialize them. Multiple event sinks can independently record, log, aggregate,
+or forward the same authoritative runtime event.
 
 ## Typed inboxes
 
@@ -242,10 +266,15 @@ root := sup.NewSupervisor("root").Observer(observer).Actor(worker)
 inbox := sup.NewCastInbox[IncrementMessage](8)
 
 err := inbox.Cast(ctx, IncrementMessage{Amount: 1})    // blocks until queued or ctx is done
-err = inbox.TryCast(ctx, IncrementMessage{Amount: 1}) // returns ErrCastInboxFull if full
+err = inbox.TryCast(ctx, IncrementMessage{Amount: 1}) // returns ErrInboxFull if full
 
-for msg := range inbox.Receive() {
-	// process msg
+for {
+	select {
+	case <-ctx.Done():
+		return
+	case msg := <-inbox.Receive():
+		// process msg
+	}
 }
 ```
 
@@ -256,24 +285,38 @@ inbox := sup.NewCallInbox[GetMessage, int](8)
 
 value, err := inbox.Call(ctx, GetMessage{})
 
-for req := range inbox.Receive() {
-	req.Reply(42, nil)
+for {
+	select {
+	case <-ctx.Done():
+		return
+	case req := <-inbox.Receive():
+		if !req.Reply(42, nil) {
+			// The caller canceled or this request was already answered.
+		}
+	}
 }
 ```
 
-Both inboxes expose `Close`, `Closed`, `Len`, and `Cap`.
+`CallRequest.Context` exposes the caller's context so work can stop after the
+caller leaves. `Reply` never blocks and returns whether the reply was accepted.
 
-## Signal
+Their lifetime is controlled by the actor's context; inboxes are not closed
+independently.
 
-A `Signal[V]` stores a value, publishes updates, and can run one or more sources.
+## rx
+
+The `github.com/webermarci/sup/rx` package provides shared reactive state and
+composable channel helpers. It is a signal library, not an implementation of
+ReactiveX.
+
+### Signal
+
+A `Signal[V]` is passive, concurrency-safe state with independent subscribers:
 
 ```go
-count := sup.NewSignal("count", 0).
-	InitialNotify().
-	Equal(func(a, b int) bool { return a == b })
+count := rx.NewSignal("count", 0)
 
 values := count.Subscribe(ctx)
-updates := count.Watch(ctx)
 
 go func() {
 	for value := range values {
@@ -281,135 +324,153 @@ go func() {
 	}
 }()
 
-_ = count.Write(ctx, 1)
+count.Set(1)
+fmt.Println(count.Value())
 ```
 
-Signals are actors. If a signal has sources, run it under a supervisor or in a goroutine:
+Every subscription starts with the current value and has capacity one. Pending
+updates are coalesced to the latest value, so slow subscribers never block
+`Set`. Each call to `Subscribe` creates an independent stream, and its channel
+closes when the subscription context is canceled.
+
+Every `Set` is a publication, even when it repeats the current value. Signals do
+not run under a supervisor; actors own behavior and set signals:
 
 ```go
-random := sup.NewSignal("random", 0).
-	Poll(200*time.Millisecond, func(ctx context.Context) (int, error) {
-		return rand.IntN(100), nil
-	}).
-	Throttle(time.Second)
-
-root := sup.NewSupervisor("signals").Actor(random)
-go root.Run(ctx)
+poller := sup.ActorFunc("random.poller", func(ctx context.Context) error {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			random.Set(rand.IntN(100))
+		case <-ctx.Done():
+			return nil
+		}
+	}
+})
 ```
 
-### Sources
+### Channel helpers
 
-A source produces values for a signal:
-
-- `Poll(interval, fn)` calls `fn` on each interval and emits the result.
-- `FromChannel(ch)` emits values received from a channel.
-- `SourceFunc` adapts a function into a custom source.
+Helpers accept and return ordinary channels, so they can be nested. They do not
+need contexts: cancellation closes the subscription channel, and that closure
+propagates through the pipeline.
 
 ```go
-ch := make(chan string)
-status := sup.NewSignal("status", "offline").Source(sup.FromChannel(ch))
+processed := rx.Map(
+	rx.Filter(
+		rx.Debounce(count.Subscribe(ctx), 100*time.Millisecond),
+		func(value int) bool { return value >= 10 },
+	),
+	func(value int) string { return strconv.Itoa(value) },
+)
 ```
 
-### Processors
+Available helpers:
 
-Processors transform, filter, or delay values before they are stored and broadcast:
+- `Map` transforms values and may change their type.
+- `Filter` drops values that do not match.
+- `Distinct` drops consecutive equal comparable values.
+- `DistinctFunc` uses a custom equality function.
+- `Debounce` emits after a quiet period.
+- `ThrottleFirst` immediately emits the first value in each interval.
+- `ThrottleLatest` emits the latest value at the end of each interval.
 
-```go
-processed := sup.NewSignal("processed", 0).
-	Map(func(v int) int { return v * 2 }).
-	Filter(func(v int) bool { return v >= 10 }).
-	Debounce(100 * time.Millisecond)
-```
-
-Built-in processors:
-
-- `Map(fn)` transforms each value.
-- `Filter(fn)` drops values that do not match.
-- `Debounce(wait)` emits the latest value after a quiet period.
-- `Throttle(interval)` emits at most one value per interval.
+Helper outputs have capacity one and coalesce pending values to the latest.
+They close when their input closes. Debounce and throttle durations must be
+positive.
 
 ### Derived
 
-`Derived[V]` computes a read-only signal from one or more watcher signals.
+`Derived[V]` is shared, read-only reactive state computed from one or more
+dependencies. Unlike `Signal`, it is an actor because it actively maintains its
+computed value:
 
 ```go
-count := sup.NewSignal("count", 0)
-doubled := sup.NewDerived("doubled", func() int {
-	return count.Read() * 2
-}, count).
-	InitialNotify()
+count := rx.NewSignal("count", 0)
+doubled := rx.NewDerived("doubled", func() int {
+	return count.Value() * 2
+}, count)
 
-root := sup.NewSupervisor("root").Actors(count, doubled)
+root := sup.NewSupervisor("root", sup.WithActors(doubled))
 go root.Run(ctx)
 ```
 
-`BatchWindow` controls how dependency updates are coalesced before recomputing.
+Signals and derived values both provide `ID`, `Value`, `Subscribe`, and `Watch`.
+Only signals provide `Set`.
 
-### Effect
+Dependency notifications already pending are coalesced. Updates to independent
+dependencies are not transactional, so a derived signal may publish intermediate
+results before converging on the latest state. Values that must change atomically
+should be stored together in one signal.
 
-`Effect[V]` runs side effects for values emitted by a signal or derived signal.
-
-```go
-effect := count.Effect("log_count", func(ctx context.Context, value int) error {
-	fmt.Println("count changed:", value)
-	return nil
-})
-
-root := sup.NewSupervisor("root").Actors(count, effect)
-```
-
-## Controls
-
-Controls expose typed inboxes for dynamic dispatch, such as from the `hub` HTTP API.
-
-```go
-func (c *Counter) Controls() []sup.Control {
-	return []sup.Control{
-		sup.NewCastControl("increment", c.IncrementInbox),
-		sup.NewCallControl("get", c.GetInbox),
-	}
-}
-```
-
-`NewCastControl[T]` decodes JSON input and dispatches to a `CastInbox[T]`.
-`NewCallControl[T, R]` decodes JSON input, dispatches to a `CallInbox[T, R]`, and returns the reply.
-
-Input schemas are inferred from Go types and JSON tags.
+Construction computes the initial snapshot. When `Run` starts, it registers every
+dependency watch and publishes exactly one refreshed startup snapshot before
+processing later dependency notifications. Derived dependency graphs must be
+acyclic.
 
 ## Hub
 
-The `github.com/webermarci/sup/hub` package exposes actors, controls, signals, and events over HTTP. It also serves the embedded debug UI at `/debug`.
+The `github.com/webermarci/sup/hub` package exposes explicitly registered
+actors and signals over HTTP. It reads signal values directly from their
+sources, streams changes and lifecycle events, and builds a pruned supervision
+graph from runtime registration events. It also serves the embedded debug UI
+at `/debug`.
 
 ```go
-registry := hub.New("registry",
+enabled := rx.NewSignal("counter_enabled", true)
+
+dashboard := hub.New("dashboard",
 	hub.WithActor(counter),
 	hub.WithSignal(counter.StateSignal),
+	hub.WithWritableSignal(enabled),
+	hub.WithEventHistoryLimit(128),
 )
 
-root := sup.NewSupervisor("root").
-	Observer(registry.Observer()).
-	Actors(counter, counter.StateSignal, registry)
+root := sup.NewSupervisor("root",
+	sup.WithEventSink(dashboard),
+	sup.WithActors(counter, dashboard),
+)
 
 go root.Run(ctx)
-go http.ListenAndServe(":8080", registry.Handler())
+go http.ListenAndServe(":8080", dashboard.Handler())
 ```
+
+`WithSignal` is always read-only over HTTP. `WithWritableSignal` explicitly
+allows outside clients to change the signal with `PATCH`. Actors can subscribe
+to that signal using the ordinary `rx` API; the hub does not define a separate
+command or control model.
+
+```http
+PATCH /signals/counter_enabled
+Content-Type: application/json
+
+{"value": false}
+```
+
+Only explicitly registered actors have their lifecycle events exposed. The
+graph includes the supervisors needed to connect those actors to the root and
+omits unrelated internal branches. Recent event history is globally bounded;
+live event streaming is unaffected by the history limit.
 
 Endpoints include:
 
 - `GET /actors`
 - `GET /actors/{actorID}`
-- `GET /actors/{actorID}/controls`
-- `POST /actors/{actorID}/controls/{controlName}`
 - `GET /signals`
 - `GET /signals/{signalID}`
+- `PATCH /signals/{signalID}`
+- `GET /graph`
 - `GET /events`
 - `GET /events/stream`
 - `GET /debug`
 
 ## Packages
 
-- `sup` — Core actors, supervisors, typed inboxes, controls, signals, sources, processors, derived signals, and effects.
-- `sup/hub` — HTTP API and debug UI for actors, controls, signals, and events.
+- `sup` — Core actors, supervisors, typed inboxes, and runtime events.
+- `rx` — Reactive signals, derived state, and channel helpers.
+- `sup/hub` — HTTP API and debug UI for actors, signals, supervision, and events.
 - `sup/exec` — Actor wrapper around `os/exec` commands.
 - `sup/mesh` — NATS-backed actor for subscriptions.
 - `sup/modbus` — Modbus actor for TCP/RTU/ASCII clients.

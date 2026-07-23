@@ -11,269 +11,105 @@ import (
 	"time"
 
 	"github.com/webermarci/sup"
+	"github.com/webermarci/sup/rx"
 )
 
-type hubTestActor struct {
-	*sup.BaseActor
-	casts *sup.CastInbox[hubIncrement]
-	calls *sup.CallInbox[hubGet, hubCount]
-}
+func TestHubExposesOnlyRegisteredActors(t *testing.T) {
+	exposed := sup.ActorFunc("exposed", func(context.Context) error { return nil })
+	internal := sup.ActorFunc("internal", func(context.Context) error { return nil })
+	h := New("hub", WithActor(exposed))
+	root := sup.NewSupervisor("root",
+		sup.WithEventSink(h),
+		sup.WithActors(exposed, internal),
+		sup.WithPolicy(sup.Temporary),
+	)
 
-type hubIncrement struct {
-	Amount int `json:"amount"`
-}
-
-type hubGet struct{}
-
-type hubCount struct {
-	Count int `json:"count"`
-}
-
-func newHubTestActor(id string) *hubTestActor {
-	return &hubTestActor{
-		BaseActor: sup.NewBaseActor(id),
-		casts:     sup.NewCastInbox[hubIncrement](1),
-		calls:     sup.NewCallInbox[hubGet, hubCount](1),
+	if err := root.Run(t.Context()); err != nil {
+		t.Fatalf("Run returned error: %v", err)
 	}
-}
-
-func (a *hubTestActor) Run(ctx context.Context) error {
-	<-ctx.Done()
-	return nil
-}
-
-func (a *hubTestActor) Controls() []sup.Control {
-	return []sup.Control{
-		sup.NewCastControl[hubIncrement]("increment", a.casts),
-		sup.NewCallControl[hubGet, hubCount]("get", a.calls),
-	}
-}
-
-func TestHubHandleActors(t *testing.T) {
-	hub := New("hub", WithActor(newHubTestActor("counter")))
 
 	req := httptest.NewRequest(http.MethodGet, "/actors", nil)
 	rec := httptest.NewRecorder()
-
-	hub.Handler().ServeHTTP(rec, req)
+	h.Handler().ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
 
-	var actors []struct {
-		ID       string `json:"id"`
-		Controls []struct {
-			Name string          `json:"name"`
-			Kind sup.ControlKind `json:"kind"`
-		} `json:"controls"`
-	}
+	var actors []hubActor
 	if err := json.NewDecoder(rec.Body).Decode(&actors); err != nil {
 		t.Fatal(err)
 	}
-
-	if len(actors) != 1 {
-		t.Fatalf("expected 1 actor, got %d", len(actors))
-	}
-	if actors[0].ID != "counter" {
-		t.Fatalf("expected actor ID counter, got %q", actors[0].ID)
-	}
-	if len(actors[0].Controls) != 2 {
-		t.Fatalf("expected 2 controls, got %d", len(actors[0].Controls))
-	}
-}
-
-func TestHubHandleCastControl(t *testing.T) {
-	actor := newHubTestActor("counter")
-	hub := New("hub")
-	hub.RegisterActor(actor)
-
-	req := httptest.NewRequest(http.MethodPost, "/actors/counter/controls/increment", strings.NewReader(`{"amount":5}`))
-	rec := httptest.NewRecorder()
-
-	hub.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	if len(actors) != 1 || actors[0].ID != exposed.ID() {
+		t.Fatalf("unexpected exposed actors: %#v", actors)
 	}
 
-	select {
-	case msg := <-actor.casts.Receive():
-		if msg.Amount != 5 {
-			t.Fatalf("expected amount 5, got %d", msg.Amount)
-		}
-	default:
-		t.Fatal("expected cast message")
-	}
-}
-
-func TestHubHandleCallControl(t *testing.T) {
-	actor := newHubTestActor("counter")
-	hub := New("hub")
-	hub.RegisterActor(actor)
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		req := <-actor.calls.Receive()
-		req.Reply(hubCount{Count: 42}, nil)
-	}()
-
-	req := httptest.NewRequest(http.MethodPost, "/actors/counter/controls/get", strings.NewReader(`{}`))
-	rec := httptest.NewRecorder()
-
-	hub.Handler().ServeHTTP(rec, req)
-	<-done
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var res hubCount
-	if err := json.NewDecoder(rec.Body).Decode(&res); err != nil {
-		t.Fatal(err)
-	}
-	if res.Count != 42 {
-		t.Fatalf("expected count 42, got %d", res.Count)
-	}
-}
-
-func TestHubObserverRegistersActorAndRecordsEvent(t *testing.T) {
-	hub := New("hub")
-	supervisor := sup.NewSupervisor("root")
-	actor := newHubTestActor("counter")
-
-	hub.Observer().OnActorRegistered(supervisor, actor)
-
-	if _, ok := hub.actor("counter"); !ok {
-		t.Fatal("expected actor to be registered")
-	}
-
-	events := hub.eventsSnapshot()["counter"]
-	if len(events) != 1 {
-		t.Fatalf("expected 1 event, got %d", len(events))
-	}
-	if events[0].Type != sup.EventActorRegistered {
-		t.Fatalf("expected event type %q, got %q", sup.EventActorRegistered, events[0].Type)
-	}
-	if events[0].SourceID != "counter" {
-		t.Fatalf("expected source ID counter, got %q", events[0].SourceID)
-	}
-}
-
-func TestHubEventsLimitIsPerActor(t *testing.T) {
-	hub := New("hub")
-	hub.eventLimit = 2
-
-	hub.publish(sup.NewEvent(sup.EventActorStarted, "chatty", nil))
-	hub.publish(sup.NewEvent(sup.EventActorStopped, "quiet", nil))
-	hub.publish(sup.NewEvent(sup.EventActorRestarting, "chatty", nil))
-	hub.publish(sup.NewEvent(sup.EventActorStopped, "chatty", nil))
-
-	snapshot := hub.eventsSnapshot()
-
-	var chatty int
-	var quiet int
-	for _, events := range snapshot {
-		for _, event := range events {
-			switch event.SourceID {
-			case "chatty":
-				chatty++
-			case "quiet":
-				quiet++
-			}
+	for _, event := range h.eventsSnapshot() {
+		if event.SourceID == internal.ID() {
+			t.Fatalf("internal actor event was exposed: %#v", event)
 		}
 	}
+}
 
-	if chatty != 2 {
-		t.Fatalf("expected 2 retained chatty events, got %d", chatty)
+func TestHubBuildsPrunedSupervisionGraphFromEvents(t *testing.T) {
+	exposed := sup.ActorFunc("worker.exposed", func(context.Context) error { return nil })
+	internal := sup.ActorFunc("worker.internal", func(context.Context) error { return nil })
+	exposedBranch := sup.NewSupervisor("branch.exposed",
+		sup.WithActors(exposed),
+		sup.WithPolicy(sup.Temporary),
+	)
+	internalBranch := sup.NewSupervisor("branch.internal",
+		sup.WithActors(internal),
+		sup.WithPolicy(sup.Temporary),
+	)
+	h := New("hub", WithActor(exposed))
+	root := sup.NewSupervisor("root",
+		sup.WithEventSink(h),
+		sup.WithActors(exposedBranch, internalBranch),
+		sup.WithPolicy(sup.Temporary),
+	)
+
+	if err := root.Run(t.Context()); err != nil {
+		t.Fatalf("Run returned error: %v", err)
 	}
-	if quiet != 1 {
-		t.Fatalf("expected quiet event to be retained, got %d", quiet)
+
+	graph := h.graphSnapshot()
+	if got, want := graphNodeIDs(graph), []string{"branch.exposed", "root", "worker.exposed"}; !equalStrings(got, want) {
+		t.Fatalf("expected graph nodes %v, got %v", want, got)
+	}
+
+	wantEdges := []graphEdge{
+		{SupervisorID: "branch.exposed", ActorID: "worker.exposed"},
+		{SupervisorID: "root", ActorID: "branch.exposed"},
+	}
+	if len(graph.Edges) != len(wantEdges) {
+		t.Fatalf("expected graph edges %#v, got %#v", wantEdges, graph.Edges)
+	}
+	for i := range wantEdges {
+		if graph.Edges[i] != wantEdges[i] {
+			t.Fatalf("expected graph edges %#v, got %#v", wantEdges, graph.Edges)
+		}
 	}
 }
 
-func TestHubHandleEvents(t *testing.T) {
-	hub := New("hub")
-	hub.publish(sup.NewEvent(sup.EventActorStarted, "counter", nil))
-
-	req := httptest.NewRequest(http.MethodGet, "/events", nil)
-	rec := httptest.NewRecorder()
-
-	hub.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var events map[string][]sup.Event
-	if err := json.NewDecoder(rec.Body).Decode(&events); err != nil {
-		t.Fatal(err)
-	}
-	counterEvents := events["counter"]
-	if len(counterEvents) != 1 {
-		t.Fatalf("expected 1 counter event, got %d", len(counterEvents))
-	}
-	if counterEvents[0].Type != sup.EventActorStarted {
-		t.Fatalf("expected event type %q, got %q", sup.EventActorStarted, counterEvents[0].Type)
-	}
-}
-
-func TestHubHandleSignals(t *testing.T) {
-	signal := sup.NewSignal("status", "offline")
-	hub := New("hub", WithSignal(signal))
-
-	req := httptest.NewRequest(http.MethodGet, "/signals", nil)
-	rec := httptest.NewRecorder()
-
-	hub.Handler().ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
-	}
-
-	var signals []hubSignal
-	if err := json.NewDecoder(rec.Body).Decode(&signals); err != nil {
-		t.Fatal(err)
-	}
-	if len(signals) != 1 {
-		t.Fatalf("expected 1 signal, got %d", len(signals))
-	}
-	if signals[0].ID != "status" {
-		t.Fatalf("expected signal ID status, got %q", signals[0].ID)
-	}
-	if signals[0].Type != hubSignalValueTypeString {
-		t.Fatalf("expected signal type %q, got %q", hubSignalValueTypeString, signals[0].Type)
-	}
-	if signals[0].Value != "offline" {
-		t.Fatalf("expected value offline, got %v", signals[0].Value)
-	}
-}
-
-func TestHubSignalUpdatesValueAndPublishesEvent(t *testing.T) {
-	signal := sup.NewSignal("status", "offline").InitialNotify()
-	hub := New("hub", WithSignal(signal))
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	done := make(chan error, 1)
-	go func() {
-		done <- hub.Run(ctx)
-	}()
-
-	waitFor(t, func() bool {
-		signal, ok := hub.signal("status")
-		return ok && signal.Value == "offline" && hasHubEvent(hub, sup.EventSignalUpdated, "status")
+func TestHubCanProjectItsOwnRegistration(t *testing.T) {
+	worker := sup.ActorFunc("worker", func(ctx context.Context) error {
+		<-ctx.Done()
+		return nil
 	})
-
-	if err := signal.Write(context.Background(), "online"); err != nil {
-		t.Fatal(err)
-	}
+	h := New("hub", WithActor(worker))
+	root := sup.NewSupervisor("root",
+		sup.WithEventSink(h),
+		sup.WithActors(worker, h),
+	)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- root.Run(ctx) }()
 
 	waitFor(t, func() bool {
-		signal, ok := hub.signal("status")
-		return ok && signal.Value == "online" && hasHubEvent(hub, sup.EventSignalUpdated, "status")
+		h.mu.RLock()
+		defer h.mu.RUnlock()
+		return h.parents[h.ID()] == root.ID()
 	})
 
 	cancel()
@@ -283,50 +119,347 @@ func TestHubSignalUpdatesValueAndPublishesEvent(t *testing.T) {
 			t.Fatal(err)
 		}
 	case <-time.After(time.Second):
-		t.Fatal("hub did not stop")
+		t.Fatal("supervisor did not stop")
 	}
 }
 
-func TestHubRunCancelsSiblingStreamsOnError(t *testing.T) {
-	hub := New("hub")
-	expectedErr := errors.New("signal stream failed")
-	siblingStopped := make(chan struct{})
-
-	hub.registerSignal(hubSignal{ID: "failing"}, func(context.Context) error {
-		return expectedErr
-	})
-
-	hub.registerSignal(hubSignal{ID: "sibling"}, func(ctx context.Context) error {
-		<-ctx.Done()
-		close(siblingStopped)
-		return nil
-	})
-
-	if err := hub.Run(context.Background()); !errors.Is(err, expectedErr) {
-		t.Fatalf("expected %v, got %v", expectedErr, err)
+func TestHubHandleGraph(t *testing.T) {
+	actor := sup.ActorFunc("worker", func(context.Context) error { return nil })
+	h := New("hub", WithActor(actor))
+	root := sup.NewSupervisor("root",
+		sup.WithEventSink(h),
+		sup.WithActors(actor),
+		sup.WithPolicy(sup.Temporary),
+	)
+	if err := root.Run(t.Context()); err != nil {
+		t.Fatal(err)
 	}
+
+	req := httptest.NewRequest(http.MethodGet, "/graph", nil)
+	rec := httptest.NewRecorder()
+	h.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var graph supervisionGraph
+	if err := json.NewDecoder(rec.Body).Decode(&graph); err != nil {
+		t.Fatal(err)
+	}
+	if len(graph.Nodes) != 2 || len(graph.Edges) != 1 {
+		t.Fatalf("unexpected graph: %#v", graph)
+	}
+	if graph.Edges[0] != (graphEdge{SupervisorID: "root", ActorID: "worker"}) {
+		t.Fatalf("unexpected graph edge: %#v", graph.Edges[0])
+	}
+}
+
+func TestHubReadsSignalValueDirectly(t *testing.T) {
+	status := rx.NewSignal("status", "offline")
+	h := New("hub", WithSignal(status))
+	status.Set("online")
+
+	req := httptest.NewRequest(http.MethodGet, "/signals/status", nil)
+	rec := httptest.NewRecorder()
+	h.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var signal hubSignal
+	if err := json.NewDecoder(rec.Body).Decode(&signal); err != nil {
+		t.Fatal(err)
+	}
+	if signal.Value != "online" || signal.Writable {
+		t.Fatalf("unexpected signal: %#v", signal)
+	}
+}
+
+func TestHubSetsExplicitlyWritableSignal(t *testing.T) {
+	target := rx.NewSignal("target", 21.0)
+	h := New("hub", WithWritableSignal(target))
+
+	req := httptest.NewRequest(http.MethodPatch, "/signals/target", strings.NewReader(`{"value":23.5}`))
+	rec := httptest.NewRecorder()
+	h.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if target.Value() != 23.5 {
+		t.Fatalf("expected target 23.5, got %v", target.Value())
+	}
+
+	var signal hubSignal
+	if err := json.NewDecoder(rec.Body).Decode(&signal); err != nil {
+		t.Fatal(err)
+	}
+	if !signal.Writable || signal.Value != 23.5 {
+		t.Fatalf("unexpected signal response: %#v", signal)
+	}
+}
+
+func TestHubRejectsWriteToReadOnlySignal(t *testing.T) {
+	status := rx.NewSignal("status", "offline")
+	h := New("hub", WithSignal(status))
+
+	req := httptest.NewRequest(http.MethodPatch, "/signals/status", strings.NewReader(`{"value":"online"}`))
+	rec := httptest.NewRecorder()
+	h.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status 405, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if status.Value() != "offline" {
+		t.Fatalf("read-only signal changed to %q", status.Value())
+	}
+}
+
+func TestHubSignalEventsExcludeInitialValue(t *testing.T) {
+	status := rx.NewSignal("status", "offline")
+	observed := make(chan struct{})
+	signal := &observedSignal[string]{
+		Signal:   status,
+		observed: observed,
+	}
+	h := New("hub", WithSignal[string](signal))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.Run(ctx) }()
 
 	select {
-	case <-siblingStopped:
+	case <-observed:
 	case <-time.After(time.Second):
-		t.Fatal("sibling stream was not canceled")
+		t.Fatal("hub did not subscribe to signal")
+	}
+	if events := h.eventsSnapshot(); len(events) != 0 {
+		t.Fatalf("initial value produced events: %#v", events)
+	}
+
+	status.Set("online")
+	waitFor(t, func() bool {
+		events := h.eventsSnapshot()
+		return len(events) == 1 && events[0].Type == EventSignalUpdated
+	})
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
 	}
 }
 
-func hasHubEvent(hub *Hub, eventType sup.EventType, sourceID string) bool {
-	for _, events := range hub.eventsSnapshot() {
-		for _, event := range events {
-			if event.Type == eventType && event.SourceID == sourceID {
-				return true
-			}
+func TestHubEventHistoryLimitIsGlobal(t *testing.T) {
+	h := New("hub", WithEventHistoryLimit(2))
+	h.publish(newHubEvent(sup.EventActorStarted, "one", nil, time.Time{}))
+	h.publish(newHubEvent(sup.EventActorStopped, "two", nil, time.Time{}))
+	h.publish(newHubEvent(sup.EventActorRestarting, "three", nil, time.Time{}))
+
+	events := h.eventsSnapshot()
+	if len(events) != 2 || events[0].SourceID != "two" || events[1].SourceID != "three" {
+		t.Fatalf("unexpected retained events: %#v", events)
+	}
+}
+
+func TestHubSnapshotsEventPayload(t *testing.T) {
+	h := New("hub")
+	value := map[string]any{
+		"count":  1,
+		"nested": []any{"original"},
+	}
+
+	h.publish(newHubEvent(
+		EventSignalUpdated,
+		"state",
+		signalUpdatedPayload{Value: value},
+		time.Time{},
+	))
+
+	value["count"] = 2
+	value["nested"].([]any)[0] = "changed"
+
+	events := h.eventsSnapshot()
+	if len(events) != 1 {
+		t.Fatalf("expected one event, got %d", len(events))
+	}
+
+	payload, ok := events[0].Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("expected snapshotted payload, got %T", events[0].Payload)
+	}
+	snapshot, ok := payload["value"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected snapshotted value, got %T", payload["value"])
+	}
+	if snapshot["count"] != float64(1) {
+		t.Fatalf("expected original count, got %v", snapshot["count"])
+	}
+	nested, ok := snapshot["nested"].([]any)
+	if !ok || len(nested) != 1 || nested[0] != "original" {
+		t.Fatalf("expected original nested value, got %#v", snapshot["nested"])
+	}
+}
+
+func TestHubZeroEventHistoryStillPublishesLive(t *testing.T) {
+	h := New("hub", WithEventHistoryLimit(0))
+	client := make(chan []byte, 1)
+	h.clients[client] = struct{}{}
+
+	h.publish(newHubEvent(sup.EventActorStarted, "worker", nil, time.Time{}))
+
+	if len(h.eventsSnapshot()) != 0 {
+		t.Fatal("expected event history to be disabled")
+	}
+	select {
+	case <-client:
+	default:
+		t.Fatal("expected event to be published to live client")
+	}
+}
+
+func TestHubHandleEventsReturnsChronologicalArray(t *testing.T) {
+	h := New("hub")
+	h.publish(newHubEvent(sup.EventActorStarted, "one", nil, time.Unix(1, 0)))
+	h.publish(newHubEvent(sup.EventActorStopped, "two", nil, time.Unix(2, 0)))
+
+	req := httptest.NewRequest(http.MethodGet, "/events", nil)
+	rec := httptest.NewRecorder()
+	h.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var events []hubEvent
+	if err := json.NewDecoder(rec.Body).Decode(&events); err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].SourceID != "one" || events[1].SourceID != "two" {
+		t.Fatalf("unexpected events: %#v", events)
+	}
+}
+
+func TestHubSerializesRegistrationSpec(t *testing.T) {
+	actor := sup.ActorFunc("worker", func(context.Context) error { return nil },
+		sup.WithSpec(sup.Spec{Kind: "worker"}),
+	)
+	event := hubEventFromRuntime(sup.Event{
+		Type:       sup.EventActorRegistered,
+		Time:       time.Unix(123, 0),
+		Actor:      actor,
+		Supervisor: sup.NewSupervisor("root"),
+	})
+
+	payload, ok := event.Payload.(actorRegisteredPayload)
+	if !ok {
+		t.Fatalf("expected registration payload, got %T", event.Payload)
+	}
+	if payload.SupervisorID != "root" || payload.Spec.Kind != "worker" {
+		t.Fatalf("unexpected registration payload: %#v", payload)
+	}
+}
+
+func TestHubSerializesRuntimeRestartEvent(t *testing.T) {
+	actor := sup.ActorFunc("worker", func(context.Context) error { return nil })
+	supervisor := sup.NewSupervisor("root")
+	eventTime := time.Unix(123, 456000000)
+	boom := errors.New("boom")
+
+	event := hubEventFromRuntime(sup.Event{
+		Type:         sup.EventActorRestarting,
+		Time:         eventTime,
+		Actor:        actor,
+		Supervisor:   supervisor,
+		Err:          boom,
+		RestartCount: 3,
+	})
+
+	if event.ID == "" || event.Timestamp != eventTime.UnixMilli() {
+		t.Fatalf("expected hub identity and timestamp, got %#v", event)
+	}
+	payload, ok := event.Payload.(actorRestartingPayload)
+	if !ok {
+		t.Fatalf("expected restart payload, got %T", event.Payload)
+	}
+	if payload.SupervisorID != "root" || payload.RestartCount != 3 || payload.LastError != "boom" {
+		t.Fatalf("unexpected restart payload: %#v", payload)
+	}
+}
+
+func TestHubRejectsConcurrentRun(t *testing.T) {
+	h := New("hub")
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.Run(ctx) }()
+	waitFor(t, func() bool { return h.running.Load() })
+
+	if err := h.Run(context.Background()); !errors.Is(err, ErrHubRunning) {
+		t.Fatalf("expected ErrHubRunning, got %v", err)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHubInspectListsSignalDependencies(t *testing.T) {
+	h := New("hub",
+		WithSignal(rx.NewSignal("z", 0)),
+		WithSignal(rx.NewSignal("a", 0)),
+	)
+
+	spec := h.Inspect()
+	if !equalStrings(spec.Dependencies, []string{"a", "z"}) {
+		t.Fatalf("unexpected dependencies: %v", spec.Dependencies)
+	}
+}
+
+func TestHubValidation(t *testing.T) {
+	actor := sup.ActorFunc("duplicate", func(context.Context) error { return nil })
+
+	requirePanic(t, func() { New("") })
+	requirePanic(t, func() { New("hub", nil) })
+	requirePanic(t, func() { New("hub", WithActor(nil)) })
+	requirePanic(t, func() { New("hub", WithActor(actor), WithActor(actor)) })
+	requirePanic(t, func() {
+		New("hub", WithActor(actor), WithSignal(rx.NewSignal("duplicate", 0)))
+	})
+	requirePanic(t, func() {
+		New("hub", WithEventHistoryLimit(-1))
+	})
+}
+
+func graphNodeIDs(graph supervisionGraph) []string {
+	ids := make([]string, 0, len(graph.Nodes))
+	for _, node := range graph.Nodes {
+		ids = append(ids, node.ID)
+	}
+	return ids
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
 		}
 	}
-	return false
+	return true
+}
+
+func requirePanic(t *testing.T, fn func()) {
+	t.Helper()
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected panic")
+		}
+	}()
+	fn()
 }
 
 func waitFor(t *testing.T, condition func() bool) {
 	t.Helper()
-
 	deadline := time.After(time.Second)
 	ticker := time.NewTicker(time.Millisecond)
 	defer ticker.Stop()
@@ -335,11 +468,24 @@ func waitFor(t *testing.T, condition func() bool) {
 		if condition() {
 			return
 		}
-
 		select {
 		case <-deadline:
 			t.Fatal("condition was not met")
 		case <-ticker.C:
 		}
 	}
+}
+
+type observedSignal[V any] struct {
+	*rx.Signal[V]
+	observed chan struct{}
+}
+
+func (s *observedSignal[V]) Subscribe(ctx context.Context) <-chan V {
+	values := s.Signal.Subscribe(ctx)
+	select {
+	case s.observed <- struct{}{}:
+	default:
+	}
+	return values
 }

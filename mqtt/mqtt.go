@@ -31,7 +31,7 @@ func WithSubscription(topic string, qos byte, handler func(mqtt.Message)) ActorO
 
 // Actor represents an MQTT client that can publish messages and subscribe to topics.
 type Actor struct {
-	*sup.BaseActor
+	id            string
 	options       *mqtt.ClientOptions
 	subscriptions []subscription
 	client        mqtt.Client
@@ -39,10 +39,10 @@ type Actor struct {
 }
 
 // NewActor creates a new Actor with the given name, MQTT client options, and optional ActorOptions.
-func NewActor(name string, options *mqtt.ClientOptions, opts ...ActorOption) *Actor {
+func NewActor(id string, options *mqtt.ClientOptions, opts ...ActorOption) *Actor {
 	a := &Actor{
-		BaseActor: sup.NewBaseActor(name),
-		options:   options,
+		id:      id,
+		options: options,
 	}
 
 	for _, o := range opts {
@@ -52,6 +52,16 @@ func NewActor(name string, options *mqtt.ClientOptions, opts ...ActorOption) *Ac
 	options.SetAutoReconnect(false)
 
 	return a
+}
+
+// ID returns the actor id.
+func (a *Actor) ID() string {
+	return a.id
+}
+
+// Inspect returns the MQTT actor spec.
+func (a *Actor) Inspect() sup.Spec {
+	return sup.Spec{Kind: "mqtt"}
 }
 
 // Publish sends a message to the specified topic with the given QoS and retained flag.
@@ -73,7 +83,13 @@ func (a *Actor) Publish(topic string, qos byte, retained bool, payload any) erro
 
 // Run starts the Actor, connecting to the MQTT broker and subscribing to topics.
 // It blocks until the context is canceled or a connection error occurs.
-func (a *Actor) Run(ctx context.Context) error {
+func (a *Actor) Run(ctx context.Context) (err error) {
+	defer func() {
+		if ctx.Err() != nil {
+			err = nil
+		}
+	}()
+
 	errChan := make(chan error, 1)
 
 	opts := *a.options

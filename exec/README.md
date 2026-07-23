@@ -36,7 +36,7 @@ dbSidecar := exec.NewActor("db-proxy", "./bin/proxy", []string{"--port", "5432"}
 
 // Manage it with a supervisor
 supervisor := sup.NewSupervisor("root",
-	sup.WithActor(dbSidecar),
+	sup.WithActors(dbSidecar),
 	sup.WithPolicy(sup.Permanent),
 )
 
@@ -74,16 +74,18 @@ func main() {
 
 	// 2. Wrap it in a supervisor
 	supervisor := sup.NewSupervisor("sidecars",
-		sup.WithActor(exporter),
+		sup.WithActors(exporter),
 		sup.WithPolicy(sup.Permanent),
 		sup.WithRestartDelay(1*time.Second),
-		sup.WithOnError(func(actor sup.Actor, err error) {
-			log.Printf("Process %s exited with error: %v", actor.Name(), err)
-		}),
+		sup.WithEventSink(sup.EventSinkFunc(func(event sup.Event) {
+			if event.Type == sup.EventActorStopped && event.Err != nil {
+				log.Printf("Process %s exited with error: %v", event.Actor.ID(), event.Err)
+			}
+		})),
 	)
 
 	// 3. Run blocks until context is canceled or a terminal error occurs
-	if err := supervisor.Run(ctx); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+	if err := supervisor.Run(ctx); err != nil {
 		log.Fatalf("Supervisor failed: %v", err)
 	}
 }

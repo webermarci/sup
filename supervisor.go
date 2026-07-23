@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/rand/v2"
 	"runtime/debug"
 	"slices"
-	"sync"
+	"sync/atomic"
 	"time"
 )
+
+// ErrSupervisorRunning is returned when Run is called while the supervisor is
+// already running.
+var ErrSupervisorRunning = errors.New("sup: supervisor is already running")
 
 // RestartPolicy controls when a supervisor restarts a stopped actor.
 type RestartPolicy uint8
@@ -25,264 +28,213 @@ const (
 	Temporary
 )
 
-// SupervisorObserver receives lifecycle callbacks from a supervisor.
-type SupervisorObserver struct {
-	OnActorRegistered    func(supervisor *Supervisor, actor Actor)
-	OnActorStarted       func(supervisor *Supervisor, actor Actor)
-	OnActorStopped       func(supervisor *Supervisor, actor Actor, err error)
-	OnActorRestarting    func(supervisor *Supervisor, actor Actor, restartCount int, lastErr error)
-	OnSupervisorTerminal func(supervisor *Supervisor, err error)
-}
+// SupervisorOption configures a Supervisor during construction.
+type SupervisorOption func(*Supervisor)
 
-// Supervisor runs actors and restarts them according to its restart policy.
-type Supervisor struct {
-	*BaseActor
-	policy             RestartPolicy
-	actors             []Actor
-	restartDelay       time.Duration
-	maxRestarts        int
-	restartWindow      time.Duration
-	wg                 sync.WaitGroup
-	onError            func(actor Actor, err error)
-	terminalErr        chan error
-	observers          []*SupervisorObserver
-	inheritedObservers []*SupervisorObserver
-	mu                 sync.RWMutex
-}
-
-// NewSupervisor creates a supervisor with the given id.
-func NewSupervisor(id string) *Supervisor {
-	return &Supervisor{
-		BaseActor:    NewBaseActor(id),
-		policy:       Transient,
-		restartDelay: time.Second,
-		terminalErr:  make(chan error, 1),
+// WithActors adds actors that start with the supervisor.
+func WithActors(actors ...Actor) SupervisorOption {
+	configured := slices.Clone(actors)
+	return func(supervisor *Supervisor) {
+		supervisor.actors = append(supervisor.actors, configured...)
 	}
 }
 
-// Actor adds an actor to be started when the supervisor runs.
-func (s *Supervisor) Actor(actor Actor) *Supervisor {
-	if actor == nil {
-		panic("sup: cannot add nil actor")
+// WithPolicy configures the supervisor restart policy.
+func WithPolicy(policy RestartPolicy) SupervisorOption {
+	if policy > Temporary {
+		panic("sup: invalid restart policy")
 	}
-
-	s.mu.Lock()
-	s.actors = append(s.actors, actor)
-	s.mu.Unlock()
-
-	return s
-}
-
-// Actors adds multiple actors to be started when the supervisor runs.
-func (s *Supervisor) Actors(actors ...Actor) *Supervisor {
-	for _, actor := range actors {
-		s.Actor(actor)
+	return func(supervisor *Supervisor) {
+		supervisor.policy = policy
 	}
-
-	return s
 }
 
-// Policy sets the supervisor restart policy.
-func (s *Supervisor) Policy(policy RestartPolicy) *Supervisor {
-	s.mu.Lock()
-	s.policy = policy
-	s.mu.Unlock()
-
-	return s
-}
-
-// RestartDelay sets the delay between actor restart attempts.
-func (s *Supervisor) RestartDelay(d time.Duration) *Supervisor {
-	if d < 0 {
+// WithRestartDelay configures the exact delay between actor restart attempts.
+func WithRestartDelay(delay time.Duration) SupervisorOption {
+	if delay < 0 {
 		panic("sup: restart delay must be non-negative")
 	}
 
-	s.mu.Lock()
-	s.restartDelay = d
-	s.mu.Unlock()
-
-	return s
+	return func(supervisor *Supervisor) {
+		supervisor.restartDelay = delay
+	}
 }
 
-// RestartLimit sets the maximum restarts allowed within a time window.
-func (s *Supervisor) RestartLimit(maxRestarts int, window time.Duration) *Supervisor {
+// WithRestartLimit limits restarts within a time window.
+func WithRestartLimit(maxRestarts int, window time.Duration) SupervisorOption {
 	if maxRestarts <= 0 || window <= 0 {
 		panic("sup: maxRestarts and window must be positive")
 	}
 
-	s.mu.Lock()
-	s.maxRestarts = maxRestarts
-	s.restartWindow = window
-	s.mu.Unlock()
-
-	return s
+	return func(supervisor *Supervisor) {
+		supervisor.maxRestarts = maxRestarts
+		supervisor.restartWindow = window
+	}
 }
 
-// OnError sets a handler called when an actor exits with an error or panic.
-func (s *Supervisor) OnError(handler func(actor Actor, err error)) *Supervisor {
-	if handler == nil {
-		panic("sup: cannot add nil handler")
+// WithEventSink adds an event sink for runtime events from this supervisor and
+// its descendant supervisors.
+func WithEventSink(sinks ...EventSink) SupervisorOption {
+	configured := slices.Clone(sinks)
+	return func(supervisor *Supervisor) {
+		supervisor.eventSinks = append(supervisor.eventSinks, configured...)
 	}
-
-	s.mu.Lock()
-	s.onError = handler
-	s.mu.Unlock()
-
-	return s
 }
 
-// Observer adds a lifecycle observer to the supervisor.
-func (s *Supervisor) Observer(observer *SupervisorObserver) *Supervisor {
-	if observer == nil {
-		panic("sup: cannot add nil observer")
-	}
-
-	s.mu.Lock()
-	s.observers = append(s.observers, observer)
-	s.mu.Unlock()
-
-	return s
+// Supervisor runs a fixed set of actors and restarts them according to its
+// restart policy. A supervisor is itself an Actor and may be nested.
+type Supervisor struct {
+	id            string
+	actors        []Actor
+	policy        RestartPolicy
+	restartDelay  time.Duration
+	maxRestarts   int
+	restartWindow time.Duration
+	eventSinks    []EventSink
+	running       atomic.Bool
 }
 
-// Spawn starts and supervises an actor immediately.
-func (s *Supervisor) Spawn(ctx context.Context, actor Actor) {
-	if actor == nil {
-		panic("sup: cannot spawn nil actor")
+// NewSupervisor creates a supervisor with the given id and options.
+func NewSupervisor(id string, options ...SupervisorOption) *Supervisor {
+	if id == "" {
+		panic("sup: supervisor id cannot be empty")
+	}
+	supervisor := &Supervisor{
+		id:           id,
+		policy:       Transient,
+		restartDelay: time.Second,
 	}
 
-	if actor.ID() == "" {
-		panic("sup: actor name cannot be empty")
-	}
-
-	if child, ok := actor.(*Supervisor); ok {
-		child.inheritObservers(s.allObservers()...)
-	}
-
-	s.notifyActorRegistered(actor)
-
-	s.wg.Go(func() {
-		var restarts []time.Time
-		if s.maxRestarts > 0 {
-			restarts = make([]time.Time, s.maxRestarts)
+	for _, option := range options {
+		if option == nil {
+			panic("sup: supervisor option cannot be nil")
 		}
-		rIdx := 0
-		restartCount := 0
+		option(supervisor)
+	}
 
-		for {
-			name := actor.ID()
-
-			s.notifyActorStarted(actor)
-			err := s.executeSafe(ctx, actor.Run)
-			s.notifyActorStopped(actor, err)
-
-			if err != nil {
-				if s.onError != nil {
-					s.onError(actor, err)
-				}
-			}
-
-			if ctx.Err() != nil {
-				return
-			}
-
-			if s.policy == Temporary || (s.policy == Transient && err == nil) {
-				return
-			}
-
-			if s.maxRestarts > 0 && s.restartWindow > 0 {
-				now := time.Now()
-				oldest := restarts[rIdx]
-
-				if !oldest.IsZero() && now.Sub(oldest) <= s.restartWindow {
-					escErr := fmt.Errorf("actor %s exceeded %d restarts in %v",
-						name, s.maxRestarts, s.restartWindow)
-					s.notifySupervisorTerminal(escErr)
-
-					select {
-					case s.terminalErr <- escErr:
-					default:
-					}
-					return
-				}
-
-				restarts[rIdx] = now
-				rIdx = (rIdx + 1) % s.maxRestarts
-			}
-
-			restartCount++
-			s.notifyActorRestarting(actor, restartCount, err)
-
-			delay := s.restartDelay
-			if delay > 0 {
-				jitterRange := int64(delay) / 10
-				if jitterRange > 0 {
-					jitter := time.Duration(rand.Int64N(jitterRange))
-					if rand.N(2) == 0 {
-						delay += jitter
-					} else {
-						delay -= jitter
-					}
-				}
-
-				t := time.NewTimer(delay)
-				select {
-				case <-ctx.Done():
-					t.Stop()
-					return
-				case <-t.C:
-				}
-			}
+	actorIDs := make(map[string]struct{}, len(supervisor.actors))
+	for _, actor := range supervisor.actors {
+		if actor == nil {
+			panic("sup: cannot add nil actor")
 		}
-	})
+		id := actor.ID()
+		if id == "" {
+			panic("sup: actor id cannot be empty")
+		}
+		if _, exists := actorIDs[id]; exists {
+			panic("sup: duplicate actor id: " + id)
+		}
+		actorIDs[id] = struct{}{}
+	}
+	for _, sink := range supervisor.eventSinks {
+		if sink == nil {
+			panic("sup: cannot add nil event sink")
+		}
+	}
+
+	return supervisor
 }
 
-// Run starts configured actors and blocks until they stop, fail, or the context is canceled.
+// ID returns the supervisor id.
+func (s *Supervisor) ID() string {
+	return s.id
+}
+
+// Run starts all configured actors and blocks until they have all stopped, a
+// restart limit is exceeded, or ctx is canceled. A supervisor may be run again
+// after Run returns. Concurrent calls return ErrSupervisorRunning.
 func (s *Supervisor) Run(ctx context.Context) error {
-	childCtx, cancel := context.WithCancel(ctx)
+	if !s.running.CompareAndSwap(false, true) {
+		return ErrSupervisorRunning
+	}
+	defer s.running.Store(false)
+
+	if len(s.actors) == 0 {
+		return nil
+	}
+
+	runCtx, cancel := context.WithCancel(withEventSinks(ctx, s.eventSinks))
 	defer cancel()
 
-	s.mu.RLock()
-	actors := append([]Actor(nil), s.actors...)
-	s.mu.RUnlock()
-
-	for _, actor := range actors {
-		s.Spawn(childCtx, actor)
+	results := make(chan error, len(s.actors))
+	for _, actor := range s.actors {
+		go func() {
+			results <- s.runActor(runCtx, actor)
+		}()
 	}
 
-	if len(actors) == 0 {
+	remaining := len(s.actors)
+	for remaining > 0 {
 		select {
 		case <-ctx.Done():
-			s.wg.Wait()
-			return ctx.Err()
-		case err := <-s.terminalErr:
 			cancel()
-			s.wg.Wait()
+			drain(results, remaining)
+			return nil
+		case err := <-results:
+			remaining--
+			if err == nil {
+				continue
+			}
+
+			cancel()
+			drain(results, remaining)
+			if ctx.Err() != nil {
+				return nil
+			}
 			return err
 		}
 	}
 
-	allDone := make(chan struct{})
-	go func() {
-		s.wg.Wait()
-		close(allDone)
-	}()
+	return nil
+}
 
-	select {
-	case <-ctx.Done():
-		s.wg.Wait()
-		return ctx.Err()
-	case err := <-s.terminalErr:
-		cancel()
-		s.wg.Wait()
-		return err
-	case <-allDone:
-		return nil
+func drain(results <-chan error, remaining int) {
+	for range remaining {
+		<-results
 	}
 }
 
-// Wait blocks until all spawned actors have stopped.
-func (s *Supervisor) Wait() {
-	s.wg.Wait()
+func (s *Supervisor) runActor(ctx context.Context, actor Actor) error {
+	s.emit(ctx, EventActorRegistered, actor, nil, 0)
+	restarts := 0
+	var windowStart time.Time
+
+	for {
+		s.emit(ctx, EventActorStarted, actor, nil, 0)
+		actorCtx, cancelActor := context.WithCancel(ctx)
+		err := executeSafe(actorCtx, actor.Run)
+		cancelActor()
+		s.emit(ctx, EventActorStopped, actor, err, 0)
+
+		if ctx.Err() != nil || s.policy == Temporary || (s.policy == Transient && err == nil) {
+			return nil
+		}
+
+		if s.maxRestarts > 0 {
+			now := time.Now()
+			if windowStart.IsZero() || now.Sub(windowStart) > s.restartWindow {
+				windowStart = now
+				restarts = 0
+			}
+			if restarts >= s.maxRestarts {
+				return fmt.Errorf("actor %s exceeded %d restarts in %v",
+					actor.ID(), s.maxRestarts, s.restartWindow)
+			}
+		}
+
+		restarts++
+		s.emit(ctx, EventActorRestarting, actor, err, restarts)
+		if ctx.Err() != nil {
+			return nil
+		}
+		if s.restartDelay > 0 {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(s.restartDelay):
+			}
+		}
+	}
 }
 
 // Inspect returns the supervisor spec.
@@ -290,141 +242,24 @@ func (s *Supervisor) Inspect() Spec {
 	return Spec{
 		Kind:         "supervisor",
 		Dependencies: []string{},
-		Metadata: map[string]string{
-			"actor_count":    fmt.Sprintf("%d", len(s.actors)),
-			"restart_window": s.restartWindow.String(),
-			"restart_delay":  s.restartDelay.String(),
-			"max_restarts":   fmt.Sprintf("%d", s.maxRestarts),
+		Metadata: map[string]any{
+			"actor_count":    len(s.actors),
+			"restart_window": s.restartWindow,
+			"restart_delay":  s.restartDelay,
+			"max_restarts":   s.maxRestarts,
 		},
 	}
 }
 
-// Children returns a copy of the configured child actors.
-func (s *Supervisor) Children() []Actor {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	var children []Actor
-	for _, c := range s.actors {
-		children = append(children, c)
-	}
-	return children
-}
-
-func (s *Supervisor) executeSafe(ctx context.Context, fn func(context.Context) error) (err error) {
+func executeSafe(ctx context.Context, fn func(context.Context) error) (err error) {
 	defer func() {
-		if r := recover(); r != nil {
-			err = errors.Join(
-				fmt.Errorf("%v", r),
-				fmt.Errorf("%s", debug.Stack()),
-			)
+		if value := recover(); value != nil {
+			err = fmt.Errorf("%v\n%s", value, debug.Stack())
 		}
 	}()
-	return fn(ctx)
-}
 
-func (s *Supervisor) notifyActorRegistered(actor Actor) {
-	s.notify(func(obs *SupervisorObserver) {
-		if obs.OnActorRegistered != nil {
-			obs.OnActorRegistered(s, actor)
-		}
-	})
-}
-
-func (s *Supervisor) notifyActorStarted(actor Actor) {
-	s.notify(func(obs *SupervisorObserver) {
-		if obs.OnActorStarted != nil {
-			obs.OnActorStarted(s, actor)
-		}
-	})
-}
-
-func (s *Supervisor) notifyActorStopped(actor Actor, err error) {
-	s.notify(func(obs *SupervisorObserver) {
-		if obs.OnActorStopped != nil {
-			obs.OnActorStopped(s, actor, err)
-		}
-	})
-}
-
-func (s *Supervisor) notifyActorRestarting(actor Actor, restartCount int, lastErr error) {
-	s.notify(func(obs *SupervisorObserver) {
-		if obs.OnActorRestarting != nil {
-			obs.OnActorRestarting(s, actor, restartCount, lastErr)
-		}
-	})
-}
-
-func (s *Supervisor) notifySupervisorTerminal(err error) {
-	s.notify(func(obs *SupervisorObserver) {
-		if obs.OnSupervisorTerminal != nil {
-			obs.OnSupervisorTerminal(s, err)
-		}
-	})
-}
-
-func (s *Supervisor) notify(fn func(*SupervisorObserver)) {
-	s.mu.RLock()
-	observers := make([]*SupervisorObserver, 0, len(s.inheritedObservers)+len(s.observers))
-	observers = append(observers, s.inheritedObservers...)
-	observers = append(observers, s.observers...)
-	s.mu.RUnlock()
-
-	for _, obs := range observers {
-		if obs == nil {
-			continue
-		}
-
-		go func(obs *SupervisorObserver) {
-			defer func() {
-				_ = recover()
-			}()
-			fn(obs)
-		}(obs)
+	if err = fn(ctx); ctx.Err() != nil {
+		return nil
 	}
-}
-
-func (s *Supervisor) allObservers() []*SupervisorObserver {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if len(s.inheritedObservers) == 0 && len(s.observers) == 0 {
-		return []*SupervisorObserver{}
-	}
-
-	observers := make([]*SupervisorObserver, 0, len(s.inheritedObservers)+len(s.observers))
-	observers = append(observers, s.inheritedObservers...)
-	observers = append(observers, s.observers...)
-
-	return observers
-}
-
-func (s *Supervisor) inheritObservers(observers ...*SupervisorObserver) {
-	s.mu.Lock()
-
-	var added []*SupervisorObserver
-	for _, obs := range observers {
-		if obs == nil {
-			continue
-		}
-		if slices.Contains(s.observers, obs) || slices.Contains(s.inheritedObservers, obs) {
-			continue
-		}
-
-		s.inheritedObservers = append(s.inheritedObservers, obs)
-		added = append(added, obs)
-	}
-
-	children := append([]Actor(nil), s.actors...)
-	s.mu.Unlock()
-
-	if len(added) == 0 {
-		return
-	}
-
-	for _, actor := range children {
-		if child, ok := actor.(*Supervisor); ok {
-			child.inheritObservers(added...)
-		}
-	}
+	return err
 }

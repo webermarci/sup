@@ -12,6 +12,7 @@ import (
 
 	"github.com/webermarci/sup"
 	"github.com/webermarci/sup/hub"
+	"github.com/webermarci/sup/rx"
 )
 
 type GetMessage struct{}
@@ -21,20 +22,26 @@ type IncrementMessage struct {
 }
 
 type Counter struct {
-	*sup.BaseActor
+	id             string
 	GetInbox       *sup.CallInbox[GetMessage, int]
 	IncrementInbox *sup.CastInbox[IncrementMessage]
 	State          int
-	StateSignal    *sup.Signal[int]
+	StateSignal    *rx.Signal[int]
+	EnabledSignal  *rx.Signal[bool]
 }
 
 func NewCounter(id string) *Counter {
 	return &Counter{
-		BaseActor:      sup.NewBaseActor(id),
+		id:             id,
 		GetInbox:       sup.NewCallInbox[GetMessage, int](8),
 		IncrementInbox: sup.NewCastInbox[IncrementMessage](8),
-		StateSignal:    sup.NewSignal(fmt.Sprintf("%s_signal", id), 0),
+		StateSignal:    rx.NewSignal(fmt.Sprintf("%s_signal", id), 0),
+		EnabledSignal:  rx.NewSignal(fmt.Sprintf("%s_enabled", id), true),
 	}
+}
+
+func (c *Counter) ID() string {
+	return c.id
 }
 
 func (c *Counter) Get() int {
@@ -44,27 +51,32 @@ func (c *Counter) Get() int {
 
 func (c *Counter) Increment(amount int) {
 	c.IncrementInbox.Cast(context.Background(), IncrementMessage{Amount: amount})
-	c.StateSignal.Write(context.Background(), c.Get())
-}
-
-func (c *Counter) Controls() []sup.Control {
-	return []sup.Control{
-		sup.NewCastControl("increment", c.IncrementInbox),
-		sup.NewCallControl("get", c.GetInbox),
-	}
 }
 
 func (c *Counter) Run(ctx context.Context) error {
+	enabledValues := c.EnabledSignal.Subscribe(ctx)
+	enabled := c.EnabledSignal.Value()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 
+		case value, ok := <-enabledValues:
+			if !ok {
+				return nil
+			}
+			enabled = value
+
 		case message := <-c.GetInbox.Receive():
 			message.Reply(c.State, nil)
 
 		case message := <-c.IncrementInbox.Receive():
+			if !enabled {
+				continue
+			}
 			c.State += message.Amount
+			c.StateSignal.Set(c.State)
 		}
 	}
 }
@@ -87,41 +99,60 @@ func main() {
 
 	counter := NewCounter("counter")
 
-	random := sup.NewSignal("random", 0).
-		Poll(200*time.Millisecond, func(ctx context.Context) (int, error) {
-			return rand.IntN(100) + 1, nil
-		}).
-		Throttle(time.Second)
+	rawRandom := rx.NewSignal("raw_random", 0)
+	random := rx.NewSignal("random", 0)
 
-	isRandomEven := sup.NewDerived("is_random_even", func() bool {
-		return random.Read()%2 == 0
+	randomPoller := sup.ActorFunc("random_poller", func(ctx context.Context) error {
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				rawRandom.Set(rand.IntN(100) + 1)
+			case <-ctx.Done():
+				return nil
+			}
+		}
+	})
+
+	randomThrottler := sup.ActorFunc("random_throttler", func(ctx context.Context) error {
+		for value := range rx.ThrottleLatest(rawRandom.Subscribe(ctx), time.Second) {
+			random.Set(value)
+		}
+		return nil
+	})
+
+	isRandomEven := rx.NewDerived("is_random_even", func() bool {
+		return random.Value()%2 == 0
 	}, random)
 
-	randomCharacter := sup.NewDerived("random_character", func() string {
-		return string(rune(random.Read()%26 + 'a'))
+	randomCharacter := rx.NewDerived("random_character", func() string {
+		return string(rune(random.Value()%26 + 'a'))
 	}, random)
 
-	quotient := sup.NewDerived("quotient", func() float64 {
-		divisor := random.Read()
+	quotient := rx.NewDerived("quotient", func() float64 {
+		divisor := random.Value()
 		if divisor == 0 {
 			return 0
 		}
-		return float64(counter.StateSignal.Read()) / float64(divisor)
+		return float64(counter.StateSignal.Value()) / float64(divisor)
 	}, counter.StateSignal, random)
 
-	combined := sup.NewDerived("combined", func() CombinedMessage {
+	combined := rx.NewDerived("combined", func() CombinedMessage {
 		return CombinedMessage{
-			Counter:         counter.StateSignal.Read(),
-			Random:          random.Read(),
-			RandomEven:      isRandomEven.Read(),
-			RandomCharacter: randomCharacter.Read(),
-			Quotient:        quotient.Read(),
+			Counter:         counter.StateSignal.Value(),
+			Random:          random.Value(),
+			RandomEven:      isRandomEven.Value(),
+			RandomCharacter: randomCharacter.Value(),
+			Quotient:        quotient.Value(),
 		}
-	}, quotient)
+	}, counter.StateSignal, random, isRandomEven, randomCharacter, quotient)
 
-	registry := hub.New("registry",
+	dashboard := hub.New("dashboard",
 		hub.WithActor(counter),
 		hub.WithSignal(counter.StateSignal),
+		hub.WithWritableSignal(counter.EnabledSignal),
 		hub.WithSignal(random),
 		hub.WithSignal(isRandomEven),
 		hub.WithSignal(randomCharacter),
@@ -129,27 +160,30 @@ func main() {
 		hub.WithSignal(combined),
 	)
 
-	root := sup.NewSupervisor("root").
-		Observer(registry.Observer()).
-		Actors(
+	root := sup.NewSupervisor("root",
+		sup.WithEventSink(dashboard),
+		sup.WithActors(
 			counter,
-			counter.StateSignal,
-			random,
+			randomPoller,
+			randomThrottler,
 			isRandomEven,
 			randomCharacter,
 			quotient,
 			combined,
-			registry,
-		)
+			dashboard,
+		),
+	)
 
 	go root.Run(ctx)
-	go http.ListenAndServe(":8080", registry.Handler())
+	go http.ListenAndServe(":8080", dashboard.Handler())
 
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.NewTicker(3 * time.Second).C:
+		case <-ticker.C:
 			counter.Increment(1)
 		}
 	}

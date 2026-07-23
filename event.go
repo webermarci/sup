@@ -1,11 +1,25 @@
 package sup
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"strconv"
+	"context"
+	"slices"
 	"time"
 )
+
+// EventSink consumes runtime events emitted by a supervisor tree. HandleEvent may
+// be called concurrently by different actors and must return promptly. A panic
+// is recovered so that event handling cannot interrupt supervision.
+type EventSink interface {
+	HandleEvent(Event)
+}
+
+// EventSinkFunc adapts a function into an EventSink.
+type EventSinkFunc func(Event)
+
+// HandleEvent calls f with event.
+func (f EventSinkFunc) HandleEvent(event Event) {
+	f(event)
+}
 
 // EventType identifies the kind of event that occurred.
 type EventType string
@@ -22,72 +36,46 @@ const (
 
 	// EventActorRestarting is emitted before a supervisor restarts an actor.
 	EventActorRestarting EventType = "actor:restarting"
-
-	// EventSupervisorTerminal is emitted when a supervisor reaches a terminal error.
-	EventSupervisorTerminal EventType = "supervisor:terminal"
-
-	// EventSignalUpdated is emitted when a signal value changes.
-	EventSignalUpdated EventType = "signal:updated"
 )
 
-// Event describes an occurrence emitted by an actor, supervisor, or signal.
+// Event describes an actor lifecycle transition emitted by a supervisor.
 type Event struct {
-	ID        string    `json:"id"`
-	Timestamp int64     `json:"timestamp"`
-	Type      EventType `json:"type"`
-	SourceID  string    `json:"source_id"`
-	Payload   any       `json:"payload,omitempty"`
+	Type         EventType
+	Time         time.Time
+	Actor        Actor
+	Supervisor   *Supervisor
+	Err          error
+	RestartCount int
 }
 
-// ActorRegisteredPayload is the payload for EventActorRegistered.
-type ActorRegisteredPayload struct {
-	SupervisorID string `json:"supervisor_id"`
+type eventSinksContextKey struct{}
+
+func withEventSinks(ctx context.Context, sinks []EventSink) context.Context {
+	if len(sinks) == 0 {
+		return ctx
+	}
+
+	parent, _ := ctx.Value(eventSinksContextKey{}).([]EventSink)
+	return context.WithValue(ctx, eventSinksContextKey{}, slices.Concat(parent, sinks))
 }
 
-// ActorStartedPayload is the payload for EventActorStarted.
-type ActorStartedPayload struct {
-	SupervisorID string `json:"supervisor_id"`
-}
-
-// ActorStoppedPayload is the payload for EventActorStopped.
-type ActorStoppedPayload struct {
-	SupervisorID string `json:"supervisor_id"`
-	Error        string `json:"error,omitempty"`
-}
-
-// ActorRestartingPayload is the payload for EventActorRestarting.
-type ActorRestartingPayload struct {
-	SupervisorID string `json:"supervisor_id"`
-	RestartCount int    `json:"restart_count"`
-	LastError    string `json:"last_error,omitempty"`
-}
-
-// SupervisorTerminalPayload is the payload for EventSupervisorTerminal.
-type SupervisorTerminalPayload struct {
-	Error string `json:"error,omitempty"`
-}
-
-// SignalUpdatedPayload is the payload for EventSignalUpdated.
-type SignalUpdatedPayload struct {
-	Value any `json:"value"`
-}
-
-// NewEvent creates an event with a generated id and current timestamp.
-func NewEvent(eventType EventType, sourceID string, payload any) Event {
-	return Event{
-		ID:        newEventID(),
-		Timestamp: time.Now().UnixMilli(),
-		Type:      eventType,
-		SourceID:  sourceID,
-		Payload:   payload,
+func emitEvent(ctx context.Context, event Event) {
+	event.Time = time.Now()
+	sinks, _ := ctx.Value(eventSinksContextKey{}).([]EventSink)
+	for _, sink := range sinks {
+		func() {
+			defer func() { _ = recover() }()
+			sink.HandleEvent(event)
+		}()
 	}
 }
 
-func newEventID() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return strconv.FormatInt(time.Now().UnixNano(), 36)
-	}
-
-	return hex.EncodeToString(b[:])
+func (s *Supervisor) emit(ctx context.Context, eventType EventType, actor Actor, err error, restarts int) {
+	emitEvent(ctx, Event{
+		Type:         eventType,
+		Actor:        actor,
+		Supervisor:   s,
+		Err:          err,
+		RestartCount: restarts,
+	})
 }

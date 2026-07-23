@@ -113,7 +113,7 @@ func WithRS485Config(enabled bool, delayRts time.Duration, delayCustom time.Dura
 
 // WithOnStart allows the caller to provide a callback function that will be invoked when the Actor starts and establishes a connection to the Modbus device.
 // This can be used for logging, metrics, or other side effects related to the actor's startup.
-func WithOnStart(handler func(protocol ModbusProtocol, address string, slaveId byte)) ActorOption {
+func WithOnStart(handler func(protocol ModbusProtocol, address string, slaveID byte)) ActorOption {
 	return func(a *Actor) {
 		a.config.onStart = handler
 	}
@@ -121,7 +121,7 @@ func WithOnStart(handler func(protocol ModbusProtocol, address string, slaveId b
 
 // WithOnRequest allows the caller to provide a callback function that will be invoked before a Modbus request is executed.
 // This can be used for logging, metrics collection, or other side effects related to outgoing Modbus requests.
-func WithOnRequest(handler func(functionCode byte, slaveId byte, address uint16, quantity uint16)) ActorOption {
+func WithOnRequest(handler func(functionCode byte, slaveID byte, address uint16, quantity uint16)) ActorOption {
 	return func(a *Actor) {
 		a.config.onRequest = handler
 	}
@@ -129,7 +129,7 @@ func WithOnRequest(handler func(functionCode byte, slaveId byte, address uint16,
 
 // WithOnResponse allows the caller to provide a callback function that will be invoked after a Modbus response is received.
 // This can be used for logging, metrics collection, or other side effects related to incoming Modbus responses, including any errors that may have occurred.
-func WithOnResponse(handler func(functionCode byte, slaveId byte, res []byte, err error, duration time.Duration)) ActorOption {
+func WithOnResponse(handler func(functionCode byte, slaveID byte, res []byte, err error, duration time.Duration)) ActorOption {
 	return func(a *Actor) {
 		a.config.onResponse = handler
 	}
@@ -159,9 +159,9 @@ type actorConfig struct {
 	rs485Enabled     bool
 	rs485DelayRts    time.Duration
 	rs485DelayCustom time.Duration
-	onStart          func(protocol ModbusProtocol, address string, slaveId byte)
-	onRequest        func(functionCode byte, slaveId byte, address uint16, quantity uint16)
-	onResponse       func(functionCode byte, slaveId byte, res []byte, err error, duration time.Duration)
+	onStart          func(protocol ModbusProtocol, address string, slaveID byte)
+	onRequest        func(functionCode byte, slaveID byte, address uint16, quantity uint16)
+	onResponse       func(functionCode byte, slaveID byte, res []byte, err error, duration time.Duration)
 }
 
 // Actor is an actor that handles Modbus communication using the specified protocol and configuration.
@@ -169,7 +169,7 @@ type actorConfig struct {
 // It processes Modbus requests sequentially and can be configured with various options such as mailbox size,
 // timeouts, serial settings, and an optional observer for monitoring requests and responses.
 type Actor struct {
-	*sup.BaseActor
+	id      string
 	inbox   *sup.CallInbox[any, []byte]
 	config  *actorConfig
 	handler modbus.ClientHandler
@@ -177,14 +177,14 @@ type Actor struct {
 }
 
 // NewActor creates a new Actor with the specified protocol, address, slave ID, and optional configuration options.
-func NewActor(name string, protocol ModbusProtocol, address string, slaveId byte, opts ...ActorOption) *Actor {
+func NewActor(id string, protocol ModbusProtocol, address string, slaveID byte, opts ...ActorOption) *Actor {
 	a := &Actor{
-		BaseActor: sup.NewBaseActor(name),
+		id: id,
 		config: &actorConfig{
 			inboxSize:        64,
 			protocol:         protocol,
 			address:          address,
-			slaveID:          slaveId,
+			slaveID:          slaveID,
 			timeout:          time.Second,
 			baudRate:         9600,
 			dataBits:         8,
@@ -205,10 +205,26 @@ func NewActor(name string, protocol ModbusProtocol, address string, slaveId byte
 	return a
 }
 
+// ID returns the actor id.
+func (a *Actor) ID() string {
+	return a.id
+}
+
+// Inspect returns the Modbus actor spec.
+func (a *Actor) Inspect() sup.Spec {
+	return sup.Spec{Kind: "modbus"}
+}
+
 // Run starts the Actor and processes incoming requests.
 // It establishes a connection to the Modbus device based on the configured protocol and handles requests sequentially.
 // The actor will continue running until the context is canceled or an unrecoverable error occurs.
-func (a *Actor) Run(ctx context.Context) error {
+func (a *Actor) Run(ctx context.Context) (err error) {
+	defer func() {
+		if ctx.Err() != nil {
+			err = nil
+		}
+	}()
+
 	switch a.config.protocol {
 	case TCP:
 		h := modbus.NewTCPClientHandler(a.config.address)
@@ -539,7 +555,7 @@ func isFatal(err error) bool {
 	return true
 }
 
-func handleFatalErr(m sup.RepliableRequest[[]byte], res []byte, err error) error {
+func handleFatalErr(m sup.CallRequest[any, []byte], res []byte, err error) error {
 	if err != nil {
 		m.Reply(nil, err)
 		if isFatal(err) {

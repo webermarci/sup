@@ -9,135 +9,150 @@ import (
 	"github.com/webermarci/sup"
 )
 
-func TestCallInbox_Success(t *testing.T) {
-	ctx := t.Context()
-	inbox := sup.NewCallInbox[string, int](10)
-	msg := "calculate_length"
-
+func TestCallInbox(t *testing.T) {
+	inbox := sup.NewCallInbox[string, int](1)
 	go func() {
 		req := <-inbox.Receive()
-		if req.Payload() == msg {
-			req.Reply(len(msg), nil)
-		} else {
-			req.Reply(0, errors.New("unexpected message"))
-		}
+		req.Reply(len(req.Payload()), nil)
 	}()
 
-	res, err := inbox.Call(ctx, msg)
-
+	got, err := inbox.Call(t.Context(), "calculate_length")
 	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+		t.Fatal(err)
 	}
-
-	if res != 16 {
-		t.Errorf("expected 16, got %d", res)
+	if got != 16 {
+		t.Fatalf("expected 16, got %d", got)
 	}
 }
 
-func TestCallInbox_ContextTimeout(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
-	defer cancel()
-
+func TestCallInboxTryCall(t *testing.T) {
 	inbox := sup.NewCallInbox[string, int](1)
-
-	_, err := inbox.Call(ctx, "hang_me")
-
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("expected deadline exceeded, got %v", err)
-	}
-}
-
-func TestCallInbox_Closed(t *testing.T) {
-	ctx := t.Context()
-	inbox := sup.NewCallInbox[string, int](1)
-	inbox.Close()
-
-	_, err := inbox.Call(ctx, "test")
-	if !errors.Is(err, sup.ErrCallInboxClosed) {
-		t.Errorf("expected ErrCallInboxClosed, got %v", err)
-	}
-}
-
-func TestCallInbox_Full(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
-	defer cancel()
-
-	inbox := sup.NewCallInbox[string, int](1)
-
-	go func() {
-		inbox.Call(context.Background(), "first")
-	}()
-
-	time.Sleep(10 * time.Millisecond)
-
-	_, err := inbox.Call(ctx, "second")
-
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("expected context timeout due to full buffer, got %v", err)
-	}
-}
-
-func TestCallInbox_ActorError(t *testing.T) {
-	ctx := t.Context()
-	inbox := sup.NewCallInbox[string, string](1)
-	expectedErr := errors.New("hardware_failure")
-
 	go func() {
 		req := <-inbox.Receive()
-		req.Reply("", expectedErr)
+		req.Reply(len(req.Payload()), nil)
 	}()
 
-	_, err := inbox.Call(ctx, "ping")
-
-	if !errors.Is(err, expectedErr) {
-		t.Errorf("expected %v, got %v", expectedErr, err)
+	got, err := inbox.TryCall(t.Context(), "hello")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 5 {
+		t.Fatalf("expected 5, got %d", got)
 	}
 }
 
-func TestCallInbox_CloseSafety(t *testing.T) {
-	inbox := sup.NewCallInbox[int, int](1)
+func TestCallInboxReplyError(t *testing.T) {
+	inbox := sup.NewCallInbox[string, string](1)
+	expectedErr := errors.New("hardware failure")
+	go func() {
+		(<-inbox.Receive()).Reply("", expectedErr)
+	}()
 
-	inbox.Close()
-	inbox.Close()
-
-	if !inbox.Closed() {
-		t.Error("expected closed to be true")
+	if _, err := inbox.Call(t.Context(), "ping"); !errors.Is(err, expectedErr) {
+		t.Fatalf("expected %v, got %v", expectedErr, err)
 	}
 }
 
-func TestCallInbox_LenCap(t *testing.T) {
-	inbox := sup.NewCallInbox[string, int](2)
+func TestCallInboxWaitingForReplyCanBeCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	inbox := sup.NewCallInbox[string, int](1)
+	queued := make(chan struct{})
+	go func() {
+		<-inbox.Receive()
+		close(queued)
+	}()
+	go func() {
+		<-queued
+		cancel()
+	}()
 
-	if got := inbox.Cap(); got != 2 {
-		t.Fatalf("expected cap 2, got %d", got)
+	if _, err := inbox.Call(ctx, "no reply"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
 	}
+}
+
+func TestCallRequestExposesCallerContext(t *testing.T) {
+	type key struct{}
+	ctx := context.WithValue(t.Context(), key{}, "value")
+	inbox := sup.NewCallInbox[string, string](1)
 
 	done := make(chan struct{})
 	go func() {
-		_, _ = inbox.Call(context.Background(), "first")
-		close(done)
+		defer close(done)
+		req := <-inbox.Receive()
+		if got := req.Context().Value(key{}); got != "value" {
+			t.Errorf("expected caller context value, got %v", got)
+		}
+		req.Reply("ok", nil)
 	}()
 
-	deadline := time.After(time.Second)
-	for inbox.Len() != 1 {
-		select {
-		case <-deadline:
-			t.Fatalf("timed out waiting for len 1, got %d", inbox.Len())
-		default:
-			time.Sleep(time.Millisecond)
+	if got, err := inbox.Call(ctx, "request"); err != nil || got != "ok" {
+		t.Fatalf("expected reply ok, got %q, %v", got, err)
+	}
+	<-done
+}
+
+func TestCallRequestReplyOnlySucceedsOnce(t *testing.T) {
+	inbox := sup.NewCallInbox[string, string](1)
+	received := make(chan struct{})
+	go func() {
+		req := <-inbox.Receive()
+		if !req.Reply("first", nil) {
+			t.Error("expected first reply to succeed")
 		}
-	}
+		if req.Reply("second", nil) {
+			t.Error("expected second reply to fail")
+		}
+		close(received)
+	}()
 
-	select {
-	case req := <-inbox.Receive():
-		req.Reply(1, nil)
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for request")
+	if got, err := inbox.Call(t.Context(), "request"); err != nil || got != "first" {
+		t.Fatalf("expected first reply, got %q, %v", got, err)
 	}
+	<-received
+}
 
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for call to finish")
+func TestCallRequestReplyFailsAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	inbox := sup.NewCallInbox[string, string](1)
+	reqCh := make(chan sup.CallRequest[string, string], 1)
+	go func() { reqCh <- <-inbox.Receive() }()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := inbox.Call(ctx, "request")
+		done <- err
+	}()
+	req := <-reqCh
+	cancel()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected cancellation, got %v", err)
+	}
+	if req.Reply("late", nil) {
+		t.Fatal("expected late reply to fail")
+	}
+}
+
+func TestZeroCallRequestReplyFails(t *testing.T) {
+	var req sup.CallRequest[string, string]
+	if req.Context() != context.Background() {
+		t.Fatal("expected zero request to use a background context")
+	}
+	if req.Reply("reply", nil) {
+		t.Fatal("expected zero request reply to fail")
+	}
+}
+
+func TestCallInboxErrors(t *testing.T) {
+	inbox := sup.NewCallInbox[string, int](1)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go inbox.Call(ctx, "first")
+	deadline := time.Now().Add(time.Second)
+	for len(inbox.Receive()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if _, err := inbox.TryCall(t.Context(), "second"); !errors.Is(err, sup.ErrInboxFull) {
+		t.Fatalf("expected ErrInboxFull, got %v", err)
 	}
 }

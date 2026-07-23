@@ -87,7 +87,7 @@ type sendMsg struct {
 // and exposes a thread-safe Send method for outbound messages. It is designed to run
 // under a sup.Supervisor, which handles reconnection on failure.
 type Actor struct {
-	*sup.BaseActor
+	id      string
 	inbox   *sup.CastInbox[sendMsg]
 	url     string
 	handler func(Message)
@@ -96,11 +96,11 @@ type Actor struct {
 
 // NewActor creates a new Actor with the specified URL, inbound message handler,
 // and optional configuration options.
-func NewActor(name string, url string, handler func(Message), opts ...ActorOption) *Actor {
+func NewActor(id string, url string, handler func(Message), opts ...ActorOption) *Actor {
 	a := &Actor{
-		BaseActor: sup.NewBaseActor(name),
-		url:       url,
-		handler:   handler,
+		id:      id,
+		url:     url,
+		handler: handler,
 		config: &actorConfig{
 			inboxSize:    64,
 			pingInterval: 15 * time.Second,
@@ -116,6 +116,16 @@ func NewActor(name string, url string, handler func(Message), opts ...ActorOptio
 	return a
 }
 
+// ID returns the actor id.
+func (a *Actor) ID() string {
+	return a.id
+}
+
+// Inspect returns the WebSocket actor spec.
+func (a *Actor) Inspect() sup.Spec {
+	return sup.Spec{Kind: "websocket"}
+}
+
 // Send enqueues an outbound message to be written by the actor's run loop.
 // It is safe to call from any goroutine.
 func (a *Actor) Send(msgType MessageType, data []byte) error {
@@ -128,7 +138,13 @@ func (a *Actor) Send(msgType MessageType, data []byte) error {
 // Run establishes the WebSocket connection and drives concurrent concerns:
 // reading inbound frames, writing outbound frames, and maintaining keep-alive pings.
 // Any failure causes Run to return an error, triggering a supervisor restart.
-func (a *Actor) Run(ctx context.Context) error {
+func (a *Actor) Run(ctx context.Context) (err error) {
+	defer func() {
+		if ctx.Err() != nil {
+			err = nil
+		}
+	}()
+
 	dialOpts := &websocket.DialOptions{}
 	if a.config.httpClient != nil {
 		dialOpts.HTTPClient = a.config.httpClient
@@ -186,7 +202,7 @@ func (a *Actor) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			conn.Close(websocket.StatusNormalClosure, "shutting down")
-			return ctx.Err()
+			return nil
 
 		case res := <-inbound:
 			if res.err != nil {

@@ -14,11 +14,16 @@ This library solves that by treating the WebSocket connection as an **Actor**. A
 
 ## Features
 
-* **Actor-Based Concurrency**: Thread-safe outbound writes via `Send`. Multiple goroutines can call `Send` safely; the actor serializes all writes.
-* **Supervised Lifecycle**: Designed to run under a `sup.Supervisor`. Any connection failure causes the actor to return a fatal error, letting the supervisor handle reconnection.
-* **Binary and Text Support**: Exposes the WebSocket message type (`MessageText` / `MessageBinary`) alongside the payload.
-* **Idle Timeout**: Configurable timeout that triggers a reconnect if no message is received within the window.
-* **Keepalive Pings**: Configurable ping interval to detect silent connection drops before the idle timeout fires.
+- **Actor-based concurrency:** Thread-safe outbound writes through `Send`; the actor serializes them.
+- **Supervised lifecycle:** Connection failures return an error so the supervisor can reconnect.
+- **Binary and text support:** Messages retain their WebSocket frame type.
+- **Keepalive pings:** A configurable ping interval helps detect silent connection failures.
+
+## Installation
+
+```bash
+go get github.com/webermarci/sup/ws
+```
 
 ## Quick start
 
@@ -31,7 +36,7 @@ import (
 	"time"
 
 	"github.com/webermarci/sup"
-	ws "github.com/webermarci/sup-ws"
+	"github.com/webermarci/sup/ws"
 )
 
 func main() {
@@ -43,74 +48,33 @@ func main() {
 	}
 
 	actor := ws.NewActor("actor", "wss://example.com/stream", handler,
-		ws.WithTimeout(30*time.Second),
 		ws.WithPingInterval(15*time.Second),
 	)
 
-	supervisor := sup.NewSupervisor(
-		sup.WithActor(actor),
+	supervisor := sup.NewSupervisor("root",
+		sup.WithActors(actor),
 		sup.WithPolicy(sup.Permanent),
 		sup.WithRestartDelay(time.Second),
-		sup.WithRestartLimit(5, 10*time.Second),
 	)
 
 	go supervisor.Run(ctx)
 
-	_ = client.Send(ws.MessageText, []byte(`{"action":"subscribe","channel":"updates"}`))
-	_ = client.Send(ws.MessageBinary, []byte{0x01, 0x02, 0x03})
+	_ = actor.Send(ws.MessageText, []byte(`{"action":"subscribe","channel":"updates"}`))
+	_ = actor.Send(ws.MessageBinary, []byte{0x01, 0x02, 0x03})
 
-	supervisor.Wait()
+	<-ctx.Done()
 }
 ```
 
-## Using it with [pubsub](https://github.com/webermarci/pubsub)
+## Options
 
-```go
-package main
+| Option | Default | Description |
+|---|---:|---|
+| `WithInboxSize(size)` | `64` | Capacity of the outbound message queue |
+| `WithPingInterval(d)` | `15s` | Interval between WebSocket pings |
+| `WithHTTPClient(client)` | default client | HTTP client used while dialing |
+| `WithOnConnect(fn)` | nil | Called after a connection is established |
+| `WithOnMessage(fn)` | nil | Called for every inbound message with inter-message duration |
+| `WithOnError(fn)` | nil | Called for failures that make `Run` return an error |
 
-import (
-  "context"
-  "fmt"
-  "time"
-
-  "github.com/webermarci/pubsub"
-  "github.com/webermarci/sup"
-  ws "github.com/webermarci/sup-ws"
-)
-
-func main() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	pubsub := pubsub.New[string, ws.Message](10)
-  
-	handler := func(message ws.Message) {
-		pubsub.Publish("ws", message)
-	}
-	
-	actor := ws.NewActor("actor", "wss://example.com/stream", handler,
-		ws.WithTimeout(30*time.Second),
-		ws.WithPingInterval(15*time.Second),
-	)
-	
-	supervisor := sup.NewSupervisor(
-		sup.WithActor(actor),
-		sup.WithPolicy(sup.Permanent),
-		sup.WithRestartDelay(time.Second),
-		sup.WithRestartLimit(5, 10 * time.Second),
-	)
-	
-	go supervisor.Run(ctx)
-	
-	messages := pubsub.Subscribe(ctx, "ws")
-	
-	go func() {
-		for message := range messages {
-			fmt.Println(message)
-		}
-	}()
-	
-	supervisor.Wait()
-	pubsub.Close()
-}
-```
+Cancellation closes the connection normally and makes `Run` return `nil`.

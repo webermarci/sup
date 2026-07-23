@@ -37,12 +37,12 @@ func TestModbusActor_ReadCoils_Success(t *testing.T) {
 	var lastAddr uint16
 
 	actor := NewActor(t.Name(), TCP, "localhost:502", 1,
-		WithOnRequest(func(functionCode, slaveId byte, address, quantity uint16) {
+		WithOnRequest(func(functionCode, slaveID byte, address, quantity uint16) {
 			requestCalled = true
 			lastFC = functionCode
 			lastAddr = address
 		}),
-		WithOnResponse(func(functionCode, slaveId byte, response []byte, err error, duration time.Duration) {
+		WithOnResponse(func(functionCode, slaveID byte, response []byte, err error, duration time.Duration) {
 			responseCalled = true
 		}),
 	)

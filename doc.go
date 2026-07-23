@@ -1,2 +1,3 @@
-// Package sup provides actor supervision, reactive signals, and message inboxes for building concurrent systems.
+// Package sup provides actors, supervision, runtime events, and typed message
+// inboxes for building concurrent systems.
 package sup

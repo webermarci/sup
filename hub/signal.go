@@ -1,11 +1,18 @@
 package hub
 
 import (
+	"cmp"
+	"context"
+	"encoding/json"
+	"errors"
 	"reflect"
-	"sort"
+	"slices"
 
 	"github.com/webermarci/sup"
+	"github.com/webermarci/sup/rx"
 )
+
+var errSignalReadOnly = errors.New("hub: signal is read-only")
 
 type hubSignalValueType string
 
@@ -17,13 +24,101 @@ const (
 )
 
 type hubSignal struct {
-	ID    string             `json:"id"`
-	Spec  sup.Spec           `json:"spec"`
-	Type  hubSignalValueType `json:"type"`
-	Value any                `json:"value"`
+	ID       string             `json:"id"`
+	Spec     sup.Spec           `json:"spec"`
+	Type     hubSignalValueType `json:"type"`
+	Value    any                `json:"value"`
+	Writable bool               `json:"writable"`
 }
 
-func (h *Hub) signal(id string) (hubSignal, bool) {
+type registeredSignal struct {
+	id        string
+	spec      sup.Spec
+	valueType hubSignalValueType
+	writable  bool
+	read      func() any
+	write     func(json.RawMessage) error
+	observe   func(context.Context, func(any))
+}
+
+func newReadableSignal[V any](signal rx.Readable[V]) registeredSignal {
+	return registeredSignal{
+		id:        signal.ID(),
+		spec:      inspectSignal(signal),
+		valueType: inferSignalValueType[V](),
+		read:      func() any { return signal.Value() },
+		observe: func(ctx context.Context, publish func(any)) {
+			observeSignal(ctx, signal, publish)
+		},
+	}
+}
+
+func newWritableSignal[V any](signal rx.Writable[V]) registeredSignal {
+	registered := newReadableSignal[V](signal)
+	registered.writable = true
+	registered.write = func(raw json.RawMessage) error {
+		var value V
+		if err := json.Unmarshal(raw, &value); err != nil {
+			return err
+		}
+		signal.Set(value)
+		return nil
+	}
+	return registered
+}
+
+func inspectSignal(signal any) sup.Spec {
+	if inspectable, ok := signal.(sup.Inspectable); ok {
+		return normalizeSpec(inspectable.Inspect(), "signal")
+	}
+	return normalizeSpec(sup.Spec{}, "signal")
+}
+
+func observeSignal[V any](ctx context.Context, signal rx.Readable[V], publish func(any)) {
+	values := signal.Subscribe(ctx)
+
+	// Subscribe starts with the current value. It is already available from the
+	// snapshot endpoints and is not a change event.
+	select {
+	case _, ok := <-values:
+		if !ok {
+			return
+		}
+	case <-ctx.Done():
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case value, ok := <-values:
+			if !ok {
+				return
+			}
+			publish(value)
+		}
+	}
+}
+
+func (s registeredSignal) describe() hubSignal {
+	return hubSignal{
+		ID:       s.id,
+		Spec:     s.spec,
+		Type:     s.valueType,
+		Value:    s.read(),
+		Writable: s.writable,
+	}
+}
+
+func (s registeredSignal) set(raw json.RawMessage) error {
+	if s.write == nil {
+		return errSignalReadOnly
+	}
+	return s.write(raw)
+}
+
+func (h *Hub) signal(id string) (registeredSignal, bool) {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
@@ -33,27 +128,21 @@ func (h *Hub) signal(id string) (hubSignal, bool) {
 
 func (h *Hub) signalsSnapshot() []hubSignal {
 	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	signals := make([]hubSignal, 0, len(h.signals))
+	signals := make([]registeredSignal, 0, len(h.signals))
 	for _, signal := range h.signals {
 		signals = append(signals, signal)
 	}
+	h.mu.RUnlock()
 
-	sort.Slice(signals, func(i, j int) bool {
-		return signals[i].ID < signals[j].ID
+	slices.SortFunc(signals, func(a, b registeredSignal) int {
+		return cmp.Compare(a.id, b.id)
 	})
 
-	return signals
-}
-
-func (h *Hub) updateSignalValue(id string, value any) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	signal := h.signals[id]
-	signal.Value = value
-	h.signals[id] = signal
+	result := make([]hubSignal, 0, len(signals))
+	for _, signal := range signals {
+		result = append(result, signal.describe())
+	}
+	return result
 }
 
 func inferSignalValueType[V any]() hubSignalValueType {

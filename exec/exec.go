@@ -13,7 +13,7 @@ import (
 // Actor wraps an external OS command and runs it under supervision.
 // If the command exits, the actor returns the error, allowing the supervisor to restart it.
 type Actor struct {
-	*sup.BaseActor
+	id        string
 	path      string
 	args      []string
 	dir       string
@@ -62,12 +62,12 @@ func WithWaitDelay(d time.Duration) ActorOption {
 	}
 }
 
-// NewActor creates a new exec Actor with the given name and command path.
-func NewActor(name string, path string, args []string, opts ...ActorOption) *Actor {
+// NewActor creates a new exec Actor with the given id and command path.
+func NewActor(id string, path string, args []string, opts ...ActorOption) *Actor {
 	a := &Actor{
-		BaseActor: sup.NewBaseActor(name),
-		path:      path,
-		args:      args,
+		id:   id,
+		path: path,
+		args: args,
 	}
 
 	for _, opt := range opts {
@@ -75,6 +75,16 @@ func NewActor(name string, path string, args []string, opts ...ActorOption) *Act
 	}
 
 	return a
+}
+
+// ID returns the actor id.
+func (a *Actor) ID() string {
+	return a.id
+}
+
+// Inspect returns the exec actor spec.
+func (a *Actor) Inspect() sup.Spec {
+	return sup.Spec{Kind: "exec"}
 }
 
 // Run executes the command and waits for it to finish.

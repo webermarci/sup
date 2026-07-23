@@ -41,7 +41,7 @@ func WithQueueSubscription(subject, queue string, handler func(*nats.Msg)) Actor
 
 // Actor represents a NATS client that can publish messages and subscribe to subjects.
 type Actor struct {
-	*sup.BaseActor
+	id            string
 	options       nats.Options
 	conn          *nats.Conn
 	subscriptions []subscription
@@ -49,15 +49,25 @@ type Actor struct {
 }
 
 // NewActor creates a new Actor with the given name, NATS options, and optional ActorOptions.
-func NewActor(name string, options nats.Options, opts ...ActorOption) *Actor {
+func NewActor(id string, options nats.Options, opts ...ActorOption) *Actor {
 	a := &Actor{
-		BaseActor: sup.NewBaseActor(name),
-		options:   options,
+		id:      id,
+		options: options,
 	}
 	for _, o := range opts {
 		o(a)
 	}
 	return a
+}
+
+// ID returns the actor id.
+func (a *Actor) ID() string {
+	return a.id
+}
+
+// Inspect returns the mesh actor spec.
+func (a *Actor) Inspect() sup.Spec {
+	return sup.Spec{Kind: "mesh"}
 }
 
 // Publish sends a message with the given data to the specified subject.
@@ -80,7 +90,13 @@ func (a *Actor) Publish(subject string, data []byte) error {
 }
 
 // Run starts the Actor's main loop, establishing a NATS connection and setting up subscriptions.
-func (a *Actor) Run(ctx context.Context) error {
+func (a *Actor) Run(ctx context.Context) (err error) {
+	defer func() {
+		if ctx.Err() != nil {
+			err = nil
+		}
+	}()
+
 	nc, err := a.options.Connect()
 	if err != nil {
 		return err

@@ -63,7 +63,7 @@ func WithHTTPClient(c *http.Client) ActorOption {
 
 // Actor is responsible for connecting to an SSE endpoint, reading and parsing incoming events, and invoking a handler function for each event.
 type Actor struct {
-	*sup.BaseActor
+	id        string
 	url       string
 	timeout   time.Duration
 	client    *http.Client
@@ -75,12 +75,12 @@ type Actor struct {
 }
 
 // NewActor creates a new Actor with the specified URL, event handler, and optional configuration options.
-func NewActor(name string, url string, onEvent func(Event), opts ...ActorOption) *Actor {
+func NewActor(id string, url string, onEvent func(Event), opts ...ActorOption) *Actor {
 	a := &Actor{
-		BaseActor: sup.NewBaseActor(name),
-		url:       url,
-		onEvent:   onEvent,
-		timeout:   30 * time.Second,
+		id:      id,
+		url:     url,
+		onEvent: onEvent,
+		timeout: 30 * time.Second,
 		client: &http.Client{
 			Transport: &http.Transport{
 				DisableKeepAlives: true,
@@ -95,6 +95,16 @@ func NewActor(name string, url string, onEvent func(Event), opts ...ActorOption)
 	return a
 }
 
+// ID returns the actor id.
+func (a *Actor) ID() string {
+	return a.id
+}
+
+// Inspect returns the SSE actor spec.
+func (a *Actor) Inspect() sup.Spec {
+	return sup.Spec{Kind: "sse"}
+}
+
 // LastEventID returns the ID of the last successfully received event.
 func (a *Actor) LastEventID() string {
 	a.mu.RLock()
@@ -105,12 +115,15 @@ func (a *Actor) LastEventID() string {
 // Run establishes a connection to the SSE endpoint and processes incoming events until the context is canceled or an error occurs.
 func (a *Actor) Run(ctx context.Context) (err error) {
 	defer func() {
+		if ctx.Err() != nil {
+			err = nil
+		}
 		if err != nil && a.onError != nil {
 			a.onError(err)
 		}
 	}()
 
-	req, err := http.NewRequestWithContext(ctx, "GET", a.url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.url, nil)
 	if err != nil {
 		return err
 	}
@@ -147,7 +160,7 @@ func (a *Actor) Run(ctx context.Context) (err error) {
 	const maxCapacity = 1024 * 1024
 	scanner.Buffer(make([]byte, 64*1024), maxCapacity)
 
-	var timedOut atomic.Int32
+	var timedOut atomic.Bool
 	var buf bytes.Buffer
 	currentEvent := Event{ID: lastID}
 
@@ -158,9 +171,9 @@ func (a *Actor) Run(ctx context.Context) (err error) {
 		default:
 		}
 
-		timedOut.Store(0)
+		timedOut.Store(false)
 		timer := time.AfterFunc(a.timeout, func() {
-			timedOut.Store(1)
+			timedOut.Store(true)
 			_ = res.Body.Close()
 		})
 
@@ -188,13 +201,9 @@ func (a *Actor) Run(ctx context.Context) (err error) {
 				continue
 			}
 
-			var key, value string
-			if parts := strings.SplitN(line, ":", 2); len(parts) == 2 {
-				key = parts[0]
-				value = strings.TrimPrefix(parts[1], " ")
-			} else {
-				key = line
-				value = ""
+			key, value, found := strings.Cut(line, ":")
+			if found {
+				value = strings.TrimPrefix(value, " ")
 			}
 
 			switch key {
@@ -217,7 +226,7 @@ func (a *Actor) Run(ctx context.Context) (err error) {
 		}
 
 		if err := scanner.Err(); err != nil {
-			if timedOut.Load() == 1 {
+			if timedOut.Load() {
 				return fmt.Errorf("sse stream timed out after %v", a.timeout)
 			}
 			return err

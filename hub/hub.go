@@ -1,137 +1,159 @@
 package hub
 
 import (
-	"bytes"
+	"cmp"
 	"context"
 	_ "embed"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"maps"
 	"net/http"
-	"sort"
-	"strconv"
+	"slices"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/webermarci/sup"
+	"github.com/webermarci/sup/rx"
 )
 
 //go:embed debug/build/index.html
 var debugIndex []byte
 
-const defaultHubEventLimit = 128
+const defaultEventHistoryLimit = 128
 
-// Option configures a Hub.
+// ErrHubRunning is returned when Run is called while the hub is already
+// running.
+var ErrHubRunning = errors.New("hub: hub is already running")
+
+// Option configures a Hub during construction.
 type Option func(*Hub)
 
-// WithEventLimit sets the maximum number of events stored per source.
-func WithEventLimit(limit int) Option {
+// WithEventHistoryLimit sets the maximum number of recent events retained
+// across all registered sources. A zero limit disables event history without
+// disabling the live event stream.
+func WithEventHistoryLimit(limit int) Option {
 	if limit < 0 {
-		panic("sup: event limit must be non-negative")
+		panic("hub: event history limit must be non-negative")
 	}
 
 	return func(h *Hub) {
-		h.eventLimit = limit
+		h.eventHistoryLimit = limit
 	}
 }
 
-// WithActor registers an actor with the hub.
+// WithActor exposes an actor through the hub. Runtime events for actors that
+// are not explicitly registered remain private.
 func WithActor(actor sup.Actor) Option {
 	if actor == nil {
-		panic("sup: cannot register nil actor")
+		panic("hub: cannot register nil actor")
 	}
 
 	return func(h *Hub) {
-		h.RegisterActor(actor)
+		id := actor.ID()
+		if id == "" {
+			panic("hub: actor id cannot be empty")
+		}
+		if _, exists := h.actors[id]; exists {
+			panic("hub: duplicate actor id: " + id)
+		}
+		if _, exists := h.signals[id]; exists {
+			panic("hub: duplicate source id: " + id)
+		}
+
+		h.actors[id] = actor
 	}
 }
 
-// WithSignal registers a readable signal with the hub.
-func WithSignal[V any](signal sup.ReadableSignal[V]) Option {
+// WithSignal exposes a readable signal through the hub.
+func WithSignal[V any](signal rx.Readable[V]) Option {
 	if signal == nil {
-		panic("sup: cannot register nil signal")
-	}
-
-	if signal.ID() == "" {
-		panic("sup: signal id cannot be empty")
+		panic("hub: cannot register nil signal")
 	}
 
 	return func(h *Hub) {
-		id := signal.ID()
-		h.registerSignal(hubSignal{
-			ID:    id,
-			Spec:  signal.Inspect(),
-			Type:  inferSignalValueType[V](),
-			Value: signal.Read(),
-		}, func(ctx context.Context) error {
-			values := signal.Subscribe(ctx)
-
-			for {
-				select {
-				case <-ctx.Done():
-					return nil
-
-				case value, ok := <-values:
-					if !ok {
-						return nil
-					}
-
-					h.updateSignalValue(id, value)
-					h.publish(sup.NewEvent(sup.EventSignalUpdated, id, sup.SignalUpdatedPayload{
-						Value: value,
-					}))
-				}
-			}
-		})
+		h.addSignal(newReadableSignal(signal))
 	}
 }
 
-// Hub exposes actors, controls, signals, and events over HTTP.
+// WithWritableSignal exposes a writable signal through the hub. Its value can
+// be changed with PATCH /signals/{signalID}.
+func WithWritableSignal[V any](signal rx.Writable[V]) Option {
+	if signal == nil {
+		panic("hub: cannot register nil writable signal")
+	}
+
+	return func(h *Hub) {
+		h.addSignal(newWritableSignal(signal))
+	}
+}
+
+// Hub exposes explicitly registered actors and signals over HTTP, records a
+// bounded recent event history, and projects runtime registration events into
+// a supervision graph.
 type Hub struct {
-	*sup.BaseActor
-	actors     map[string]sup.Actor
-	signals    map[string]hubSignal
-	streams    []func(context.Context) error
-	events     map[string][]sup.Event
-	clients    map[chan []byte]struct{}
-	eventLimit int
-	mu         sync.RWMutex
+	id string
+
+	actors  map[string]sup.Actor
+	signals map[string]registeredSignal
+
+	graphNodes map[string]graphNode
+	parents    map[string]string
+
+	events            []hubEvent
+	eventHistoryLimit int
+	clients           map[chan []byte]struct{}
+	mu                sync.RWMutex
+	running           atomic.Bool
 }
 
 // New creates a hub with the given id and options.
 func New(id string, options ...Option) *Hub {
-	hub := &Hub{
-		BaseActor:  sup.NewBaseActor(id),
-		actors:     make(map[string]sup.Actor),
-		signals:    make(map[string]hubSignal),
-		events:     make(map[string][]sup.Event),
-		clients:    make(map[chan []byte]struct{}),
-		eventLimit: defaultHubEventLimit,
+	if id == "" {
+		panic("hub: hub id cannot be empty")
+	}
+
+	h := &Hub{
+		id:                id,
+		actors:            make(map[string]sup.Actor),
+		signals:           make(map[string]registeredSignal),
+		graphNodes:        make(map[string]graphNode),
+		parents:           make(map[string]string),
+		clients:           make(map[chan []byte]struct{}),
+		eventHistoryLimit: defaultEventHistoryLimit,
 	}
 
 	for _, option := range options {
-		option(hub)
+		if option == nil {
+			panic("hub: option cannot be nil")
+		}
+		option(h)
 	}
 
-	return hub
-}
-
-// RegisterActor registers an actor with the hub.
-func (h *Hub) RegisterActor(actor sup.Actor) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-	h.actors[actor.ID()] = actor
-}
-
-func (h *Hub) registerSignal(signal hubSignal, stream func(context.Context) error) {
-	h.mu.Lock()
-	defer h.mu.Unlock()
-
-	if _, exists := h.signals[signal.ID]; exists {
-		panic("sup: duplicate signal id: " + signal.ID)
+	for id, actor := range h.actors {
+		h.graphNodes[id] = newGraphNode(actor)
 	}
 
-	h.signals[signal.ID] = signal
-	h.streams = append(h.streams, stream)
+	return h
+}
+
+// ID returns the hub id.
+func (h *Hub) ID() string {
+	return h.id
+}
+
+func (h *Hub) addSignal(signal registeredSignal) {
+	if signal.id == "" {
+		panic("hub: signal id cannot be empty")
+	}
+	if _, exists := h.signals[signal.id]; exists {
+		panic("hub: duplicate signal id: " + signal.id)
+	}
+	if _, exists := h.actors[signal.id]; exists {
+		panic("hub: duplicate source id: " + signal.id)
+	}
+
+	h.signals[signal.id] = signal
 }
 
 // Handler returns the HTTP handler for the hub API and debug UI.
@@ -140,12 +162,12 @@ func (h *Hub) Handler() http.Handler {
 
 	mux.HandleFunc("GET /actors", h.handleActors)
 	mux.HandleFunc("GET /actors/{actorID}", h.handleActor)
-	mux.HandleFunc("GET /actors/{actorID}/controls", h.handleControls)
-	mux.HandleFunc("POST /actors/{actorID}/controls/{controlName}", h.handleControl)
 
 	mux.HandleFunc("GET /signals", h.handleSignals)
 	mux.HandleFunc("GET /signals/{signalID}", h.handleSignal)
+	mux.HandleFunc("PATCH /signals/{signalID}", h.handleSetSignal)
 
+	mux.HandleFunc("GET /graph", h.handleGraph)
 	mux.HandleFunc("GET /events", h.handleEvents)
 	mux.HandleFunc("GET /events/stream", h.handleEventStream)
 
@@ -155,102 +177,75 @@ func (h *Hub) Handler() http.Handler {
 	return mux
 }
 
-// Observer returns a supervisor observer that records actor lifecycle events.
-func (h *Hub) Observer() *sup.SupervisorObserver {
-	return &sup.SupervisorObserver{
-		OnActorRegistered: func(supervisor *sup.Supervisor, actor sup.Actor) {
-			h.RegisterActor(actor)
-			h.publish(sup.NewEvent(sup.EventActorRegistered, actor.ID(), sup.ActorRegisteredPayload{
-				SupervisorID: supervisor.ID(),
-			}))
-		},
-		OnActorStarted: func(supervisor *sup.Supervisor, actor sup.Actor) {
-			h.publish(sup.NewEvent(sup.EventActorStarted, actor.ID(), sup.ActorStartedPayload{
-				SupervisorID: supervisor.ID(),
-			}))
-		},
-		OnActorStopped: func(supervisor *sup.Supervisor, actor sup.Actor, err error) {
-			h.publish(sup.NewEvent(sup.EventActorStopped, actor.ID(), sup.ActorStoppedPayload{
-				SupervisorID: supervisor.ID(),
-				Error:        hubErrorString(err),
-			}))
-		},
-		OnActorRestarting: func(supervisor *sup.Supervisor, actor sup.Actor, restartCount int, lastErr error) {
-			h.publish(sup.NewEvent(sup.EventActorRestarting, actor.ID(), sup.ActorRestartingPayload{
-				SupervisorID: supervisor.ID(),
-				RestartCount: restartCount,
-				LastError:    hubErrorString(lastErr),
-			}))
-		},
-		OnSupervisorTerminal: func(supervisor *sup.Supervisor, err error) {
-			h.publish(sup.NewEvent(sup.EventSupervisorTerminal, supervisor.ID(), sup.SupervisorTerminalPayload{
-				Error: hubErrorString(err),
-			}))
-		},
+// HandleEvent projects a runtime event emitted by a supervisor tree. All
+// registration events contribute structural supervisor information, while
+// only explicitly exposed actors contribute public lifecycle events.
+func (h *Hub) HandleEvent(event sup.Event) {
+	if event.Actor == nil {
+		return
 	}
+
+	h.projectRuntimeEvent(event)
+
+	h.mu.RLock()
+	_, exposed := h.actors[event.Actor.ID()]
+	h.mu.RUnlock()
+	if !exposed {
+		return
+	}
+
+	h.publish(hubEventFromRuntime(event))
 }
 
 // Inspect returns the hub spec.
 func (h *Hub) Inspect() sup.Spec {
 	h.mu.RLock()
-	actorCount := len(h.actors)
-	signalCount := len(h.signals)
+	dependencies := slices.Sorted(maps.Keys(h.signals))
 	h.mu.RUnlock()
 
 	return sup.Spec{
 		Kind:         "hub",
-		Dependencies: []string{},
-		Metadata: map[string]string{
-			"actor_count":  strconv.Itoa(actorCount),
-			"signal_count": strconv.Itoa(signalCount),
-		},
+		Dependencies: dependencies,
+		Metadata:     map[string]any{},
 	}
 }
 
-// Run starts registered signal streams until they stop, fail, or the context is canceled.
+// Run observes registered signals and publishes their changes until ctx is
+// canceled. Signal values themselves are always read directly from the source.
 func (h *Hub) Run(ctx context.Context) error {
-	streams := h.streamsSnapshot()
-	if len(streams) == 0 {
-		<-ctx.Done()
-		return nil
+	if ctx == nil {
+		panic("hub: context cannot be nil")
+	}
+	if !h.running.CompareAndSwap(false, true) {
+		return ErrHubRunning
+	}
+	defer h.running.Store(false)
+
+	runCtx, cancel := context.WithCancel(ctx)
+	var streams sync.WaitGroup
+	defer func() {
+		cancel()
+		streams.Wait()
+	}()
+
+	h.mu.RLock()
+	registered := slices.Collect(maps.Values(h.signals))
+	h.mu.RUnlock()
+
+	for _, signal := range registered {
+		streams.Go(func() {
+			signal.observe(runCtx, func(value any) {
+				h.publish(newHubEvent(
+					EventSignalUpdated,
+					signal.id,
+					signalUpdatedPayload{Value: value},
+					time.Time{},
+				))
+			})
+		})
 	}
 
-	streamCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	errCh := make(chan error, len(streams))
-	for _, stream := range streams {
-		go func(stream func(context.Context) error) {
-			errCh <- stream(streamCtx)
-		}(stream)
-	}
-
-	remaining := len(streams)
-	waitForStreams := func() {
-		for remaining > 0 {
-			<-errCh
-			remaining--
-		}
-	}
-
-	for remaining > 0 {
-		select {
-		case <-ctx.Done():
-			cancel()
-			waitForStreams()
-			return nil
-
-		case err := <-errCh:
-			remaining--
-			if err != nil {
-				cancel()
-				waitForStreams()
-				return err
-			}
-		}
-	}
-
-	<-ctx.Done()
+	<-runCtx.Done()
 	return nil
 }
 
@@ -262,43 +257,29 @@ func (h *Hub) actor(id string) (sup.Actor, bool) {
 	return actor, ok
 }
 
-func (h *Hub) streamsSnapshot() []func(context.Context) error {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	streams := make([]func(context.Context) error, len(h.streams))
-	copy(streams, h.streams)
-	return streams
-}
-
 func (h *Hub) actorsSnapshot() []sup.Actor {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	actors := make([]sup.Actor, 0, len(h.actors))
-	for _, actor := range h.actors {
-		actors = append(actors, actor)
-	}
-
-	sort.Slice(actors, func(i, j int) bool {
-		return actors[i].ID() < actors[j].ID()
+	return slices.SortedFunc(maps.Values(h.actors), func(a, b sup.Actor) int {
+		return cmp.Compare(a.ID(), b.ID())
 	})
-
-	return actors
 }
 
-func (h *Hub) eventsSnapshot() map[string][]sup.Event {
+func (h *Hub) eventsSnapshot() []hubEvent {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 
-	events := make(map[string][]sup.Event)
-	maps.Copy(events, h.events)
-
-	return events
+	return slices.Clone(h.events)
 }
 
-func (h *Hub) publish(event sup.Event) {
-	msg, err := formatHubEventSSE(event)
+func (h *Hub) publish(event hubEvent) {
+	snapshot, err := snapshotHubEvent(event)
+	if err != nil {
+		return
+	}
+
+	msg, err := formatHubEventSSE(snapshot)
 	if err != nil {
 		return
 	}
@@ -306,45 +287,24 @@ func (h *Hub) publish(event sup.Event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	key := event.SourceID
-	h.events[key] = append(h.events[key], event)
-	if h.eventLimit > 0 && len(h.events[key]) > h.eventLimit {
-		h.events[key] = h.events[key][len(h.events[key])-h.eventLimit:]
+	if h.eventHistoryLimit > 0 {
+		h.events = append(h.events, snapshot)
+		if len(h.events) > h.eventHistoryLimit {
+			h.events = slices.Clone(h.events[len(h.events)-h.eventHistoryLimit:])
+		}
 	}
 
-	for ch := range h.clients {
+	for client := range h.clients {
 		select {
-		case ch <- msg:
+		case client <- msg:
 		default:
 		}
 	}
 }
 
-func writeJSON(w http.ResponseWriter, v any) {
+func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(v); err != nil {
+	if err := json.NewEncoder(w).Encode(value); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
-}
-
-func formatHubEventSSE(event sup.Event) ([]byte, error) {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return nil, err
-	}
-
-	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "id: %s\n", event.ID)
-	fmt.Fprintf(&buf, "event: %s\n", event.Type)
-	buf.WriteString("data: ")
-	buf.Write(data)
-	buf.WriteString("\n\n")
-	return buf.Bytes(), nil
-}
-
-func hubErrorString(err error) string {
-	if err == nil {
-		return ""
-	}
-	return err.Error()
 }

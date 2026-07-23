@@ -304,7 +304,7 @@ func TestWSActorReconnectsUnderSupervisor(t *testing.T) {
 	<-done
 }
 
-func TestWSActorReturnsContextErrorOnCancel(t *testing.T) {
+func TestWSActorReturnsNilOnCancel(t *testing.T) {
 	accepted := make(chan struct{}, 1)
 
 	server := newTestServer(t, func(ctx context.Context, conn *websocket.Conn) {
@@ -320,22 +320,18 @@ func TestWSActorReturnsContextErrorOnCancel(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	supervisor := sup.NewSupervisor("root").
-		Actor(actor).
-		Policy(sup.Temporary)
-
-	supervisorDone := make(chan error, 1)
+	actorDone := make(chan error, 1)
 	go func() {
-		supervisorDone <- supervisor.Run(ctx)
+		actorDone <- actor.Run(ctx)
 	}()
 
 	wait(t, accepted, 2*time.Second, "server accept")
 	cancel()
 
 	select {
-	case err := <-supervisorDone:
-		if err != context.Canceled {
-			t.Fatalf("expected context.Canceled, got %v", err)
+	case err := <-actorDone:
+		if err != nil {
+			t.Fatalf("expected clean shutdown, got %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timeout waiting for supervisor completion")

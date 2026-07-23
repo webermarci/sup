@@ -32,13 +32,14 @@ func TestActor_Supervision(t *testing.T) {
 	// Use a script that exits immediately to trigger restarts
 	actor := exec.NewActor("restart-test", "go", []string{"version"})
 
-	supervisor := sup.NewSupervisor("sup").
-		Policy(sup.Permanent).
-		RestartDelay(10 * time.Millisecond).
-		Actor(sup.ActorFunc("wrapped", func(ctx context.Context) error {
+	supervisor := sup.NewSupervisor("sup",
+		sup.WithPolicy(sup.Permanent),
+		sup.WithRestartDelay(10*time.Millisecond),
+		sup.WithActors(sup.ActorFunc("wrapped", func(ctx context.Context) error {
 			runs.Add(1)
 			return actor.Run(ctx)
-		}))
+		})),
+	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
