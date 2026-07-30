@@ -36,7 +36,7 @@
 		"vite": "8.1.5"
 	},
 	"dependencies": {
-		"@lucide/svelte": "1.27.0",
+		"@lucide/svelte": "1.28.0",
 		"basecoat-css": "1.0.2"
 	}
 }
