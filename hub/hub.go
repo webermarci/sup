@@ -3,7 +3,6 @@ package hub
 import (
 	"cmp"
 	"context"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"maps"
@@ -16,9 +15,6 @@ import (
 	"github.com/webermarci/sup"
 	"github.com/webermarci/sup/rx"
 )
-
-//go:embed debug/build/index.html
-var debugIndex []byte
 
 const defaultEventHistoryLimit = 128
 
@@ -156,7 +152,7 @@ func (h *Hub) addSignal(signal registeredSignal) {
 	h.signals[signal.id] = signal
 }
 
-// Handler returns the HTTP handler for the hub API and debug UI.
+// Handler returns the HTTP handler for the hub API.
 func (h *Hub) Handler() http.Handler {
 	mux := http.NewServeMux()
 
@@ -170,9 +166,6 @@ func (h *Hub) Handler() http.Handler {
 	mux.HandleFunc("GET /graph", h.handleGraph)
 	mux.HandleFunc("GET /events", h.handleEvents)
 	mux.HandleFunc("GET /events/stream", h.handleEventStream)
-
-	mux.HandleFunc("GET /debug", h.serveDebug)
-	mux.HandleFunc("GET /debug/{$}", h.serveDebug)
 
 	return mux
 }

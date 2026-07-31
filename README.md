@@ -415,8 +415,7 @@ acyclic.
 The `github.com/webermarci/sup/hub` package exposes explicitly registered
 actors and signals over HTTP. It reads signal values directly from their
 sources, streams changes and lifecycle events, and builds a pruned supervision
-graph from runtime registration events. It also serves the embedded debug UI
-at `/debug`.
+graph from runtime registration events.
 
 ```go
 enabled := rx.NewSignal("counter_enabled", true)
@@ -464,13 +463,12 @@ Endpoints include:
 - `GET /graph`
 - `GET /events`
 - `GET /events/stream`
-- `GET /debug`
 
 ## Packages
 
 - `sup` — Core actors, supervisors, typed inboxes, and runtime events.
 - `rx` — Reactive signals, derived state, and channel helpers.
-- `sup/hub` — HTTP API and debug UI for actors, signals, supervision, and events.
+- `sup/hub` — HTTP API for actors, signals, supervision, and events.
 - `sup/exec` — Actor wrapper around `os/exec` commands.
 - `sup/mesh` — NATS-backed actor for subscriptions.
 - `sup/modbus` — Modbus actor for TCP/RTU/ASCII clients.

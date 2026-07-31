@@ -131,11 +131,3 @@ func (h *Hub) handleEventStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 }
-
-func (h *Hub) serveDebug(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	if _, err := w.Write(debugIndex); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}

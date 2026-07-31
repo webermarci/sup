@@ -14,6 +14,16 @@ import (
 	"github.com/webermarci/sup/rx"
 )
 
+func TestHubDoesNotServeDebugFrontend(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/debug", nil)
+	rec := httptest.NewRecorder()
+	New("hub").Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHubExposesOnlyRegisteredActors(t *testing.T) {
 	exposed := sup.ActorFunc("exposed", func(context.Context) error { return nil })
 	internal := sup.ActorFunc("internal", func(context.Context) error { return nil })
