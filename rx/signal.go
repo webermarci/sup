@@ -40,8 +40,7 @@ type Writable[V any] interface {
 // value. Subscribers are independent and coalesce pending publications to the
 // latest value, so a slow subscriber never blocks Set.
 type Signal[V any] struct {
-	id string
-
+	id                string
 	value             V
 	valueSubscribers  map[chan V]struct{}
 	changeSubscribers map[chan struct{}]struct{}
@@ -85,6 +84,7 @@ func (s *Signal[V]) Set(value V) {
 	for subscriber := range s.valueSubscribers {
 		sendLatest(subscriber, value)
 	}
+
 	for subscriber := range s.changeSubscribers {
 		select {
 		case subscriber <- struct{}{}:
@@ -105,16 +105,19 @@ func (s *Signal[V]) Subscribe(ctx context.Context) <-chan V {
 	subscriber := make(chan V, 1)
 
 	s.mu.Lock()
+
 	if ctx.Err() != nil {
 		close(subscriber)
 		s.mu.Unlock()
 		return subscriber
 	}
+
 	subscriber <- s.value
 	if s.valueSubscribers == nil {
 		s.valueSubscribers = make(map[chan V]struct{})
 	}
 	s.valueSubscribers[subscriber] = struct{}{}
+
 	s.mu.Unlock()
 
 	context.AfterFunc(ctx, func() {
@@ -141,16 +144,19 @@ func (s *Signal[V]) Watch(ctx context.Context) <-chan struct{} {
 	subscriber := make(chan struct{}, 1)
 
 	s.mu.Lock()
+
 	if ctx.Err() != nil {
 		close(subscriber)
 		s.mu.Unlock()
 		return subscriber
 	}
+
 	subscriber <- struct{}{}
 	if s.changeSubscribers == nil {
 		s.changeSubscribers = make(map[chan struct{}]struct{})
 	}
 	s.changeSubscribers[subscriber] = struct{}{}
+
 	s.mu.Unlock()
 
 	context.AfterFunc(ctx, func() {

@@ -8,9 +8,19 @@ import (
 	"github.com/webermarci/sup"
 )
 
+type actorState string
+
+const (
+	actorStateRegistered actorState = "registered"
+	actorStateRunning    actorState = "running"
+	actorStateRestarting actorState = "restarting"
+	actorStateStopped    actorState = "stopped"
+)
+
 type graphNode struct {
-	ID   string   `json:"id"`
-	Spec sup.Spec `json:"spec"`
+	ID    string     `json:"id"`
+	Spec  sup.Spec   `json:"spec"`
+	State actorState `json:"state"`
 }
 
 type graphEdge struct {
@@ -25,20 +35,32 @@ type supervisionGraph struct {
 
 func newGraphNode(actor sup.Actor) graphNode {
 	return graphNode{
-		ID:   actor.ID(),
-		Spec: inspectActor(actor),
+		ID:    actor.ID(),
+		Spec:  inspectActor(actor),
+		State: actorStateRegistered,
 	}
 }
 
 func (h *Hub) projectRuntimeEvent(event sup.Event) {
-	if event.Type != sup.EventActorRegistered {
+	actorNode := newGraphNode(event.Actor)
+
+	switch event.Type {
+	case sup.EventActorRegistered:
+		actorNode.State = actorStateRegistered
+	case sup.EventActorStarted:
+		actorNode.State = actorStateRunning
+	case sup.EventActorRestarting:
+		actorNode.State = actorStateRestarting
+	case sup.EventActorStopped:
+		actorNode.State = actorStateStopped
+	default:
 		return
 	}
 
-	actorNode := newGraphNode(event.Actor)
 	var supervisorNode graphNode
 	if event.Supervisor != nil {
 		supervisorNode = newGraphNode(event.Supervisor)
+		supervisorNode.State = actorStateRunning
 	}
 
 	h.mu.Lock()
@@ -54,10 +76,11 @@ func (h *Hub) projectRuntimeEvent(event sup.Event) {
 }
 
 func (h *Hub) graphSnapshot() supervisionGraph {
+	exposed := slices.Collect(maps.Keys(h.actors))
+
 	h.mu.RLock()
 	nodes := maps.Clone(h.graphNodes)
 	parents := maps.Clone(h.parents)
-	exposed := slices.Collect(maps.Keys(h.actors))
 	h.mu.RUnlock()
 
 	visible := make(map[string]struct{}, len(exposed))
@@ -96,6 +119,7 @@ func (h *Hub) graphSnapshot() supervisionGraph {
 	slices.SortFunc(graph.Nodes, func(a, b graphNode) int {
 		return cmp.Compare(a.ID, b.ID)
 	})
+
 	slices.SortFunc(graph.Edges, func(a, b graphEdge) int {
 		if order := cmp.Compare(a.SupervisorID, b.SupervisorID); order != 0 {
 			return order

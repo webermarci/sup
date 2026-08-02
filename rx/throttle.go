@@ -11,11 +11,13 @@ func ThrottleFirst[V any](
 	if input == nil {
 		panic("rx: throttle input cannot be nil")
 	}
+
 	if interval <= 0 {
 		panic("rx: throttle interval must be positive")
 	}
 
 	output := make(chan V, 1)
+
 	go func() {
 		defer close(output)
 
@@ -50,6 +52,7 @@ func ThrottleFirst[V any](
 			}
 		}
 	}()
+
 	return output
 }
 
@@ -65,11 +68,13 @@ func ThrottleLatest[V any](
 	if input == nil {
 		panic("rx: throttle input cannot be nil")
 	}
+
 	if interval <= 0 {
 		panic("rx: throttle interval must be positive")
 	}
 
 	output := make(chan V, 1)
+
 	go func() {
 		defer close(output)
 
@@ -107,5 +112,6 @@ func ThrottleLatest[V any](
 			}
 		}
 	}()
+
 	return output
 }

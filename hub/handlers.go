@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -20,7 +21,7 @@ func (h *Hub) handleActors(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *Hub) handleActor(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.actor(r.PathValue("actorID"))
+	actor, ok := h.actors[r.PathValue("actorID")]
 	if !ok {
 		http.Error(w, "actor not found", http.StatusNotFound)
 		return
@@ -34,7 +35,7 @@ func (h *Hub) handleSignals(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *Hub) handleSignal(w http.ResponseWriter, r *http.Request) {
-	signal, ok := h.signal(r.PathValue("signalID"))
+	signal, ok := h.signals[r.PathValue("signalID")]
 	if !ok {
 		http.Error(w, "signal not found", http.StatusNotFound)
 		return
@@ -44,7 +45,7 @@ func (h *Hub) handleSignal(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Hub) handleSetSignal(w http.ResponseWriter, r *http.Request) {
-	signal, ok := h.signal(r.PathValue("signalID"))
+	signal, ok := h.signals[r.PathValue("signalID")]
 	if !ok {
 		http.Error(w, "signal not found", http.StatusNotFound)
 		return
@@ -53,19 +54,23 @@ func (h *Hub) handleSetSignal(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Value json.RawMessage `json:"value"`
 	}
+
 	raw, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	if err := json.Unmarshal(raw, &request); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+
 	if len(request.Value) == 0 {
 		http.Error(w, "value is required", http.StatusBadRequest)
 		return
 	}
+
 	if err := signal.set(request.Value); err != nil {
 		if errors.Is(err, errSignalReadOnly) {
 			w.Header().Set("Allow", http.MethodGet)
@@ -84,6 +89,7 @@ func (h *Hub) handleGraph(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *Hub) handleEvents(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Event-History-Limit", strconv.Itoa(h.eventHistoryLimit))
 	writeJSON(w, h.eventsSnapshot())
 }
 
@@ -103,6 +109,7 @@ func (h *Hub) handleEventStream(w http.ResponseWriter, r *http.Request) {
 	h.mu.Lock()
 	h.clients[events] = struct{}{}
 	h.mu.Unlock()
+	flusher.Flush()
 
 	defer func() {
 		h.mu.Lock()

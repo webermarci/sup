@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"math/rand/v2"
 	"net/http"
 	"os"
 	"os/signal"
@@ -15,78 +15,111 @@ import (
 	"github.com/webermarci/sup/rx"
 )
 
-type GetMessage struct{}
+type Tick struct{}
 
-type IncrementMessage struct {
-	Amount int `json:"amount"`
+// TrafficLight is a small state-machine actor. A separate clock sends ticks
+// through its typed inbox, and the actor publishes each state as a signal.
+type TrafficLight struct {
+	ticks *sup.CastInbox[Tick]
+
+	light              *rx.Signal[string]
+	secondsRemaining   *rx.Signal[int]
+	cyclesCompleted    *rx.Signal[int]
+	cycleLengthSeconds *rx.Signal[int]
+	paused             *rx.Signal[bool]
 }
 
-type Counter struct {
-	id             string
-	GetInbox       *sup.CallInbox[GetMessage, int]
-	IncrementInbox *sup.CastInbox[IncrementMessage]
-	State          int
-	StateSignal    *rx.Signal[int]
-	EnabledSignal  *rx.Signal[bool]
-}
-
-func NewCounter(id string) *Counter {
-	return &Counter{
-		id:             id,
-		GetInbox:       sup.NewCallInbox[GetMessage, int](8),
-		IncrementInbox: sup.NewCastInbox[IncrementMessage](8),
-		StateSignal:    rx.NewSignal(fmt.Sprintf("%s_signal", id), 0),
-		EnabledSignal:  rx.NewSignal(fmt.Sprintf("%s_enabled", id), true),
+func NewTrafficLight(
+	cycleLengthSeconds *rx.Signal[int],
+	paused *rx.Signal[bool],
+) *TrafficLight {
+	return &TrafficLight{
+		ticks:              sup.NewCastInbox[Tick](1),
+		light:              rx.NewSignal("traffic_light", "green"),
+		secondsRemaining:   rx.NewSignal("seconds_remaining", cycleLengthSeconds.Value()),
+		cyclesCompleted:    rx.NewSignal("cycles_completed", 0),
+		cycleLengthSeconds: cycleLengthSeconds,
+		paused:             paused,
 	}
 }
 
-func (c *Counter) ID() string {
-	return c.id
+func (l *TrafficLight) ID() string {
+	return "traffic_light_controller"
 }
 
-func (c *Counter) Get() int {
-	state, _ := c.GetInbox.Call(context.Background(), GetMessage{})
-	return state
+func (l *TrafficLight) Inspect() sup.Spec {
+	return sup.Spec{
+		Kind:         "state machine",
+		Dependencies: []string{l.cycleLengthSeconds.ID(), l.paused.ID()},
+		Metadata:     map[string]any{"phases": []string{"green", "yellow", "red"}},
+	}
 }
 
-func (c *Counter) Increment(amount int) {
-	c.IncrementInbox.Cast(context.Background(), IncrementMessage{Amount: amount})
+func (l *TrafficLight) Tick(ctx context.Context) error {
+	return l.ticks.Cast(ctx, Tick{})
 }
 
-func (c *Counter) Run(ctx context.Context) error {
-	enabledValues := c.EnabledSignal.Subscribe(ctx)
-	enabled := c.EnabledSignal.Value()
+func (l *TrafficLight) Run(ctx context.Context) error {
+	cycleLengths := l.cycleLengthSeconds.Subscribe(ctx)
+	pauses := l.paused.Subscribe(ctx)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
 
-		case value, ok := <-enabledValues:
+		case paused, ok := <-pauses:
 			if !ok {
 				return nil
 			}
-			enabled = value
+			if paused {
+				l.light.Set("yellow")
+				l.secondsRemaining.Set(0)
+			} else {
+				l.light.Set("green")
+				l.secondsRemaining.Set(l.cycleLengthSeconds.Value())
+			}
 
-		case message := <-c.GetInbox.Receive():
-			message.Reply(c.State, nil)
-
-		case message := <-c.IncrementInbox.Receive():
-			if !enabled {
+		case seconds, ok := <-cycleLengths:
+			if !ok {
+				return nil
+			}
+			if seconds < 2 {
+				l.cycleLengthSeconds.Set(2)
 				continue
 			}
-			c.State += message.Amount
-			c.StateSignal.Set(c.State)
+			if seconds > 30 {
+				l.cycleLengthSeconds.Set(30)
+				continue
+			}
+			if l.light.Value() != "yellow" {
+				l.secondsRemaining.Set(seconds)
+			}
+
+		case <-l.ticks.Receive():
+			if l.paused.Value() {
+				continue
+			}
+			remaining := l.secondsRemaining.Value() - 1
+			if remaining > 0 {
+				l.secondsRemaining.Set(remaining)
+				continue
+			}
+
+			switch l.light.Value() {
+			case "green":
+				l.light.Set("yellow")
+				l.secondsRemaining.Set(2)
+			case "yellow":
+				l.light.Set("red")
+				l.secondsRemaining.Set(l.cycleLengthSeconds.Value())
+			case "red":
+				l.light.Set("green")
+				l.secondsRemaining.Set(l.cycleLengthSeconds.Value())
+				l.cyclesCompleted.Set(l.cyclesCompleted.Value() + 1)
+			}
 		}
 	}
-}
-
-type CombinedMessage struct {
-	Counter         int
-	Random          int
-	RandomEven      bool
-	RandomCharacter string
-	Quotient        float64
 }
 
 func main() {
@@ -97,94 +130,83 @@ func main() {
 	)
 	defer cancel()
 
-	counter := NewCounter("counter")
+	cycleLengthSeconds := rx.NewSignal("cycle_length_seconds", 5)
+	paused := rx.NewSignal("paused", false)
+	light := NewTrafficLight(cycleLengthSeconds, paused)
 
-	rawRandom := rx.NewSignal("raw_random", 0)
-	random := rx.NewSignal("random", 0)
-
-	randomPoller := sup.ActorFunc("random_poller", func(ctx context.Context) error {
-		ticker := time.NewTicker(200 * time.Millisecond)
+	clock := sup.ActorFunc("clock", func(ctx context.Context) error {
+		ticker := time.NewTicker(time.Second)
 		defer ticker.Stop()
 
 		for {
 			select {
-			case <-ticker.C:
-				rawRandom.Set(rand.IntN(100) + 1)
 			case <-ctx.Done():
 				return nil
+			case <-ticker.C:
+				if paused.Value() {
+					continue
+				}
+				if err := light.Tick(ctx); err != nil {
+					return err
+				}
 			}
 		}
-	})
+	}, sup.WithSpec(sup.Spec{
+		Kind:         "ticker",
+		Dependencies: []string{paused.ID(), light.ID()},
+		Metadata:     map[string]any{"interval": "1s"},
+	}))
 
-	randomThrottler := sup.ActorFunc("random_throttler", func(ctx context.Context) error {
-		for value := range rx.ThrottleLatest(rawRandom.Subscribe(ctx), time.Second) {
-			random.Set(value)
+	pedestrianSignal := rx.NewDerived("pedestrian_signal", func() string {
+		if paused.Value() {
+			return "off"
 		}
-		return nil
-	})
-
-	isRandomEven := rx.NewDerived("is_random_even", func() bool {
-		return random.Value()%2 == 0
-	}, random)
-
-	randomCharacter := rx.NewDerived("random_character", func() string {
-		return string(rune(random.Value()%26 + 'a'))
-	}, random)
-
-	quotient := rx.NewDerived("quotient", func() float64 {
-		divisor := random.Value()
-		if divisor == 0 {
-			return 0
+		if light.light.Value() == "red" {
+			return "walk"
 		}
-		return float64(counter.StateSignal.Value()) / float64(divisor)
-	}, counter.StateSignal, random)
+		return "wait"
+	}, paused, light.light)
 
-	combined := rx.NewDerived("combined", func() CombinedMessage {
-		return CombinedMessage{
-			Counter:         counter.StateSignal.Value(),
-			Random:          random.Value(),
-			RandomEven:      isRandomEven.Value(),
-			RandomCharacter: randomCharacter.Value(),
-			Quotient:        quotient.Value(),
-		}
-	}, counter.StateSignal, random, isRandomEven, randomCharacter, quotient)
+	intersection := sup.NewSupervisor("intersection",
+		sup.WithRestartDelay(750*time.Millisecond),
+		sup.WithRestartLimit(5, time.Minute),
+		sup.WithActors(clock, light),
+	)
 
 	dashboard := hub.New("dashboard",
-		hub.WithActor(counter),
-		hub.WithSignal(counter.StateSignal),
-		hub.WithWritableSignal(counter.EnabledSignal),
-		hub.WithSignal(random),
-		hub.WithSignal(isRandomEven),
-		hub.WithSignal(randomCharacter),
-		hub.WithSignal(quotient),
-		hub.WithSignal(combined),
+		hub.WithActor(clock),
+		hub.WithActor(light),
+		hub.WithWritableSignal(cycleLengthSeconds),
+		hub.WithWritableSignal(paused),
+		hub.WithSignal(light.light),
+		hub.WithSignal(light.secondsRemaining),
+		hub.WithSignal(light.cyclesCompleted),
+		hub.WithSignal(pedestrianSignal),
 	)
 
 	root := sup.NewSupervisor("root",
 		sup.WithEventSink(dashboard),
-		sup.WithActors(
-			counter,
-			randomPoller,
-			randomThrottler,
-			isRandomEven,
-			randomCharacter,
-			quotient,
-			combined,
-			dashboard,
-		),
+		sup.WithActors(intersection, pedestrianSignal, dashboard),
 	)
 
-	go root.Run(ctx)
-	go http.ListenAndServe(":8080", dashboard.Handler())
-
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			counter.Increment(1)
+	go func() {
+		if err := root.Run(ctx); err != nil {
+			fmt.Fprintln(os.Stderr, "supervision stopped:", err)
+			cancel()
 		}
-	}
+	}()
+
+	server := &http.Server{Addr: ":8080", Handler: dashboard.Handler()}
+	go func() {
+		fmt.Println("traffic dashboard: http://localhost:8080")
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fmt.Fprintln(os.Stderr, "dashboard stopped:", err)
+			cancel()
+		}
+	}()
+
+	<-ctx.Done()
+	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelShutdown()
+	_ = server.Shutdown(shutdownCtx)
 }

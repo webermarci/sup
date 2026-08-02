@@ -6,7 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -14,13 +16,70 @@ import (
 	"github.com/webermarci/sup/rx"
 )
 
-func TestHubDoesNotServeDebugFrontend(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/debug", nil)
-	rec := httptest.NewRecorder()
-	New("hub").Handler().ServeHTTP(rec, req)
+func TestHubServesDebugPageAtMountedPath(t *testing.T) {
+	actor := sup.ActorFunc("worker", func(context.Context) error { return nil })
+	status := rx.NewSignal("status", "online")
+	h := New("debug", WithActor(actor), WithSignal(status))
 
-	if rec.Code != http.StatusNotFound {
-		t.Fatalf("expected status 404, got %d: %s", rec.Code, rec.Body.String())
+	mux := http.NewServeMux()
+	mux.Handle("/nested/", http.StripPrefix("/nested", h.Handler()))
+
+	req := httptest.NewRequest(http.MethodGet, "/nested", nil)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusTemporaryRedirect || rec.Header().Get("Location") != "/nested/" {
+		t.Fatalf("unexpected mount redirect: status %d, location %q", rec.Code, rec.Header().Get("Location"))
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/nested/", nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if contentType := rec.Header().Get("Content-Type"); contentType != "text/html; charset=utf-8" {
+		t.Fatalf("unexpected content type: %q", contentType)
+	}
+	for _, content := range []string{
+		"<h1>sup debug</h1>",
+		"data-graph",
+		"data-actors",
+		"data-signals",
+		"data-events",
+		"<script>",
+	} {
+		if !strings.Contains(rec.Body.String(), content) {
+			t.Errorf("page does not contain %q", content)
+		}
+	}
+	if strings.Contains(rec.Body.String(), "<nav") || strings.Contains(rec.Body.String(), "<a ") {
+		t.Error("page contains navigation links")
+	}
+	if strings.Contains(rec.Body.String(), "Hub:") {
+		t.Error("page contains the hub id label")
+	}
+	if strings.Contains(rec.Body.String(), "worker") || strings.Contains(rec.Body.String(), "online") {
+		t.Error("page contains server-rendered hub data")
+	}
+	graphIndex := strings.Index(rec.Body.String(), "<h2>Supervision graph</h2>")
+	actorsIndex := strings.Index(rec.Body.String(), "<h2>Actors")
+	signalsIndex := strings.Index(rec.Body.String(), "<h2>Signals")
+	eventsIndex := strings.Index(rec.Body.String(), "<h2>Recent events")
+	if graphIndex < 0 || actorsIndex < 0 || signalsIndex < 0 || eventsIndex < 0 ||
+		!(graphIndex < actorsIndex && actorsIndex < signalsIndex && signalsIndex < eventsIndex) {
+		t.Error("page sections are not in graph, actors, signals, events order")
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/nested/actors", nil)
+	rec = httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected mounted API status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), `"id":"worker"`) {
+		t.Fatalf("mounted actors API does not contain worker: %s", rec.Body.String())
 	}
 }
 
@@ -84,7 +143,7 @@ func TestHubBuildsPrunedSupervisionGraphFromEvents(t *testing.T) {
 	}
 
 	graph := h.graphSnapshot()
-	if got, want := graphNodeIDs(graph), []string{"branch.exposed", "root", "worker.exposed"}; !equalStrings(got, want) {
+	if got, want := graphNodeIDs(graph), []string{"branch.exposed", "root", "worker.exposed"}; !slices.Equal(got, want) {
 		t.Fatalf("expected graph nodes %v, got %v", want, got)
 	}
 
@@ -98,6 +157,42 @@ func TestHubBuildsPrunedSupervisionGraphFromEvents(t *testing.T) {
 	for i := range wantEdges {
 		if graph.Edges[i] != wantEdges[i] {
 			t.Fatalf("expected graph edges %#v, got %#v", wantEdges, graph.Edges)
+		}
+	}
+}
+
+func TestHubProjectsActorLifecycleState(t *testing.T) {
+	worker := sup.ActorFunc("worker", func(context.Context) error { return nil })
+	root := sup.NewSupervisor("root")
+	h := New("hub", WithActor(worker))
+
+	tests := []struct {
+		eventType sup.EventType
+		wantState actorState
+	}{
+		{sup.EventActorRegistered, actorStateRegistered},
+		{sup.EventActorStarted, actorStateRunning},
+		{sup.EventActorRestarting, actorStateRestarting},
+		{sup.EventActorStopped, actorStateStopped},
+	}
+
+	for _, test := range tests {
+		h.HandleEvent(sup.Event{
+			Type:       test.eventType,
+			Actor:      worker,
+			Supervisor: root,
+		})
+
+		graph := h.graphSnapshot()
+		var got actorState
+		for _, node := range graph.Nodes {
+			if node.ID == worker.ID() {
+				got = node.State
+				break
+			}
+		}
+		if got != test.wantState {
+			t.Fatalf("after %s: expected state %q, got %q", test.eventType, test.wantState, got)
 		}
 	}
 }
@@ -151,6 +246,9 @@ func TestHubHandleGraph(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if cacheControl := rec.Header().Get("Cache-Control"); cacheControl != "no-store" {
+		t.Fatalf("unexpected cache control: %q", cacheControl)
 	}
 	var graph supervisionGraph
 	if err := json.NewDecoder(rec.Body).Decode(&graph); err != nil {
@@ -209,6 +307,48 @@ func TestHubSetsExplicitlyWritableSignal(t *testing.T) {
 	}
 }
 
+func TestHubPatchWritableSignalPublishesUpdateEvent(t *testing.T) {
+	target := rx.NewSignal("target", 21)
+	observed := make(chan struct{})
+	signal := &observedSignal[int]{
+		Signal:   target,
+		observed: observed,
+	}
+	h := New("hub", WithWritableSignal[int](signal))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- h.Run(ctx) }()
+
+	select {
+	case <-observed:
+	case <-time.After(time.Second):
+		t.Fatal("hub did not subscribe to writable signal")
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/signals/target", strings.NewReader(`{"value":23}`))
+	rec := httptest.NewRecorder()
+	h.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	waitFor(t, func() bool { return len(h.eventsSnapshot()) == 1 })
+	events := h.eventsSnapshot()
+	if events[0].Type != EventSignalUpdated || events[0].SourceID != "target" {
+		t.Fatalf("unexpected signal event: %#v", events[0])
+	}
+	payload, ok := events[0].Payload.(map[string]any)
+	if !ok || payload["value"] != float64(23) {
+		t.Fatalf("unexpected signal event payload: %#v", events[0].Payload)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestHubRejectsWriteToReadOnlySignal(t *testing.T) {
 	status := rx.NewSignal("status", "offline")
 	h := New("hub", WithSignal(status))
@@ -220,8 +360,42 @@ func TestHubRejectsWriteToReadOnlySignal(t *testing.T) {
 	if rec.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected status 405, got %d: %s", rec.Code, rec.Body.String())
 	}
+	if allow := rec.Header().Get("Allow"); allow != http.MethodGet {
+		t.Fatalf("expected Allow %q, got %q", http.MethodGet, allow)
+	}
 	if status.Value() != "offline" {
 		t.Fatalf("read-only signal changed to %q", status.Value())
+	}
+}
+
+func TestHubHTTPErrorResponses(t *testing.T) {
+	h := New("hub", WithWritableSignal(rx.NewSignal("count", 1)))
+
+	tests := []struct {
+		name   string
+		method string
+		path   string
+		body   string
+		status int
+	}{
+		{name: "unknown actor", method: http.MethodGet, path: "/actors/missing", status: http.StatusNotFound},
+		{name: "unknown signal", method: http.MethodGet, path: "/signals/missing", status: http.StatusNotFound},
+		{name: "patch unknown signal", method: http.MethodPatch, path: "/signals/missing", body: `{"value":2}`, status: http.StatusNotFound},
+		{name: "malformed patch", method: http.MethodPatch, path: "/signals/count", body: `{"value":`, status: http.StatusBadRequest},
+		{name: "missing value", method: http.MethodPatch, path: "/signals/count", body: `{}`, status: http.StatusBadRequest},
+		{name: "incompatible value", method: http.MethodPatch, path: "/signals/count", body: `{"value":"two"}`, status: http.StatusBadRequest},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			req := httptest.NewRequest(test.method, test.path, strings.NewReader(test.body))
+			rec := httptest.NewRecorder()
+			h.Handler().ServeHTTP(rec, req)
+
+			if rec.Code != test.status {
+				t.Fatalf("expected status %d, got %d: %s", test.status, rec.Code, rec.Body.String())
+			}
+		})
 	}
 }
 
@@ -327,7 +501,7 @@ func TestHubZeroEventHistoryStillPublishesLive(t *testing.T) {
 }
 
 func TestHubHandleEventsReturnsChronologicalArray(t *testing.T) {
-	h := New("hub")
+	h := New("hub", WithEventHistoryLimit(7))
 	h.publish(newHubEvent(sup.EventActorStarted, "one", nil, time.Unix(1, 0)))
 	h.publish(newHubEvent(sup.EventActorStopped, "two", nil, time.Unix(2, 0)))
 
@@ -338,12 +512,60 @@ func TestHubHandleEventsReturnsChronologicalArray(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
 	}
+	if limit := rec.Header().Get("Event-History-Limit"); limit != "7" {
+		t.Fatalf("unexpected event history limit header: %q", limit)
+	}
 	var events []hubEvent
 	if err := json.NewDecoder(rec.Body).Decode(&events); err != nil {
 		t.Fatal(err)
 	}
 	if len(events) != 2 || events[0].SourceID != "one" || events[1].SourceID != "two" {
 		t.Fatalf("unexpected events: %#v", events)
+	}
+}
+
+func TestHubEventStreamPublishesAndRemovesClientOnCancel(t *testing.T) {
+	h := New("hub")
+	ctx, cancel := context.WithCancel(t.Context())
+	req := httptest.NewRequest(http.MethodGet, "/events/stream", nil).WithContext(ctx)
+	w := newStreamRecorder()
+	done := make(chan struct{})
+
+	go func() {
+		h.Handler().ServeHTTP(w, req)
+		close(done)
+	}()
+
+	select {
+	case <-w.flushed:
+	case <-time.After(time.Second):
+		t.Fatal("event stream did not flush its headers")
+	}
+
+	if contentType := w.Header().Get("Content-Type"); contentType != "text/event-stream" {
+		t.Fatalf("unexpected content type: %q", contentType)
+	}
+	if cacheControl := w.Header().Get("Cache-Control"); cacheControl != "no-cache" {
+		t.Fatalf("unexpected cache control: %q", cacheControl)
+	}
+
+	event := newHubEvent(sup.EventActorStarted, "worker", nil, time.Unix(1, 0))
+	h.publish(event)
+	w.waitForBody(t, "event: actor:started")
+	w.waitForBody(t, `"source_id":"worker"`)
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("event stream did not stop after cancellation")
+	}
+
+	h.mu.RLock()
+	clients := len(h.clients)
+	h.mu.RUnlock()
+	if clients != 0 {
+		t.Fatalf("expected event stream client to be removed, got %d clients", clients)
 	}
 }
 
@@ -418,7 +640,7 @@ func TestHubInspectListsSignalDependencies(t *testing.T) {
 	)
 
 	spec := h.Inspect()
-	if !equalStrings(spec.Dependencies, []string{"a", "z"}) {
+	if !slices.Equal(spec.Dependencies, []string{"a", "z"}) {
 		t.Fatalf("unexpected dependencies: %v", spec.Dependencies)
 	}
 }
@@ -436,6 +658,7 @@ func TestHubValidation(t *testing.T) {
 	requirePanic(t, func() {
 		New("hub", WithEventHistoryLimit(-1))
 	})
+	requirePanic(t, func() { New("hub").Run(nil) })
 }
 
 func graphNodeIDs(graph supervisionGraph) []string {
@@ -444,18 +667,6 @@ func graphNodeIDs(graph supervisionGraph) []string {
 		ids = append(ids, node.ID)
 	}
 	return ids
-}
-
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
 }
 
 func requirePanic(t *testing.T, fn func()) {
@@ -489,6 +700,46 @@ func waitFor(t *testing.T, condition func() bool) {
 type observedSignal[V any] struct {
 	*rx.Signal[V]
 	observed chan struct{}
+}
+
+type streamRecorder struct {
+	header    http.Header
+	body      strings.Builder
+	flushed   chan struct{}
+	flushOnce sync.Once
+	mu        sync.Mutex
+}
+
+func newStreamRecorder() *streamRecorder {
+	return &streamRecorder{
+		header:  make(http.Header),
+		flushed: make(chan struct{}),
+	}
+}
+
+func (r *streamRecorder) Header() http.Header {
+	return r.header
+}
+
+func (r *streamRecorder) WriteHeader(int) {}
+
+func (r *streamRecorder) Write(data []byte) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.body.Write(data)
+}
+
+func (r *streamRecorder) Flush() {
+	r.flushOnce.Do(func() { close(r.flushed) })
+}
+
+func (r *streamRecorder) waitForBody(t *testing.T, content string) {
+	t.Helper()
+	waitFor(t, func() bool {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		return strings.Contains(r.body.String(), content)
+	})
 }
 
 func (s *observedSignal[V]) Subscribe(ctx context.Context) <-chan V {

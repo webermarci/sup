@@ -90,12 +90,11 @@ func WithWritableSignal[V any](signal rx.Writable[V]) Option {
 type Hub struct {
 	id string
 
-	actors  map[string]sup.Actor
-	signals map[string]registeredSignal
-
-	graphNodes map[string]graphNode
-	parents    map[string]string
-
+	// actors and signals are immutable after New returns.
+	actors            map[string]sup.Actor
+	signals           map[string]registeredSignal
+	graphNodes        map[string]graphNode
+	parents           map[string]string
 	events            []hubEvent
 	eventHistoryLimit int
 	clients           map[chan []byte]struct{}
@@ -142,9 +141,11 @@ func (h *Hub) addSignal(signal registeredSignal) {
 	if signal.id == "" {
 		panic("hub: signal id cannot be empty")
 	}
+
 	if _, exists := h.signals[signal.id]; exists {
 		panic("hub: duplicate signal id: " + signal.id)
 	}
+
 	if _, exists := h.actors[signal.id]; exists {
 		panic("hub: duplicate source id: " + signal.id)
 	}
@@ -152,9 +153,10 @@ func (h *Hub) addSignal(signal registeredSignal) {
 	h.signals[signal.id] = signal
 }
 
-// Handler returns the HTTP handler for the hub API.
+// Handler returns the HTTP handler for the hub debug page and API.
 func (h *Hub) Handler() http.Handler {
 	mux := http.NewServeMux()
+	mux.HandleFunc("GET /{$}", serveDebugPage)
 
 	mux.HandleFunc("GET /actors", h.handleActors)
 	mux.HandleFunc("GET /actors/{actorID}", h.handleActor)
@@ -180,9 +182,7 @@ func (h *Hub) HandleEvent(event sup.Event) {
 
 	h.projectRuntimeEvent(event)
 
-	h.mu.RLock()
 	_, exposed := h.actors[event.Actor.ID()]
-	h.mu.RUnlock()
 	if !exposed {
 		return
 	}
@@ -192,9 +192,7 @@ func (h *Hub) HandleEvent(event sup.Event) {
 
 // Inspect returns the hub spec.
 func (h *Hub) Inspect() sup.Spec {
-	h.mu.RLock()
 	dependencies := slices.Sorted(maps.Keys(h.signals))
-	h.mu.RUnlock()
 
 	return sup.Spec{
 		Kind:         "hub",
@@ -209,25 +207,18 @@ func (h *Hub) Run(ctx context.Context) error {
 	if ctx == nil {
 		panic("hub: context cannot be nil")
 	}
+
 	if !h.running.CompareAndSwap(false, true) {
 		return ErrHubRunning
 	}
 	defer h.running.Store(false)
 
-	runCtx, cancel := context.WithCancel(ctx)
 	var streams sync.WaitGroup
-	defer func() {
-		cancel()
-		streams.Wait()
-	}()
+	defer streams.Wait()
 
-	h.mu.RLock()
-	registered := slices.Collect(maps.Values(h.signals))
-	h.mu.RUnlock()
-
-	for _, signal := range registered {
+	for _, signal := range h.signals {
 		streams.Go(func() {
-			signal.observe(runCtx, func(value any) {
+			signal.observe(ctx, func(value any) {
 				h.publish(newHubEvent(
 					EventSignalUpdated,
 					signal.id,
@@ -238,22 +229,11 @@ func (h *Hub) Run(ctx context.Context) error {
 		})
 	}
 
-	<-runCtx.Done()
+	<-ctx.Done()
 	return nil
 }
 
-func (h *Hub) actor(id string) (sup.Actor, bool) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	actor, ok := h.actors[id]
-	return actor, ok
-}
-
 func (h *Hub) actorsSnapshot() []sup.Actor {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
 	return slices.SortedFunc(maps.Values(h.actors), func(a, b sup.Actor) int {
 		return cmp.Compare(a.ID(), b.ID())
 	})
@@ -297,6 +277,7 @@ func (h *Hub) publish(event hubEvent) {
 
 func writeJSON(w http.ResponseWriter, value any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}

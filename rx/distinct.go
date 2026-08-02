@@ -17,11 +17,13 @@ func DistinctFunc[V any](
 	if input == nil {
 		panic("rx: distinct input cannot be nil")
 	}
+
 	if equal == nil {
 		panic("rx: distinct equality function cannot be nil")
 	}
 
 	output := make(chan V, 1)
+
 	go func() {
 		defer close(output)
 
@@ -35,5 +37,6 @@ func DistinctFunc[V any](
 			}
 		}
 	}()
+
 	return output
 }

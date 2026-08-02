@@ -415,7 +415,9 @@ acyclic.
 The `github.com/webermarci/sup/hub` package exposes explicitly registered
 actors and signals over HTTP. It reads signal values directly from their
 sources, streams changes and lifecycle events, and builds a pruned supervision
-graph from runtime registration events.
+graph from runtime registration events. Its HTML overview takes a fresh
+snapshot through the same HTTP API on each page load, then applies live signal
+and event updates from the SSE stream. It has no frontend dependencies.
 
 ```go
 enabled := rx.NewSignal("counter_enabled", true)
@@ -436,10 +438,15 @@ go root.Run(ctx)
 go http.ListenAndServe(":8080", dashboard.Handler())
 ```
 
+The overview is served at `/`. The handler is prefix-agnostic, so applications
+can also mount it below a path with `http.StripPrefix`.
+
 `WithSignal` is always read-only over HTTP. `WithWritableSignal` explicitly
 allows outside clients to change the signal with `PATCH`. Actors can subscribe
 to that signal using the ordinary `rx` API; the hub does not define a separate
-command or control model.
+command or control model. Writable signals can also be changed with the forms
+in the HTML overview, which call the same `PATCH` endpoint without reloading the
+page.
 
 ```http
 PATCH /signals/counter_enabled
@@ -455,6 +462,7 @@ live event streaming is unaffected by the history limit.
 
 Endpoints include:
 
+- `GET /`
 - `GET /actors`
 - `GET /actors/{actorID}`
 - `GET /signals`
@@ -463,6 +471,17 @@ Endpoints include:
 - `GET /graph`
 - `GET /events`
 - `GET /events/stream`
+
+Run the traffic-light example for a compact tour of the whole stack:
+
+```bash
+go run ./examples/dashboard
+```
+
+It combines a typed inbox, nested supervision, writable controls, derived
+state, and live SSE updates. Change `cycle_length_seconds` to speed up or slow
+down the intersection. Set `paused` to `true` to put the traffic light into a
+stationary yellow state and turn the pedestrian signal off.
 
 ## Packages
 

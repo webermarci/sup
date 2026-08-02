@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"maps"
 	"reflect"
 	"slices"
 
@@ -118,23 +119,8 @@ func (s registeredSignal) set(raw json.RawMessage) error {
 	return s.write(raw)
 }
 
-func (h *Hub) signal(id string) (registeredSignal, bool) {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-
-	signal, ok := h.signals[id]
-	return signal, ok
-}
-
 func (h *Hub) signalsSnapshot() []hubSignal {
-	h.mu.RLock()
-	signals := make([]registeredSignal, 0, len(h.signals))
-	for _, signal := range h.signals {
-		signals = append(signals, signal)
-	}
-	h.mu.RUnlock()
-
-	slices.SortFunc(signals, func(a, b registeredSignal) int {
+	signals := slices.SortedFunc(maps.Values(h.signals), func(a, b registeredSignal) int {
 		return cmp.Compare(a.id, b.id)
 	})
 

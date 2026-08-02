@@ -1,0 +1,675 @@
+<!doctype html>
+<html lang="en">
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<title>sup debug</title>
+	<style>
+		:root {
+			color-scheme: light;
+			--background: #fff;
+			--surface: #fff;
+			--text: #111;
+			--muted: #666;
+			--line: #d9d9d9;
+			--subtle: #f5f5f5;
+			--stripe: #fbfbfb;
+			--focus: #000;
+			--sans: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+			--mono: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, monospace;
+		}
+
+		* {
+			box-sizing: border-box;
+		}
+
+		body {
+			margin: 0;
+			padding: 1rem;
+			background: var(--background);
+			color: var(--text);
+			font-family: var(--sans);
+			font-size: 0.875rem;
+			line-height: 1.5;
+		}
+
+		header {
+			padding-bottom: 1rem;
+			border-bottom: 2px solid var(--text);
+		}
+
+		h1,
+		h2 {
+			line-height: 1.2;
+		}
+
+		h1 {
+			margin: 0;
+			font-family: var(--mono);
+			font-size: 1.5rem;
+		}
+
+		h2 {
+			margin: 0 0 0.75rem;
+			font-size: 1rem;
+		}
+
+		section {
+			margin-top: 2rem;
+		}
+
+		ul {
+			margin: 0.5rem 0;
+			padding-left: 1.5rem;
+		}
+
+		table {
+			width: 100%;
+			border-collapse: collapse;
+			background: var(--surface);
+			border: 1px solid var(--line);
+		}
+
+		th,
+		td {
+			padding: 0.6rem 0.75rem;
+			border-bottom: 1px solid var(--line);
+			text-align: left;
+			vertical-align: middle;
+		}
+
+		th:not(:last-child),
+		td:not(:last-child) {
+			border-right: 1px solid var(--line);
+		}
+
+		th {
+			background: var(--subtle);
+			color: var(--muted);
+			font-size: 0.75rem;
+			text-transform: uppercase;
+			letter-spacing: 0.05em;
+		}
+
+		tbody tr:last-child td {
+			border-bottom: 0;
+		}
+
+		tbody tr:nth-child(even) {
+			background: var(--stripe);
+		}
+
+		table[data-fill-last] :is(th, td):not(:last-child) {
+			width: 1%;
+			white-space: nowrap;
+		}
+
+		table[data-fill-last] :is(th, td):last-child {
+			width: 100%;
+		}
+
+		table[data-fill-last-two] :is(th, td):nth-child(-n + 3) {
+			width: 1%;
+			white-space: nowrap;
+		}
+
+		table[data-fill-last-two] :is(th, td):nth-last-child(-n + 2) {
+			width: 50%;
+		}
+
+		table[data-bold-first] tbody td:first-child,
+		table[data-bold-second] tbody td:nth-child(2) {
+			font-weight: 600;
+		}
+
+		table[data-center-second] :is(th, td):nth-child(2),
+		table[data-center-third] :is(th, td):nth-child(3) {
+			text-align: center;
+		}
+
+		[data-badge] {
+			display: inline-block;
+			padding: 0.1rem 0.4rem;
+			border: 1px solid var(--line);
+			border-radius: 0.2rem;
+			background: var(--subtle);
+			font-size: 0.75rem;
+			line-height: 1.25;
+		}
+
+		code,
+		time,
+		textarea {
+			font-family: var(--mono);
+		}
+
+		code {
+			white-space: pre;
+		}
+
+		form {
+			display: flex;
+			align-items: flex-start;
+			gap: 0.5rem;
+		}
+
+		input,
+		select,
+		textarea,
+		button {
+			margin: 0;
+			padding: 0.35rem 0.5rem;
+			border: 1px solid var(--line);
+			border-radius: 0;
+			background: var(--surface);
+			color: var(--text);
+			font: inherit;
+		}
+
+		input,
+		select {
+			min-width: 10rem;
+		}
+
+		select {
+			-webkit-appearance: none;
+			appearance: none;
+			padding-right: 1.75rem;
+			background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='m1 1 4 4 4-4' fill='none' stroke='%23111' stroke-width='1.5'/%3E%3C/svg%3E");
+			background-repeat: no-repeat;
+			background-position: right 0.6rem center;
+		}
+
+		input,
+		select,
+		button {
+			height: 2rem;
+		}
+
+		textarea {
+			min-width: 22rem;
+			min-height: 5rem;
+			resize: vertical;
+		}
+
+		button {
+			-webkit-appearance: none;
+			appearance: none;
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			border-color: var(--text);
+			background: var(--text);
+			color: var(--background);
+			line-height: 1;
+			cursor: pointer;
+		}
+
+		button:disabled {
+			opacity: 0.5;
+			cursor: wait;
+		}
+
+		input:focus-visible,
+		select:focus-visible,
+		textarea:focus-visible,
+		button:focus-visible {
+			outline: 2px solid var(--focus);
+			outline-offset: 2px;
+		}
+
+		output {
+			padding: 0.35rem 0;
+			color: var(--muted);
+		}
+
+		@media (max-width: 48rem) {
+			table {
+				display: block;
+				overflow-x: auto;
+				white-space: nowrap;
+			}
+
+			form {
+				flex-wrap: wrap;
+			}
+		}
+	</style>
+</head>
+<body>
+	<header>
+		<h1>sup debug</h1>
+	</header>
+
+	<main>
+		<section>
+			<h2>Supervision graph</h2>
+			<div data-graph>
+				<p>Loading…</p>
+			</div>
+		</section>
+
+		<section>
+			<h2>Actors (<span data-actor-count>0</span>)</h2>
+			<table data-fill-last-two data-bold-first data-center-second data-center-third>
+				<thead>
+					<tr><th>ID</th><th>Kind</th><th>State</th><th>Dependencies</th><th>Metadata</th></tr>
+				</thead>
+				<tbody data-actors>
+					<tr><td colspan="5">Loading…</td></tr>
+				</tbody>
+			</table>
+		</section>
+
+		<section>
+			<h2>Signals (<span data-signal-count>0</span>)</h2>
+			<table data-fill-last data-bold-first data-center-second data-center-third>
+				<thead>
+					<tr><th>ID</th><th>Kind</th><th>Type</th><th>Value</th></tr>
+				</thead>
+				<tbody data-signals>
+					<tr><td colspan="4">Loading…</td></tr>
+				</tbody>
+			</table>
+		</section>
+
+		<section>
+			<h2>Recent events (<span data-event-count>0</span>)</h2>
+			<table data-fill-last data-bold-second data-center-third>
+				<thead>
+					<tr><th>Time</th><th>Source</th><th>Type</th><th>Payload</th></tr>
+				</thead>
+				<tbody data-events>
+					<tr data-events-empty><td colspan="4">Loading…</td></tr>
+				</tbody>
+			</table>
+		</section>
+	</main>
+
+	<script>
+	(() => {
+		const makeElement = (tag, text) => {
+			const element = document.createElement(tag);
+			if (text !== undefined) element.textContent = text;
+			return element;
+		};
+
+		const makeCell = (content) => {
+			const cell = makeElement("td");
+			cell.append(content instanceof Node ? content : document.createTextNode(content));
+			return cell;
+		};
+
+		const makeBadge = (text) => {
+			const badge = makeElement("span", text);
+			badge.dataset.badge = "";
+			return badge;
+		};
+
+		const fetchJSON = async (path) => {
+			const response = await fetch(path);
+			if (!response.ok) throw new Error(`GET ${path} failed: ${response.status}`);
+			return response.json();
+		};
+
+		const parseValue = (form) => {
+			const control = form.elements.value;
+			const value = control.value;
+			switch (form.dataset.signalType) {
+			case "boolean":
+				return value === "true";
+			case "number": {
+				const number = control.valueAsNumber;
+				if (Number.isInteger(number) && !Number.isSafeInteger(number)) {
+					throw new Error("Number is outside JavaScript's safe integer range");
+				}
+				return number;
+			}
+			case "json":
+				return JSON.parse(value);
+			default:
+				return value;
+			}
+		};
+
+		const displayValue = (type, value) => {
+			if (type === "json") return JSON.stringify(value);
+			return value;
+		};
+
+		const dateTimeFormatter = new Intl.DateTimeFormat(undefined, {
+			dateStyle: "short",
+			timeStyle: "medium",
+		});
+		const formatTime = (timestamp) => dateTimeFormatter.format(new Date(timestamp));
+
+		const renderSignals = (signals) => {
+			const rows = document.querySelector("[data-signals]");
+			rows.replaceChildren();
+
+			for (const signal of signals) {
+				const row = makeElement("tr");
+				row.dataset.signalId = signal.id;
+				const valueCell = makeElement("td");
+
+				if (signal.writable) {
+					const form = makeElement("form");
+					form.dataset.signalForm = "";
+					form.dataset.signalType = signal.type;
+					let control;
+
+					if (signal.type === "boolean") {
+						control = makeElement("select");
+						for (const value of [true, false]) {
+							const option = makeElement("option", String(value));
+							option.value = String(value);
+							option.selected = signal.value === value;
+							control.append(option);
+						}
+					} else if (signal.type === "json") {
+						control = makeElement("textarea");
+					} else {
+						control = makeElement("input");
+						control.type = signal.type === "number" ? "number" : "text";
+						if (signal.type === "number") {
+							control.step = "any";
+							control.required = true;
+						}
+					}
+
+					control.name = "value";
+					control.value = displayValue(signal.type, signal.value);
+					const button = makeElement("button", "Set");
+					button.type = "submit";
+					const output = makeElement("output");
+					output.setAttribute("aria-live", "polite");
+					form.append(control, button, output);
+					valueCell.append(form);
+				} else {
+					const value = makeElement("code", JSON.stringify(signal.value));
+					value.dataset.signalValue = "";
+					valueCell.append(value);
+				}
+
+				row.append(
+					makeCell(signal.id),
+					makeCell(makeBadge(signal.spec.kind)),
+					makeCell(makeBadge(signal.type)),
+					valueCell,
+				);
+				rows.append(row);
+			}
+
+			if (signals.length === 0) {
+				const cell = makeCell("No signals registered.");
+				cell.colSpan = 4;
+				const row = makeElement("tr");
+				row.append(cell);
+				rows.append(row);
+			}
+			document.querySelector("[data-signal-count]").textContent = signals.length;
+		};
+
+		const updateSignal = (id, value) => {
+			const row = document.querySelector(`[data-signal-id="${CSS.escape(id)}"]`);
+			if (!row) return;
+
+			const form = row.querySelector("[data-signal-form]");
+			if (form) {
+				form.elements.value.value = displayValue(form.dataset.signalType, value);
+				return;
+			}
+
+			const output = row.querySelector("[data-signal-value]");
+			if (output) output.textContent = JSON.stringify(value);
+		};
+
+		const makeEventRow = (event) => {
+			const row = document.createElement("tr");
+			row.dataset.eventId = event.id;
+
+			const timeCell = document.createElement("td");
+			const time = document.createElement("time");
+			time.dateTime = new Date(event.timestamp).toISOString();
+			time.textContent = formatTime(event.timestamp);
+			timeCell.append(time);
+
+			const typeCell = document.createElement("td");
+			const type = document.createElement("span");
+			type.dataset.badge = "";
+			type.textContent = event.type;
+			typeCell.append(type);
+			const sourceCell = document.createElement("td");
+			sourceCell.textContent = event.source_id;
+			const payloadCell = document.createElement("td");
+			const payload = document.createElement("code");
+			payload.textContent = JSON.stringify(event.payload ?? null);
+			payloadCell.append(payload);
+
+			row.append(timeCell, sourceCell, typeCell, payloadCell);
+			return row;
+		};
+
+		const appendEvent = (event) => {
+			const events = document.querySelector("[data-events]");
+			const limit = Number(events.dataset.eventLimit);
+			if (limit === 0 || events.querySelector(`[data-event-id="${CSS.escape(event.id)}"]`)) return;
+
+			events.querySelector("[data-events-empty]")?.remove();
+			const row = makeEventRow(event);
+			events.prepend(row);
+			while (events.rows.length > limit) events.rows[events.rows.length - 1].remove();
+			document.querySelector("[data-event-count]").textContent = events.rows.length;
+		};
+
+		const renderEvents = (history, limit) => {
+			const events = document.querySelector("[data-events]");
+			events.dataset.eventLimit = limit;
+			events.replaceChildren();
+			const visible = limit === 0 ? [] : history.slice(-limit).reverse();
+			for (const event of visible) events.append(makeEventRow(event));
+
+			if (events.rows.length === 0) {
+				const cell = makeCell("No events recorded.");
+				cell.colSpan = 4;
+				const row = makeElement("tr");
+				row.dataset.eventsEmpty = "";
+				row.append(cell);
+				events.append(row);
+			}
+			document.querySelector("[data-event-count]").textContent = visible.length;
+		};
+
+		const renderGraph = (graph) => {
+			const container = document.querySelector("[data-graph]");
+			container.replaceChildren();
+			if (graph.nodes.length === 0) {
+				const empty = document.createElement("p");
+				empty.textContent = "No supervision graph recorded.";
+				container.append(empty);
+				return;
+			}
+
+			const nodes = new Map(graph.nodes.map((node) => [node.id, node]));
+			const children = new Map();
+			const hasParent = new Set();
+			for (const edge of graph.edges) {
+				if (!nodes.has(edge.supervisor_id) || !nodes.has(edge.actor_id)) continue;
+				if (!children.has(edge.supervisor_id)) children.set(edge.supervisor_id, []);
+				children.get(edge.supervisor_id).push(edge.actor_id);
+				hasParent.add(edge.actor_id);
+			}
+
+			const rendered = new Set();
+			const renderNode = (id, ancestors = new Set()) => {
+				const node = nodes.get(id);
+				const item = document.createElement("li");
+				const name = document.createElement("strong");
+				name.textContent = id;
+				item.append(name, ` (${node.spec.kind})`);
+				rendered.add(id);
+
+				const childIDs = children.get(id) ?? [];
+				const nextAncestors = new Set(ancestors).add(id);
+				const childList = document.createElement("ul");
+				for (const childID of childIDs) {
+					if (!nextAncestors.has(childID)) childList.append(renderNode(childID, nextAncestors));
+				}
+				if (childList.children.length > 0) item.append(childList);
+				return item;
+			};
+
+			const forest = document.createElement("ul");
+			for (const node of graph.nodes) {
+				if (!hasParent.has(node.id)) forest.append(renderNode(node.id));
+			}
+			for (const node of graph.nodes) {
+				if (!rendered.has(node.id)) forest.append(renderNode(node.id));
+			}
+			container.append(forest);
+		};
+
+		const renderActors = (nodes) => {
+			const actors = document.querySelector("[data-actors]");
+			actors.replaceChildren();
+
+			for (const node of nodes) {
+				const row = makeElement("tr");
+				row.append(
+					makeCell(node.id),
+					makeCell(makeBadge(node.spec.kind)),
+					makeCell(makeBadge(node.state)),
+					makeCell(makeElement("code", JSON.stringify(node.spec.dependencies ?? []))),
+					makeCell(makeElement("code", JSON.stringify(node.spec.metadata ?? {}))),
+				);
+				actors.append(row);
+			}
+
+			if (nodes.length === 0) {
+				const row = document.createElement("tr");
+				const cell = document.createElement("td");
+				cell.colSpan = 5;
+				cell.textContent = "No actors registered.";
+				row.append(cell);
+				actors.append(row);
+			}
+			document.querySelector("[data-actor-count]").textContent = nodes.length;
+		};
+
+		const renderGraphSnapshot = (graph) => {
+			renderGraph(graph);
+			renderActors(graph.nodes);
+		};
+
+		let refreshingGraph = false;
+		let graphRefreshRequested = false;
+		const refreshGraph = async () => {
+			graphRefreshRequested = true;
+			if (refreshingGraph) return;
+			refreshingGraph = true;
+			try {
+				while (graphRefreshRequested) {
+					graphRefreshRequested = false;
+					const graph = await fetchJSON("graph");
+					renderGraphSnapshot(graph);
+				}
+			} finally {
+				refreshingGraph = false;
+			}
+		};
+
+		const applyEvent = (event) => {
+			if (event.type === "signal:updated") {
+				updateSignal(event.source_id, event.payload.value);
+			}
+			if (event.type.startsWith("actor:")) void refreshGraph();
+			appendEvent(event);
+		};
+
+		let hydrated = false;
+		const pendingEvents = [];
+		const handleEvent = (message) => {
+			const event = JSON.parse(message.data);
+			if (!hydrated) {
+				pendingEvents.push(event);
+				return;
+			}
+			applyEvent(event);
+		};
+
+		document.addEventListener("submit", async (event) => {
+			const form = event.target;
+			if (!(form instanceof HTMLFormElement) || !form.matches("[data-signal-form]")) return;
+			event.preventDefault();
+
+			const button = form.querySelector("button");
+			const output = form.querySelector("output");
+			button.disabled = true;
+			output.value = "Saving...";
+
+			try {
+				const signalID = form.closest("[data-signal-id]").dataset.signalId;
+				const response = await fetch("signals/" + encodeURIComponent(signalID), {
+					method: "PATCH",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ value: parseValue(form) }),
+				});
+				if (!response.ok) {
+					const message = (await response.text()).trim();
+					throw new Error(message || "Request failed: " + response.status);
+				}
+				const signal = await response.json();
+				updateSignal(signal.id, signal.value);
+				output.value = "";
+			} catch (error) {
+				output.value = error instanceof Error ? error.message : String(error);
+			} finally {
+				button.disabled = false;
+			}
+		});
+
+		const eventSource = new EventSource("events/stream");
+		for (const type of [
+			"signal:updated",
+			"actor:registered",
+			"actor:started",
+			"actor:stopped",
+			"actor:restarting",
+		]) {
+			eventSource.addEventListener(type, handleEvent);
+		}
+
+		const streamReady = new Promise((resolve) => {
+			eventSource.addEventListener("open", resolve, { once: true });
+			eventSource.addEventListener("error", resolve, { once: true });
+		});
+
+		const initialize = async () => {
+			await streamReady;
+			const [graph, signals, eventsResponse] = await Promise.all([
+				fetchJSON("graph"),
+				fetchJSON("signals"),
+				fetch("events"),
+			]);
+			if (!eventsResponse.ok) throw new Error(`GET events failed: ${eventsResponse.status}`);
+			const history = await eventsResponse.json();
+			const limit = Number(eventsResponse.headers.get("Event-History-Limit")) || 0;
+
+			renderGraphSnapshot(graph);
+			renderSignals(signals);
+			renderEvents(history, limit);
+			hydrated = true;
+			for (const event of pendingEvents) applyEvent(event);
+			pendingEvents.length = 0;
+		};
+
+		initialize().catch((error) => {
+			for (const loading of document.querySelectorAll("main :is(p, td)")) {
+				if (loading.textContent === "Loading…") loading.textContent = "Unable to load data.";
+			}
+			console.error(error);
+		});
+	})();
+	</script>
+</body>
+</html>

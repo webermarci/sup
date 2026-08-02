@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/webermarci/sup"
 )
@@ -22,9 +23,7 @@ type Derived[V any] struct {
 	value   *Signal[V]
 	compute func() V
 	deps    []Dependency
-
-	running bool
-	runMu   sync.Mutex
+	running atomic.Bool
 }
 
 // NewDerived creates a derived value with an initial computed value.
@@ -36,6 +35,7 @@ func NewDerived[V any](
 	if id == "" {
 		panic("rx: derived id cannot be empty")
 	}
+
 	if compute == nil {
 		panic("rx: derived compute function cannot be nil")
 	}
@@ -79,14 +79,15 @@ func (d *Derived[V]) Run(ctx context.Context) error {
 	if ctx == nil {
 		panic("rx: derived context cannot be nil")
 	}
-	if !d.beginRun() {
+	if !d.running.CompareAndSwap(false, true) {
 		return ErrDerivedRunning
 	}
-	defer d.endRun()
+	defer d.running.Store(false)
 
 	runCtx, cancel := context.WithCancel(ctx)
 	changed := make(chan struct{}, 1)
 	var watchers sync.WaitGroup
+
 	defer func() {
 		cancel()
 		watchers.Wait()
@@ -148,20 +149,4 @@ func (d *Derived[V]) Inspect() sup.Spec {
 		Dependencies: dependencies,
 		Metadata:     map[string]any{},
 	}
-}
-
-func (d *Derived[V]) beginRun() bool {
-	d.runMu.Lock()
-	defer d.runMu.Unlock()
-	if d.running {
-		return false
-	}
-	d.running = true
-	return true
-}
-
-func (d *Derived[V]) endRun() {
-	d.runMu.Lock()
-	d.running = false
-	d.runMu.Unlock()
 }

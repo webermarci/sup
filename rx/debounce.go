@@ -10,17 +10,20 @@ func Debounce[V any](input <-chan V, wait time.Duration) <-chan V {
 	if input == nil {
 		panic("rx: debounce input cannot be nil")
 	}
+
 	if wait <= 0 {
 		panic("rx: debounce wait must be positive")
 	}
 
 	output := make(chan V, 1)
+
 	go func() {
 		defer close(output)
 
 		var latest V
 		var timer *time.Timer
 		var timerC <-chan time.Time
+
 		defer func() {
 			if timer != nil {
 				timer.Stop()
@@ -54,5 +57,6 @@ func Debounce[V any](input <-chan V, wait time.Duration) <-chan V {
 			}
 		}
 	}()
+
 	return output
 }

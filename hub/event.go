@@ -1,7 +1,6 @@
 package hub
 
 import (
-	"bytes"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -124,11 +123,5 @@ func formatHubEventSSE(event hubEvent) ([]byte, error) {
 		return nil, err
 	}
 
-	var buf bytes.Buffer
-	fmt.Fprintf(&buf, "id: %s\n", event.ID)
-	fmt.Fprintf(&buf, "event: %s\n", event.Type)
-	buf.WriteString("data: ")
-	buf.Write(data)
-	buf.WriteString("\n\n")
-	return buf.Bytes(), nil
+	return fmt.Appendf(nil, "id: %s\nevent: %s\ndata: %s\n\n", event.ID, event.Type, data), nil
 }
