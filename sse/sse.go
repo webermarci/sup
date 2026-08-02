@@ -1,98 +1,80 @@
+// Package sse adapts HTTP server-sent event streams to sup actors.
 package sse
 
 import (
 	"bufio"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/webermarci/sup"
 )
 
-// Event represents a single SSE event with its ID, data, and optional name.
+var (
+	// ErrActorRunning is returned when Run is called while the actor is already
+	// consuming or establishing a stream.
+	ErrActorRunning = errors.New("sse: actor is already running")
+
+	// ErrNilResponse is returned when a ConnectFunc returns a nil response
+	// without an error.
+	ErrNilResponse = errors.New("sse: connect function returned nil response")
+
+	// ErrNilBody is returned when a successful response has no body.
+	ErrNilBody = errors.New("sse: response body is nil")
+)
+
+const maxLineSize = 1024 * 1024
+
+// Event is one server-sent event.
 type Event struct {
 	ID   string
+	Type string
 	Data string
-	Name string
 }
 
-// ActorOption defines a function type for configuring an Actor.
-type ActorOption func(*Actor)
+// ConnectFunc establishes one SSE connection. lastEventID is the most recent
+// valid id field parsed by the actor and may be sent as Last-Event-ID. The
+// function owns request construction and HTTP client configuration; the actor
+// closes the body of a response returned without an error.
+type ConnectFunc func(ctx context.Context, lastEventID string) (*http.Response, error)
 
-// WithTimeout sets the duration after which the SSE connection will be considered timed out if no events are received.
-func WithTimeout(d time.Duration) ActorOption {
-	return func(a *Actor) {
-		a.timeout = d
-	}
-}
-
-// WithLastEventID sets the initial Last-Event-ID to be used when connecting.
-func WithLastEventID(id string) ActorOption {
-	return func(a *Actor) {
-		a.mu.Lock()
-		defer a.mu.Unlock()
-		a.lastID = id
-	}
-}
-
-// WithOnConnect allows the caller to provide a callback function that will be invoked when the Actor successfully connects to the SSE endpoint.
-func WithOnConnect(handler func(url string, lastID string)) ActorOption {
-	return func(a *Actor) {
-		a.onConnect = handler
-	}
-}
-
-// WithOnError allows the caller to provide a callback function that will be invoked whenever an error occurs during the Actor's operation.
-func WithOnError(handler func(error)) ActorOption {
-	return func(a *Actor) {
-		a.onError = handler
-	}
-}
-
-// WithHTTPClient allows the caller to provide a custom http.Client for making requests to the SSE endpoint.
-func WithHTTPClient(c *http.Client) ActorOption {
-	return func(a *Actor) {
-		a.client = c
-	}
-}
-
-// Actor is responsible for connecting to an SSE endpoint, reading and parsing incoming events, and invoking a handler function for each event.
+// Actor establishes one connection per Run call and parses its event stream.
+// Reconnection policy belongs to the supervisor.
 type Actor struct {
-	id        string
-	url       string
-	timeout   time.Duration
-	client    *http.Client
-	lastID    string
-	onConnect func(url string, lastID string)
-	onEvent   func(Event)
-	onError   func(error)
-	mu        sync.RWMutex
+	id      string
+	connect ConnectFunc
+	handle  func(Event)
+	lastID  string
+	mu      sync.RWMutex
+	running atomic.Bool
 }
 
-// NewActor creates a new Actor with the specified URL, event handler, and optional configuration options.
-func NewActor(id string, url string, onEvent func(Event), opts ...ActorOption) *Actor {
-	a := &Actor{
-		id:      id,
-		url:     url,
-		onEvent: onEvent,
-		timeout: 30 * time.Second,
-		client: &http.Client{
-			Transport: &http.Transport{
-				DisableKeepAlives: true,
-			},
-		},
+var _ sup.Actor = (*Actor)(nil)
+var _ sup.Inspectable = (*Actor)(nil)
+
+// NewActor creates an SSE actor with the given connection and event handlers.
+// handle is called synchronously while consuming the stream.
+func NewActor(id string, connect ConnectFunc, handle func(Event)) *Actor {
+	if id == "" {
+		panic("sse: actor id cannot be empty")
 	}
 
-	for _, opt := range opts {
-		opt(a)
+	if connect == nil {
+		panic("sse: connect function cannot be nil")
 	}
 
-	return a
+	if handle == nil {
+		panic("sse: event handler cannot be nil")
+	}
+
+	return &Actor{id: id, connect: connect, handle: handle}
 }
 
 // ID returns the actor id.
@@ -105,133 +87,137 @@ func (a *Actor) Inspect() sup.Spec {
 	return sup.Spec{Kind: "sse"}
 }
 
-// LastEventID returns the ID of the last successfully received event.
+// LastEventID returns the value of the most recently parsed valid id field.
 func (a *Actor) LastEventID() string {
 	a.mu.RLock()
 	defer a.mu.RUnlock()
 	return a.lastID
 }
 
-// Run establishes a connection to the SSE endpoint and processes incoming events until the context is canceled or an error occurs.
+// Run establishes and consumes one SSE connection. Context cancellation and
+// HTTP 204 are clean actor shutdowns; other connection and stream failures are
+// returned to the supervisor.
 func (a *Actor) Run(ctx context.Context) (err error) {
+	if ctx == nil {
+		panic("sse: context cannot be nil")
+	}
+
+	if !a.running.CompareAndSwap(false, true) {
+		return ErrActorRunning
+	}
+	defer a.running.Store(false)
+
 	defer func() {
 		if ctx.Err() != nil {
 			err = nil
 		}
-		if err != nil && a.onError != nil {
-			a.onError(err)
-		}
 	}()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.url, nil)
+	response, err := a.connect(ctx, a.LastEventID())
 	if err != nil {
 		return err
 	}
 
-	lastID := a.LastEventID()
-
-	req.Header.Set("Accept", "text/event-stream")
-	req.Header.Set("Cache-Control", "no-cache")
-	req.Header.Set("Connection", "keep-alive")
-	if lastID != "" {
-		req.Header.Set("Last-Event-ID", lastID)
+	if response == nil {
+		return ErrNilResponse
 	}
 
-	client := a.client
-	if client == nil {
-		client = &http.Client{}
+	if response.Body != nil {
+		defer response.Body.Close()
 	}
 
-	res, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("unexpected status code: %d", res.StatusCode)
+	// The SSE protocol uses 204 to tell the client to stop reconnecting. A nil
+	// result lets a Transient supervisor stop while Permanent can still restart.
+	if response.StatusCode == http.StatusNoContent {
+		return nil
 	}
 
-	if a.onConnect != nil {
-		a.onConnect(a.url, lastID)
+	if response.StatusCode != http.StatusOK {
+		return fmt.Errorf("sse: unexpected status code: %d", response.StatusCode)
 	}
 
-	scanner := bufio.NewScanner(res.Body)
-	const maxCapacity = 1024 * 1024
-	scanner.Buffer(make([]byte, 64*1024), maxCapacity)
+	if response.Body == nil {
+		return ErrNilBody
+	}
 
-	var timedOut atomic.Bool
-	var buf bytes.Buffer
-	currentEvent := Event{ID: lastID}
+	mediaType, params, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
+	if err != nil || !strings.EqualFold(mediaType, "text/event-stream") {
+		return fmt.Errorf("sse: unexpected content type: %q", response.Header.Get("Content-Type"))
+	}
 
-	for {
-		select {
-		case <-ctx.Done():
+	if charset := params["charset"]; charset != "" && !strings.EqualFold(charset, "utf-8") {
+		return fmt.Errorf("sse: unexpected event-stream charset: %q", charset)
+	}
+
+	return a.consume(ctx, response.Body)
+}
+
+func (a *Actor) consume(ctx context.Context, body io.Reader) error {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 64*1024), maxLineSize)
+
+	var data bytes.Buffer
+	event := Event{ID: a.LastEventID()}
+	firstLine := true
+
+	for scanner.Scan() {
+		if ctx.Err() != nil {
 			return nil
-		default:
 		}
 
-		timedOut.Store(false)
-		timer := time.AfterFunc(a.timeout, func() {
-			timedOut.Store(true)
-			_ = res.Body.Close()
-		})
+		line := scanner.Text()
+		line = strings.ToValidUTF8(line, "\uFFFD")
+		if firstLine {
+			line = strings.TrimPrefix(line, "\uFEFF")
+			firstLine = false
+		}
 
-		ok := scanner.Scan()
-		timer.Stop()
-
-		if ok {
-			line := scanner.Text()
-
-			if line == "" {
-				if buf.Len() > 0 {
-					data := buf.String()
-					if data[len(data)-1] == '\n' {
-						data = data[:len(data)-1]
-					}
-					currentEvent.Data = data
-					a.onEvent(currentEvent)
-					buf.Reset()
-				}
-				currentEvent = Event{ID: a.LastEventID()}
-				continue
+		if line == "" {
+			if data.Len() > 0 {
+				value := data.String()
+				value = strings.TrimSuffix(value, "\n")
+				event.Data = value
+				a.handle(event)
+				data.Reset()
 			}
-
-			if strings.HasPrefix(line, ":") {
-				continue
-			}
-
-			key, value, found := strings.Cut(line, ":")
-			if found {
-				value = strings.TrimPrefix(value, " ")
-			}
-
-			switch key {
-			case "data":
-				buf.WriteString(value)
-				buf.WriteByte('\n')
-			case "event":
-				currentEvent.Name = value
-			case "id":
-				if !strings.ContainsRune(value, 0) {
-					a.mu.Lock()
-					a.lastID = value
-					a.mu.Unlock()
-					currentEvent.ID = value
-				}
-			case "retry":
-				// Reconnection time is managed by the supervisor, but we parse it for completeness
-			}
+			event = Event{ID: a.LastEventID()}
 			continue
 		}
 
-		if err := scanner.Err(); err != nil {
-			if timedOut.Load() {
-				return fmt.Errorf("sse stream timed out after %v", a.timeout)
-			}
-			return err
+		if strings.HasPrefix(line, ":") {
+			continue
 		}
 
+		field, value, found := strings.Cut(line, ":")
+		if found {
+			value = strings.TrimPrefix(value, " ")
+		}
+
+		switch field {
+		case "data":
+			data.WriteString(value)
+			data.WriteByte('\n')
+		case "event":
+			event.Type = value
+		case "id":
+			if !strings.ContainsRune(value, 0) {
+				a.mu.Lock()
+				a.lastID = value
+				a.mu.Unlock()
+				event.ID = value
+			}
+		case "retry":
+			// Reconnection timing belongs to the supervisor.
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return fmt.Errorf("sse: read stream: %w", err)
+	}
+
+	if ctx.Err() != nil {
 		return nil
 	}
+
+	return fmt.Errorf("sse: stream closed: %w", io.ErrUnexpectedEOF)
 }

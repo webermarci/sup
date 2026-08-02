@@ -488,7 +488,7 @@ stationary yellow state and turn the pedestrian signal off.
 - `sup` — Core actors, supervisors, typed inboxes, and runtime events.
 - `rx` — Reactive signals, derived state, and channel helpers.
 - `sup/hub` — HTTP API for actors, signals, supervision, and events.
-- `sup/exec` — Actor wrapper around `os/exec` commands.
+- `sup/process` — Actor adapter for `os/exec` commands.
 - `sup/mesh` — NATS-backed actor for subscriptions.
 - `sup/modbus` — Modbus actor for TCP/RTU/ASCII clients.
 - `sup/mqtt` — MQTT actor for publish/subscribe clients.
