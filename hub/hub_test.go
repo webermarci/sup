@@ -314,7 +314,7 @@ func TestHubPatchWritableSignalPublishesUpdateEvent(t *testing.T) {
 		Signal:   target,
 		observed: observed,
 	}
-	h := New("hub", WithWritableSignal[int](signal))
+	h := New("hub", WithWritableSignal(signal))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -406,7 +406,7 @@ func TestHubSignalEventsExcludeInitialValue(t *testing.T) {
 		Signal:   status,
 		observed: observed,
 	}
-	h := New("hub", WithSignal[string](signal))
+	h := New("hub", WithSignal(signal))
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- h.Run(ctx) }()
