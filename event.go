@@ -25,7 +25,8 @@ func (f EventSinkFunc) HandleEvent(event Event) {
 type EventType string
 
 const (
-	// EventActorRegistered is emitted when an actor is registered with a supervisor.
+	// EventActorRegistered is emitted when a supervisor begins supervising an
+	// actor during a Run attempt.
 	EventActorRegistered EventType = "actor:registered"
 
 	// EventActorStarted is emitted when an actor starts running.
@@ -70,11 +71,18 @@ func emitEvent(ctx context.Context, event Event) {
 	}
 }
 
-func (s *Supervisor) emit(ctx context.Context, eventType EventType, actor Actor, err error, restarts int) {
+func emitSupervisorEvent(
+	ctx context.Context,
+	supervisor *Supervisor,
+	eventType EventType,
+	actor Actor,
+	err error,
+	restarts int,
+) {
 	emitEvent(ctx, Event{
 		Type:         eventType,
 		Actor:        actor,
-		Supervisor:   s,
+		Supervisor:   supervisor,
 		Err:          err,
 		RestartCount: restarts,
 	})

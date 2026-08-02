@@ -9,15 +9,25 @@ import (
 	"github.com/webermarci/sup"
 )
 
-func BenchmarkSupervisor_RunAndExit(b *testing.B) {
-	actor := sup.ActorFunc("worker", func(context.Context) error { return nil })
+func BenchmarkSupervisor_RunAndCancel(b *testing.B) {
+	started := make(chan struct{})
+	actor := sup.ActorFunc("worker", func(ctx context.Context) error {
+		started <- struct{}{}
+		<-ctx.Done()
+		return nil
+	})
 	supervisor := sup.NewSupervisor("bench",
 		sup.WithActors(actor),
 		sup.WithPolicy(sup.Temporary),
 	)
 
 	for b.Loop() {
-		if err := supervisor.Run(b.Context()); err != nil {
+		ctx, cancel := context.WithCancel(b.Context())
+		go func() {
+			<-started
+			cancel()
+		}()
+		if err := supervisor.Run(ctx); err != nil {
 			b.Fatal(err)
 		}
 	}

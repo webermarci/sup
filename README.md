@@ -12,7 +12,7 @@ It provides typed inboxes for actor communication, OTP-style supervision with re
 ## Features
 
 - **Idiomatic actors** — An actor is any value that implements `ID()` and `Run(context.Context) error`.
-- **Supervisor trees** — Supervisors are actors too, so they can supervise actors or other supervisors.
+- **Supervisor trees** — Supervisors are actors too, so they can be nested like ordinary actors.
 - **Restart policies** — `Permanent`, `Transient`, and `Temporary` policies control when actors restart.
 - **Panic recovery** — Panics are recovered, wrapped with a stack trace, reported, and handled by the restart policy.
 - **Typed inboxes** — `CastInbox[T]` and `CallInbox[T, R]` provide type-safe asynchronous and request/reply messaging.
@@ -200,8 +200,8 @@ Every actor follows the same `Run` contract:
 - A failure that may require a restart returns a non-nil error.
 - A panic is recovered by the supervisor and treated as a failure.
 
-`Supervisor.Run` follows the same contract, so supervisors can be nested as
-ordinary actors. It returns an error when a restart limit is exceeded or when
+Supervisors follow the same actor contract, so they can be nested as ordinary
+actors. A supervisor returns an error when a restart limit is exceeded or when
 the same supervisor is run concurrently.
 
 ## Supervisors
@@ -252,8 +252,9 @@ root := sup.NewSupervisor("root",
 ```
 
 Each event carries its occurrence time, actor, supervisor, error, and restart
-count as native Go values. Presentation layers such as `hub` decide how to
-serialize them. Multiple event sinks can independently record, log, aggregate,
+count as native Go values. `EventActorRegistered` marks the beginning of active
+supervision during a `Run`. Presentation layers such as `hub` decide how to
+serialize events. Multiple event sinks can independently record, log, aggregate,
 or forward the same authoritative runtime event.
 
 ## Typed inboxes
@@ -489,8 +490,4 @@ stationary yellow state and turn the pedestrian signal off.
 - `rx` — Reactive signals, derived state, and channel helpers.
 - `sup/hub` — HTTP API for actors, signals, supervision, and events.
 - `sup/process` — Actor adapter for `os/exec` commands.
-- `sup/mesh` — NATS-backed actor for subscriptions.
-- `sup/modbus` — Modbus actor for TCP/RTU/ASCII clients.
-- `sup/mqtt` — MQTT actor for publish/subscribe clients.
-- `sup/sse` — Server-Sent Events client actor.
-- `sup/ws` — WebSocket client actor.
+- `sup/resource` — Supervised, serialized access to acquired resources.

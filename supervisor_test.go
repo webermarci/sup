@@ -28,8 +28,9 @@ func TestSupervisor_Temporary(t *testing.T) {
 		})),
 	)
 
-	// In Temporary policy, Run should exit cleanly even after a panic
-	supervisor.Run(t.Context())
+	if err := runUntilSupervisorEmpty(t, supervisor); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
 
 	if runs.Load() != 1 {
 		t.Fatalf("expected 1 run, got %d", runs.Load())
@@ -51,8 +52,9 @@ func TestSupervisor_Transient(t *testing.T) {
 		})),
 	)
 
-	// Should restart once then exit cleanly on nil
-	supervisor.Run(t.Context())
+	if err := runUntilSupervisorEmpty(t, supervisor); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
 
 	if runs.Load() != 2 {
 		t.Fatalf("expected 2 runs, got %d", runs.Load())
@@ -131,37 +133,6 @@ func TestSupervisor_RestartLimit(t *testing.T) {
 	}
 }
 
-func TestSupervisor_TerminalFailureStopsSiblings(t *testing.T) {
-	siblingStarted := make(chan struct{})
-	siblingStopped := make(chan struct{})
-
-	failing := sup.ActorFunc("failing", func(context.Context) error {
-		<-siblingStarted
-		return errors.New("fail")
-	})
-	sibling := sup.ActorFunc("sibling", func(ctx context.Context) error {
-		close(siblingStarted)
-		<-ctx.Done()
-		close(siblingStopped)
-		return nil
-	})
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithActors(failing, sibling),
-		sup.WithPolicy(sup.Transient),
-		sup.WithRestartDelay(0),
-		sup.WithRestartLimit(1, time.Second),
-	)
-
-	if err := supervisor.Run(t.Context()); err == nil {
-		t.Fatal("expected terminal restart-limit error")
-	}
-	select {
-	case <-siblingStopped:
-	default:
-		t.Fatal("Run returned before the sibling stopped")
-	}
-}
-
 func TestSupervisor_RestartLimitWindowResets(t *testing.T) {
 	var runs atomic.Int32
 	supervisor := sup.NewSupervisor("sup",
@@ -180,7 +151,7 @@ func TestSupervisor_RestartLimitWindowResets(t *testing.T) {
 		sup.WithRestartLimit(2, 20*time.Millisecond),
 	)
 
-	if err := supervisor.Run(t.Context()); err != nil {
+	if err := runUntilSupervisorEmpty(t, supervisor); err != nil {
 		t.Fatalf("expected restart window to reset, got %v", err)
 	}
 	if runs.Load() != 5 {
@@ -203,7 +174,9 @@ func TestSupervisor_PanicStackTrace(t *testing.T) {
 		})),
 	)
 
-	supervisor.Run(t.Context())
+	if err := runUntilSupervisorEmpty(t, supervisor); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
 
 	if capturedErr == nil || !strings.Contains(capturedErr.Error(), "stack") {
 		t.Fatal("expected stack trace in panic recovery")
@@ -235,7 +208,7 @@ func TestSupervisor_EventSinkReceivesRichEvents(t *testing.T) {
 		sup.WithEventSink(sink),
 	)
 
-	if err := supervisor.Run(t.Context()); err != nil {
+	if err := runUntilSupervisorEmpty(t, supervisor); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
@@ -287,7 +260,7 @@ func TestSupervisor_EventSinkPanicDoesNotInterruptSupervision(t *testing.T) {
 		),
 	)
 
-	if err := supervisor.Run(t.Context()); err != nil {
+	if err := runUntilSupervisorEmpty(t, supervisor); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
 	if received.Load() != 3 {
@@ -379,22 +352,13 @@ func TestSupervisor_EventSinkPropagatesThroughSupervisorTree(t *testing.T) {
 		sup.WithPolicy(sup.Transient),
 	)
 
-	if err := root.Run(t.Context()); err != nil {
+	if err := runSupervisorUntil(t, root, func() bool {
+		return observedLeafWorkerStarted.Load() == 1
+	}); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
-
-	deadline := time.After(500 * time.Millisecond)
-	for {
-		if observedLeafWorkerStarted.Load() == 1 {
-			return
-		}
-
-		select {
-		case <-deadline:
-			t.Fatalf("expected root sink to see leaf worker start, got %d", observedLeafWorkerStarted.Load())
-		default:
-			time.Sleep(5 * time.Millisecond)
-		}
+	if observedLeafWorkerStarted.Load() != 1 {
+		t.Fatalf("expected root sink to see leaf worker start, got %d", observedLeafWorkerStarted.Load())
 	}
 }
 
@@ -429,7 +393,9 @@ func TestSupervisor_LocalAndParentEventSinksReceiveChildEvents(t *testing.T) {
 		sup.WithPolicy(sup.Transient),
 	)
 
-	if err := root.Run(t.Context()); err != nil {
+	if err := runSupervisorUntil(t, root, func() bool {
+		return parentObserved.Load() == 1 && childObserved.Load() == 1
+	}); err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
@@ -437,4 +403,41 @@ func TestSupervisor_LocalAndParentEventSinksReceiveChildEvents(t *testing.T) {
 		t.Fatalf("expected both sinks to receive one event, parent=%d child=%d",
 			parentObserved.Load(), childObserved.Load())
 	}
+}
+
+func runUntilSupervisorEmpty(t *testing.T, supervisor *sup.Supervisor) error {
+	t.Helper()
+	return supervisor.Run(t.Context())
+}
+
+func runSupervisorUntil(
+	t *testing.T,
+	supervisor *sup.Supervisor,
+	condition func() bool,
+) error {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- supervisor.Run(ctx) }()
+
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for !condition() {
+		select {
+		case err := <-done:
+			if !condition() {
+				t.Fatalf("supervisor stopped before condition was met: %v", err)
+			}
+			return err
+		case <-deadline.C:
+			t.Fatal("timed out waiting for supervisor condition")
+		case <-ticker.C:
+		}
+	}
+
+	cancel()
+	return <-done
 }

@@ -3,6 +3,7 @@ package sup_test
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -112,6 +113,45 @@ func TestCallRequestReplyOnlySucceedsOnce(t *testing.T) {
 	<-received
 }
 
+func TestCallRequestReplyHasOneConcurrentWinner(t *testing.T) {
+	inbox := sup.NewCallInbox[string, int](1)
+	requestCh := make(chan sup.CallRequest[string, int], 1)
+	go func() { requestCh <- <-inbox.Receive() }()
+
+	callDone := make(chan error, 1)
+	go func() {
+		_, err := inbox.Call(t.Context(), "request")
+		callDone <- err
+	}()
+
+	request := <-requestCh
+	const replies = 32
+	results := make(chan bool, replies)
+	var group sync.WaitGroup
+	group.Add(replies)
+	for i := range replies {
+		go func(value int) {
+			defer group.Done()
+			results <- request.Reply(value, nil)
+		}(i)
+	}
+	group.Wait()
+	close(results)
+
+	winners := 0
+	for succeeded := range results {
+		if succeeded {
+			winners++
+		}
+	}
+	if winners != 1 {
+		t.Fatalf("expected exactly one successful reply, got %d", winners)
+	}
+	if err := <-callDone; err != nil {
+		t.Fatalf("call failed after concurrent replies: %v", err)
+	}
+}
+
 func TestCallRequestReplyFailsAfterCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	inbox := sup.NewCallInbox[string, string](1)
@@ -144,15 +184,47 @@ func TestZeroCallRequestReplyFails(t *testing.T) {
 }
 
 func TestCallInboxErrors(t *testing.T) {
-	inbox := sup.NewCallInbox[string, int](1)
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	go inbox.Call(ctx, "first")
-	deadline := time.Now().Add(time.Second)
-	for len(inbox.Receive()) == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
+	inbox := sup.NewCallInbox[string, int](0)
 	if _, err := inbox.TryCall(t.Context(), "second"); !errors.Is(err, sup.ErrInboxFull) {
 		t.Fatalf("expected ErrInboxFull, got %v", err)
 	}
+}
+
+func TestCallInboxCallCanBeCanceledWhileAdmissionIsBlocked(t *testing.T) {
+	inbox := sup.NewCallInbox[string, int](0)
+	baseCtx, cancel := context.WithCancel(t.Context())
+	ctx := &doneObservedContext{
+		Context:  baseCtx,
+		observed: make(chan struct{}),
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := inbox.Call(ctx, "blocked")
+		done <- err
+	}()
+
+	// The context wrapper reports when the inbox send has evaluated its
+	// cancellation channel. With no receiver, admission is now blocked.
+	<-ctx.observed
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context cancellation, got %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("blocked call did not stop after cancellation")
+	}
+}
+
+type doneObservedContext struct {
+	context.Context
+	observed chan struct{}
+	sync.Once
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.Once.Do(func() { close(c.observed) })
+	return c.Context.Done()
 }

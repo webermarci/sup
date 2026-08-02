@@ -9,7 +9,8 @@ import (
 
 func TestThrottleFirstEmitsFirstValueInInterval(t *testing.T) {
 	input := make(chan int)
-	output := rx.ThrottleFirst(input, 30*time.Millisecond)
+	const interval = 30 * time.Millisecond
+	output := rx.ThrottleFirst(input, interval)
 
 	input <- 1
 	if got := receive(t, output); got != 1 {
@@ -24,7 +25,9 @@ func TestThrottleFirstEmitsFirstValueInInterval(t *testing.T) {
 	default:
 	}
 
-	time.Sleep(35 * time.Millisecond)
+	// Leave generous scheduling margin so a busy test runner cannot keep the
+	// timer in the previous interval.
+	time.Sleep(3 * interval)
 	input <- 4
 	if got := receive(t, output); got != 4 {
 		t.Fatalf("expected next interval value 4, got %d", got)

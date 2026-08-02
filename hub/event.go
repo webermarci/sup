@@ -1,10 +1,9 @@
 package hub
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"strconv"
+	"sync/atomic"
 	"time"
 
 	"github.com/webermarci/sup"
@@ -45,12 +44,14 @@ type signalUpdatedPayload struct {
 	Value any `json:"value"`
 }
 
+var eventIDCounter atomic.Uint64
+
 func newHubEvent(eventType sup.EventType, sourceID string, payload any, eventTime time.Time) hubEvent {
 	if eventTime.IsZero() {
 		eventTime = time.Now()
 	}
 	return hubEvent{
-		ID:        newEventID(),
+		ID:        strconv.FormatUint(eventIDCounter.Add(1), 10),
 		Timestamp: eventTime.UnixMilli(),
 		Type:      eventType,
 		SourceID:  sourceID,
@@ -58,17 +59,17 @@ func newHubEvent(eventType sup.EventType, sourceID string, payload any, eventTim
 	}
 }
 
-func snapshotHubEvent(event hubEvent) (hubEvent, error) {
+func snapshotHubEvent(event hubEvent) (hubEvent, []byte, error) {
 	data, err := json.Marshal(event)
 	if err != nil {
-		return hubEvent{}, err
+		return hubEvent{}, nil, err
 	}
 
 	var snapshot hubEvent
 	if err := json.Unmarshal(data, &snapshot); err != nil {
-		return hubEvent{}, err
+		return hubEvent{}, nil, err
 	}
-	return snapshot, nil
+	return snapshot, data, nil
 }
 
 func hubEventFromRuntime(event sup.Event) hubEvent {
@@ -109,19 +110,4 @@ func errorString(err error) string {
 		return ""
 	}
 	return err.Error()
-}
-
-func newEventID() string {
-	var b [16]byte
-	_, _ = rand.Read(b[:])
-	return hex.EncodeToString(b[:])
-}
-
-func formatHubEventSSE(event hubEvent) ([]byte, error) {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return nil, err
-	}
-
-	return fmt.Appendf(nil, "id: %s\nevent: %s\ndata: %s\n\n", event.ID, event.Type, data), nil
 }

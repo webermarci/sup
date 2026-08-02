@@ -74,11 +74,14 @@ func main() {
 
 	go supervisor.Run(ctx)
 
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.NewTicker(1 * time.Second).C:
+		case <-ticker.C:
 			fmt.Println("current value:", actor.Get())
 			actor.Increment(1)
 		}

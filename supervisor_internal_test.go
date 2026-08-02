@@ -3,7 +3,6 @@ package sup
 import (
 	"context"
 	"errors"
-	"runtime"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -40,19 +39,26 @@ func TestSupervisor_RejectsConcurrentRun(t *testing.T) {
 
 func TestSupervisor_SequentialRuns(t *testing.T) {
 	var runs atomic.Int32
+	started := make(chan struct{}, 2)
 	supervisor := NewSupervisor("sup",
-		WithActors(ActorFunc("worker", func(context.Context) error {
+		WithActors(ActorFunc("worker", func(ctx context.Context) error {
 			runs.Add(1)
+			started <- struct{}{}
+			<-ctx.Done()
 			return nil
 		})),
 		WithPolicy(Temporary),
 	)
 
-	if err := supervisor.Run(t.Context()); err != nil {
-		t.Fatalf("first Run returned error: %v", err)
-	}
-	if err := supervisor.Run(t.Context()); err != nil {
-		t.Fatalf("second Run returned error: %v", err)
+	for run := range 2 {
+		ctx, cancel := context.WithCancel(t.Context())
+		done := make(chan error, 1)
+		go func() { done <- supervisor.Run(ctx) }()
+		<-started
+		cancel()
+		if err := <-done; err != nil {
+			t.Fatalf("run %d returned error: %v", run+1, err)
+		}
 	}
 	if runs.Load() != 2 {
 		t.Fatalf("expected two actor runs, got %d", runs.Load())
@@ -62,6 +68,7 @@ func TestSupervisor_SequentialRuns(t *testing.T) {
 func TestSupervisor_CancelsAttemptContextBeforeRestart(t *testing.T) {
 	var runs atomic.Int32
 	firstCanceled := make(chan struct{})
+	secondFinished := make(chan struct{})
 	actor := ActorFunc("worker", func(ctx context.Context) error {
 		if runs.Add(1) == 1 {
 			go func() {
@@ -73,6 +80,7 @@ func TestSupervisor_CancelsAttemptContextBeforeRestart(t *testing.T) {
 
 		select {
 		case <-firstCanceled:
+			close(secondFinished)
 			return nil
 		case <-time.After(time.Second):
 			return errors.New("previous attempt context was not canceled")
@@ -84,7 +92,12 @@ func TestSupervisor_CancelsAttemptContextBeforeRestart(t *testing.T) {
 		WithPolicy(Transient),
 		WithRestartDelay(0),
 	)
-	if err := supervisor.Run(t.Context()); err != nil {
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- supervisor.Run(ctx) }()
+	<-secondFinished
+	cancel()
+	if err := <-done; err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
 }
@@ -103,26 +116,11 @@ func TestSupervisor_CancellationNormalizesChildError(t *testing.T) {
 
 		done := make(chan error, 1)
 		go func() { done <- supervisor.Run(ctx) }()
-		waitForSupervisorRunning(t, supervisor)
 		cancel()
 		close(release)
 
 		if err := <-done; err != nil {
 			t.Fatalf("expected clean shutdown, got %v", err)
 		}
-	}
-}
-
-func waitForSupervisorRunning(t *testing.T, supervisor *Supervisor) {
-	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for {
-		if supervisor.running.Load() {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for supervisor to start")
-		}
-		runtime.Gosched()
 	}
 }

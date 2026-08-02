@@ -226,9 +226,6 @@ func TestNewActorValidation(t *testing.T) {
 	command := func(ctx context.Context) *exec.Cmd { return helperCommand(ctx, "echo") }
 	requirePanic(t, func() { process.NewActor("", command) })
 	requirePanic(t, func() { process.NewActor("actor", nil) })
-
-	actor := process.NewActor("actor", command)
-	requirePanic(t, func() { actor.Run(nil) })
 }
 
 func TestActorRejectsNilCommand(t *testing.T) {

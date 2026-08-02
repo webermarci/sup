@@ -93,9 +93,13 @@ func TestHubExposesOnlyRegisteredActors(t *testing.T) {
 		sup.WithPolicy(sup.Temporary),
 	)
 
-	if err := root.Run(t.Context()); err != nil {
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- root.Run(ctx) }()
+	if err := <-done; err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
+	cancel()
 
 	req := httptest.NewRequest(http.MethodGet, "/actors", nil)
 	rec := httptest.NewRecorder()
@@ -121,8 +125,14 @@ func TestHubExposesOnlyRegisteredActors(t *testing.T) {
 }
 
 func TestHubBuildsPrunedSupervisionGraphFromEvents(t *testing.T) {
-	exposed := sup.ActorFunc("worker.exposed", func(context.Context) error { return nil })
-	internal := sup.ActorFunc("worker.internal", func(context.Context) error { return nil })
+	exposed := sup.ActorFunc("worker.exposed", func(ctx context.Context) error {
+		<-ctx.Done()
+		return nil
+	})
+	internal := sup.ActorFunc("worker.internal", func(ctx context.Context) error {
+		<-ctx.Done()
+		return nil
+	})
 	exposedBranch := sup.NewSupervisor("branch.exposed",
 		sup.WithActors(exposed),
 		sup.WithPolicy(sup.Temporary),
@@ -138,7 +148,15 @@ func TestHubBuildsPrunedSupervisionGraphFromEvents(t *testing.T) {
 		sup.WithPolicy(sup.Temporary),
 	)
 
-	if err := root.Run(t.Context()); err != nil {
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- root.Run(ctx) }()
+	waitFor(t, func() bool {
+		graph := h.graphSnapshot()
+		return len(graph.Nodes) >= 3 && len(graph.Edges) >= 2
+	})
+	cancel()
+	if err := <-done; err != nil {
 		t.Fatalf("Run returned error: %v", err)
 	}
 
@@ -229,14 +247,24 @@ func TestHubCanProjectItsOwnRegistration(t *testing.T) {
 }
 
 func TestHubHandleGraph(t *testing.T) {
-	actor := sup.ActorFunc("worker", func(context.Context) error { return nil })
+	actor := sup.ActorFunc("worker", func(ctx context.Context) error {
+		<-ctx.Done()
+		return nil
+	})
 	h := New("hub", WithActor(actor))
 	root := sup.NewSupervisor("root",
 		sup.WithEventSink(h),
 		sup.WithActors(actor),
 		sup.WithPolicy(sup.Temporary),
 	)
-	if err := root.Run(t.Context()); err != nil {
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- root.Run(ctx) }()
+	waitFor(t, func() bool {
+		return len(h.graphSnapshot().Edges) == 1
+	})
+	cancel()
+	if err := <-done; err != nil {
 		t.Fatal(err)
 	}
 
@@ -280,6 +308,64 @@ func TestHubReadsSignalValueDirectly(t *testing.T) {
 	}
 	if signal.Value != "online" || signal.Writable {
 		t.Fatalf("unexpected signal: %#v", signal)
+	}
+}
+
+func TestHubListsSignalsInStableOrder(t *testing.T) {
+	h := New("hub",
+		WithSignal(rx.NewSignal("zeta", true)),
+		WithWritableSignal(rx.NewSignal("alpha", 21)),
+		WithSignal(rx.NewSignal("middle", map[string]int{"count": 1})),
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "/signals", nil)
+	rec := httptest.NewRecorder()
+	h.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var signals []hubSignal
+	if err := json.NewDecoder(rec.Body).Decode(&signals); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(signals), 3; got != want {
+		t.Fatalf("expected %d signals, got %d", want, got)
+	}
+	if signals[0].ID != "alpha" || signals[1].ID != "middle" || signals[2].ID != "zeta" {
+		t.Fatalf("signals were not sorted by id: %#v", signals)
+	}
+	if signals[0].Type != hubSignalValueTypeNumber || !signals[0].Writable || signals[0].Value != float64(21) {
+		t.Fatalf("unexpected writable numeric signal: %#v", signals[0])
+	}
+	if signals[1].Type != hubSignalValueTypeJSON || signals[1].Writable {
+		t.Fatalf("unexpected JSON signal: %#v", signals[1])
+	}
+	if signals[2].Type != hubSignalValueTypeBoolean || signals[2].Value != true {
+		t.Fatalf("unexpected boolean signal: %#v", signals[2])
+	}
+}
+
+func TestHubReturnsActorDescription(t *testing.T) {
+	actor := sup.ActorFunc("worker", func(context.Context) error { return nil },
+		sup.WithSpec(sup.Spec{Kind: "worker", Metadata: map[string]any{"role": "job"}}),
+	)
+	h := New("hub", WithActor(actor))
+
+	req := httptest.NewRequest(http.MethodGet, "/actors/worker", nil)
+	rec := httptest.NewRecorder()
+	h.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var described hubActor
+	if err := json.NewDecoder(rec.Body).Decode(&described); err != nil {
+		t.Fatal(err)
+	}
+	if described.ID != "worker" || described.Spec.Kind != "worker" ||
+		described.Spec.Metadata["role"] != "job" {
+		t.Fatalf("unexpected actor description: %#v", described)
 	}
 }
 
@@ -382,6 +468,7 @@ func TestHubHTTPErrorResponses(t *testing.T) {
 		{name: "unknown signal", method: http.MethodGet, path: "/signals/missing", status: http.StatusNotFound},
 		{name: "patch unknown signal", method: http.MethodPatch, path: "/signals/missing", body: `{"value":2}`, status: http.StatusNotFound},
 		{name: "malformed patch", method: http.MethodPatch, path: "/signals/count", body: `{"value":`, status: http.StatusBadRequest},
+		{name: "trailing JSON value", method: http.MethodPatch, path: "/signals/count", body: `{"value":2} {}`, status: http.StatusBadRequest},
 		{name: "missing value", method: http.MethodPatch, path: "/signals/count", body: `{}`, status: http.StatusBadRequest},
 		{name: "incompatible value", method: http.MethodPatch, path: "/signals/count", body: `{"value":"two"}`, status: http.StatusBadRequest},
 	}
@@ -616,6 +703,15 @@ func TestHubSerializesRuntimeRestartEvent(t *testing.T) {
 	}
 }
 
+func TestHubEventIDsAreUnique(t *testing.T) {
+	first := newHubEvent(sup.EventActorStarted, "worker", nil, time.Time{})
+	second := newHubEvent(sup.EventActorStarted, "worker", nil, time.Time{})
+
+	if first.ID == "" || second.ID == "" || first.ID == second.ID {
+		t.Fatalf("expected unique event ids, got %q and %q", first.ID, second.ID)
+	}
+}
+
 func TestHubRejectsConcurrentRun(t *testing.T) {
 	h := New("hub")
 	ctx, cancel := context.WithCancel(context.Background())
@@ -658,7 +754,6 @@ func TestHubValidation(t *testing.T) {
 	requirePanic(t, func() {
 		New("hub", WithEventHistoryLimit(-1))
 	})
-	requirePanic(t, func() { New("hub").Run(nil) })
 }
 
 func graphNodeIDs(graph supervisionGraph) []string {

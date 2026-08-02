@@ -9,10 +9,6 @@ jobs:
     permissions:
       contents: read
 
-    strategy:
-      matrix:
-        module: [".", "modbus", "mqtt", "ws"]
-
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -24,7 +20,5 @@ jobs:
           go-version: "stable"
           cache: true
 
-      - name: Test ${{ matrix.module }}
-        run: |
-          cd ${{ matrix.module }}
-          go test -v -race ./...
+      - name: Test
+        run: go test -v -race ./...

@@ -11,6 +11,10 @@ var ErrInboxFull = errors.New("sup: inbox is full")
 type inbox[T any] chan T
 
 func (i inbox[T]) send(ctx context.Context, value T, block bool) error {
+	if ctx == nil {
+		panic("sup: context cannot be nil")
+	}
+
 	if block {
 		select {
 		case i <- value:
@@ -25,6 +29,7 @@ func (i inbox[T]) send(ctx context.Context, value T, block bool) error {
 		return ctx.Err()
 	default:
 	}
+
 	select {
 	case i <- value:
 		return nil

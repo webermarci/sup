@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"slices"
@@ -247,15 +248,12 @@ func (h *Hub) eventsSnapshot() []hubEvent {
 }
 
 func (h *Hub) publish(event hubEvent) {
-	snapshot, err := snapshotHubEvent(event)
+	snapshot, data, err := snapshotHubEvent(event)
 	if err != nil {
 		return
 	}
 
-	msg, err := formatHubEventSSE(snapshot)
-	if err != nil {
-		return
-	}
+	msg := fmt.Appendf(nil, "id: %s\nevent: %s\ndata: %s\n\n", snapshot.ID, snapshot.Type, data)
 
 	h.mu.Lock()
 	defer h.mu.Unlock()

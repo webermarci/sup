@@ -41,12 +41,6 @@ func Debounce[V any](input <-chan V, wait time.Duration) <-chan V {
 				if timer == nil {
 					timer = time.NewTimer(wait)
 				} else {
-					if !timer.Stop() {
-						select {
-						case <-timer.C:
-						default:
-						}
-					}
 					timer.Reset(wait)
 				}
 				timerC = timer.C

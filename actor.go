@@ -6,7 +6,7 @@ import "context"
 //
 // Run must return nil when its context is canceled or the actor completes
 // intentionally. It should return a non-nil error only for failures that may
-// require a restart. Panics are recovered by Supervisor and treated as failures.
+// require a restart. Panics are recovered by supervisors and treated as failures.
 type Actor interface {
 	// ID returns the actor id.
 	ID() string

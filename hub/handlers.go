@@ -55,13 +55,16 @@ func (h *Hub) handleSetSignal(w http.ResponseWriter, r *http.Request) {
 		Value json.RawMessage `json:"value"`
 	}
 
-	raw, err := io.ReadAll(r.Body)
-	if err != nil {
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(&request); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	if err := json.Unmarshal(raw, &request); err != nil {
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			err = errors.New("request body must contain a single JSON value")
+		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
