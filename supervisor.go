@@ -28,14 +28,6 @@ const (
 	Temporary
 )
 
-type supervisorConfig struct {
-	policy        RestartPolicy
-	restartDelay  time.Duration
-	maxRestarts   int
-	restartWindow time.Duration
-	eventSinks    []EventSink
-}
-
 // SupervisorOption configures a Supervisor during construction.
 type SupervisorOption func(*Supervisor)
 
@@ -43,28 +35,57 @@ type SupervisorOption func(*Supervisor)
 func WithActors(actors ...Actor) SupervisorOption {
 	configured := slices.Clone(actors)
 	return func(supervisor *Supervisor) {
+		actorIDs := make(map[string]struct{}, len(supervisor.actors)+len(configured))
+		for _, actor := range supervisor.actors {
+			actorIDs[actor.ID()] = struct{}{}
+		}
+
+		for _, actor := range configured {
+			if actor == nil {
+				panic("sup: cannot add nil actor")
+			}
+
+			id := actor.ID()
+			if id == "" {
+				panic("sup: actor id cannot be empty")
+			}
+			if _, exists := actorIDs[id]; exists {
+				panic("sup: duplicate actor id: " + id)
+			}
+			actorIDs[id] = struct{}{}
+		}
 		supervisor.actors = append(supervisor.actors, configured...)
 	}
 }
 
 // WithPolicy configures the supervisor restart policy.
 func WithPolicy(policy RestartPolicy) SupervisorOption {
-	validateRestartPolicy(policy)
-	return func(supervisor *Supervisor) { supervisor.config.policy = policy }
+	return func(supervisor *Supervisor) {
+		if policy > Temporary {
+			panic("sup: invalid restart policy")
+		}
+		supervisor.policy = policy
+	}
 }
 
 // WithRestartDelay configures the exact delay between actor restart attempts.
 func WithRestartDelay(delay time.Duration) SupervisorOption {
-	validateRestartDelay(delay)
-	return func(supervisor *Supervisor) { supervisor.config.restartDelay = delay }
+	return func(supervisor *Supervisor) {
+		if delay < 0 {
+			panic("sup: restart delay must be non-negative")
+		}
+		supervisor.restartDelay = delay
+	}
 }
 
 // WithRestartLimit limits restarts within a time window.
 func WithRestartLimit(maxRestarts int, window time.Duration) SupervisorOption {
-	validateRestartLimit(maxRestarts, window)
 	return func(supervisor *Supervisor) {
-		supervisor.config.maxRestarts = maxRestarts
-		supervisor.config.restartWindow = window
+		if maxRestarts <= 0 || window <= 0 {
+			panic("sup: maxRestarts and window must be positive")
+		}
+		supervisor.maxRestarts = maxRestarts
+		supervisor.restartWindow = window
 	}
 }
 
@@ -73,49 +94,12 @@ func WithRestartLimit(maxRestarts int, window time.Duration) SupervisorOption {
 func WithEventSink(sinks ...EventSink) SupervisorOption {
 	configured := slices.Clone(sinks)
 	return func(supervisor *Supervisor) {
-		supervisor.config.eventSinks = append(supervisor.config.eventSinks, configured...)
-	}
-}
-
-func validateRestartPolicy(policy RestartPolicy) {
-	if policy > Temporary {
-		panic("sup: invalid restart policy")
-	}
-}
-
-func validateRestartDelay(delay time.Duration) {
-	if delay < 0 {
-		panic("sup: restart delay must be non-negative")
-	}
-}
-
-func validateRestartLimit(maxRestarts int, window time.Duration) {
-	if maxRestarts <= 0 || window <= 0 {
-		panic("sup: maxRestarts and window must be positive")
-	}
-}
-
-func defaultSupervisorConfig() supervisorConfig {
-	return supervisorConfig{
-		policy:       Transient,
-		restartDelay: time.Second,
-	}
-}
-
-func validateEventSinks(sinks []EventSink) {
-	for _, sink := range sinks {
-		if sink == nil {
-			panic("sup: cannot add nil event sink")
+		for _, sink := range configured {
+			if sink == nil {
+				panic("sup: cannot add nil event sink")
+			}
 		}
-	}
-}
-
-func validateActor(actor Actor) {
-	if actor == nil {
-		panic("sup: cannot add nil actor")
-	}
-	if actor.ID() == "" {
-		panic("sup: actor id cannot be empty")
+		supervisor.eventSinks = append(supervisor.eventSinks, configured...)
 	}
 }
 
@@ -131,20 +115,20 @@ func (s *Supervisor) runActor(ctx context.Context, actor Actor) error {
 		cancelActor()
 		emitSupervisorEvent(ctx, s, EventActorStopped, actor, err, 0)
 
-		if ctx.Err() != nil || s.config.policy == Temporary ||
-			(s.config.policy == Transient && err == nil) {
+		if ctx.Err() != nil || s.policy == Temporary ||
+			(s.policy == Transient && err == nil) {
 			return nil
 		}
 
-		if s.config.maxRestarts > 0 {
+		if s.maxRestarts > 0 {
 			now := time.Now()
-			if windowStart.IsZero() || now.Sub(windowStart) > s.config.restartWindow {
+			if windowStart.IsZero() || now.Sub(windowStart) > s.restartWindow {
 				windowStart = now
 				restarts = 0
 			}
-			if restarts >= s.config.maxRestarts {
+			if restarts >= s.maxRestarts {
 				return fmt.Errorf("actor %s exceeded %d restarts in %v",
-					actor.ID(), s.config.maxRestarts, s.config.restartWindow)
+					actor.ID(), s.maxRestarts, s.restartWindow)
 			}
 		}
 
@@ -153,11 +137,11 @@ func (s *Supervisor) runActor(ctx context.Context, actor Actor) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if s.config.restartDelay > 0 {
+		if s.restartDelay > 0 {
 			select {
 			case <-ctx.Done():
 				return nil
-			case <-time.After(s.config.restartDelay):
+			case <-time.After(s.restartDelay):
 			}
 		}
 	}
@@ -166,10 +150,14 @@ func (s *Supervisor) runActor(ctx context.Context, actor Actor) error {
 // Supervisor runs a fixed set of actors and restarts them according to its
 // restart policy. A supervisor is itself an Actor and may be nested.
 type Supervisor struct {
-	id      string
-	actors  []Actor
-	config  supervisorConfig
-	running atomic.Bool
+	id            string
+	actors        []Actor
+	policy        RestartPolicy
+	restartDelay  time.Duration
+	maxRestarts   int
+	restartWindow time.Duration
+	eventSinks    []EventSink
+	running       atomic.Bool
 }
 
 var _ Actor = (*Supervisor)(nil)
@@ -181,8 +169,9 @@ func NewSupervisor(id string, options ...SupervisorOption) *Supervisor {
 		panic("sup: supervisor id cannot be empty")
 	}
 	supervisor := &Supervisor{
-		id:     id,
-		config: defaultSupervisorConfig(),
+		id:           id,
+		policy:       Transient,
+		restartDelay: time.Second,
 	}
 	for _, option := range options {
 		if option == nil {
@@ -191,15 +180,6 @@ func NewSupervisor(id string, options ...SupervisorOption) *Supervisor {
 		option(supervisor)
 	}
 
-	actorIDs := make(map[string]struct{}, len(supervisor.actors))
-	for _, actor := range supervisor.actors {
-		validateActor(actor)
-		if _, exists := actorIDs[actor.ID()]; exists {
-			panic("sup: duplicate actor id: " + actor.ID())
-		}
-		actorIDs[actor.ID()] = struct{}{}
-	}
-	validateEventSinks(supervisor.config.eventSinks)
 	return supervisor
 }
 
@@ -222,12 +202,11 @@ func (s *Supervisor) Run(ctx context.Context) error {
 		return nil
 	}
 
-	runCtx, cancel := context.WithCancel(withEventSinks(ctx, s.config.eventSinks))
+	runCtx, cancel := context.WithCancel(withEventSinks(ctx, s.eventSinks))
 	defer cancel()
 
 	results := make(chan error, len(s.actors))
 	for _, actor := range s.actors {
-		actor := actor
 		go func() {
 			results <- s.runActor(runCtx, actor)
 		}()
@@ -271,9 +250,9 @@ func (s *Supervisor) Inspect() Spec {
 		Dependencies: []string{},
 		Metadata: map[string]any{
 			"actor_count":    len(s.actors),
-			"restart_window": s.config.restartWindow,
-			"restart_delay":  s.config.restartDelay,
-			"max_restarts":   s.config.maxRestarts,
+			"restart_window": s.restartWindow,
+			"restart_delay":  s.restartDelay,
+			"max_restarts":   s.maxRestarts,
 		},
 	}
 }
