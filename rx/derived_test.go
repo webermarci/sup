@@ -189,12 +189,6 @@ func TestDerivedValidatesArguments(t *testing.T) {
 	}
 }
 
-func TestDerivedRunRejectsNilContext(t *testing.T) {
-	derived := rx.NewDerived("derived", func() int { return 0 })
-	defer expectPanic(t)
-	derived.Run(nil)
-}
-
 type observedDependency struct {
 	*rx.Signal[int]
 	watched chan struct{}

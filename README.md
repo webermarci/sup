@@ -9,6 +9,11 @@ signal package.
 
 It provides typed inboxes for actor communication, OTP-style supervision with restart policies, reactive values that can be composed and observed, and an optional HTTP hub for inspecting actors, signals, supervision, and events.
 
+The core package is intentionally small: actors own application behavior and
+state, while supervisors own lifecycle and recovery. Start with the core
+package and add `rx`, `hub`, or `process` only when your application needs
+those capabilities.
+
 ## Features
 
 - **Idiomatic actors** — An actor is any value that implements `ID()` and `Run(context.Context) error`.
@@ -25,6 +30,45 @@ It provides typed inboxes for actor communication, OTP-style supervision with re
 ```bash
 go get github.com/webermarci/sup
 ```
+
+The module requires Go 1.26.3 or newer.
+
+## Start here
+
+A typical application built with `sup` has this shape:
+
+1. Define one or more actors that implement `ID` and `Run`.
+2. Put the actors under a root `Supervisor`.
+3. Expose actor operations through typed `CastInbox` and `CallInbox` values.
+4. Run the root supervisor with the application's context.
+5. Add `rx` for shared reactive state, `hub` for an HTTP inspection surface, or
+   `process` for supervised external commands.
+
+The most important design rules are:
+
+- Treat context cancellation as a normal shutdown and return `nil` from
+  `Run`.
+- Return a non-nil error only for a failure that should be visible to the
+  supervisor and may require a restart.
+- Keep mutable actor state owned by the actor's `Run` loop; use inboxes for
+  concurrent callers to communicate with it.
+- Do not close inboxes yourself. Their lifetime is controlled by the actor's
+  context.
+- `CallInbox` handlers should reply once and check the boolean result of
+  `Reply`, because the caller may have canceled.
+- Put every `rx.Derived` value that should update into a supervisor tree; a
+  derived value is an actor, unlike a passive `rx.Signal`.
+
+### Package map
+
+| Package | Use it for |
+| --- | --- |
+| `github.com/webermarci/sup` | Actors, supervisors, typed inboxes, and runtime events |
+| `github.com/webermarci/sup/rx` | Signals, derived state, and channel pipelines |
+| `github.com/webermarci/sup/hub` | HTTP snapshots, live events, and optional signal controls |
+| `github.com/webermarci/sup/process` | Running `os/exec.Cmd` values as supervised actors |
+
+For the API reference, see the [core package documentation](https://pkg.go.dev/github.com/webermarci/sup), [`rx`](https://pkg.go.dev/github.com/webermarci/sup/rx), [`hub`](https://pkg.go.dev/github.com/webermarci/sup/hub), and [`process`](https://pkg.go.dev/github.com/webermarci/sup/process) package pages. The repository also contains a minimal [simple example](examples/simple) and a complete [dashboard example](examples/dashboard).
 
 ## Quick start
 
@@ -229,6 +273,10 @@ if err := supervisor.Run(ctx); err != nil {
 | `Transient` | stop | restart |
 | `Temporary` | stop | stop |
 
+`NewSupervisor` defaults to the `Transient` policy, a one-second restart
+delay, and no restart limit. Configure the delay and limit explicitly when
+restart timing or failure budgets are part of the application's behavior.
+
 ### Runtime events
 
 An `EventSink` receives lifecycle events from a supervisor and all of its
@@ -338,6 +386,8 @@ Every `Set` is a publication, even when it repeats the current value. Signals do
 not run under a supervisor; actors own behavior and set signals:
 
 ```go
+random := rx.NewSignal("random", 0)
+
 poller := sup.ActorFunc("random.poller", func(ctx context.Context) error {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -359,6 +409,10 @@ need contexts: cancellation closes the subscription channel, and that closure
 propagates through the pipeline.
 
 ```go
+ctx, cancel := context.WithCancel(context.Background())
+defer cancel()
+count := rx.NewSignal("count", 0)
+
 processed := rx.Map(
 	rx.Filter(
 		rx.Debounce(count.Subscribe(ctx), 100*time.Millisecond),
@@ -380,7 +434,8 @@ Available helpers:
 
 Helper outputs have capacity one and coalesce pending values to the latest.
 They close when their input closes. Debounce and throttle durations must be
-positive.
+positive. `Debounce` and `ThrottleLatest` do not flush a pending value when
+their input closes.
 
 ### Derived
 
@@ -422,10 +477,11 @@ and event updates from the SSE stream. It has no frontend dependencies.
 
 ```go
 enabled := rx.NewSignal("counter_enabled", true)
+status := rx.NewSignal("counter_status", "ready")
 
 dashboard := hub.New("dashboard",
 	hub.WithActor(counter),
-	hub.WithSignal(counter.StateSignal),
+	hub.WithSignal(status),
 	hub.WithWritableSignal(enabled),
 	hub.WithEventHistoryLimit(128),
 )
@@ -448,6 +504,11 @@ to that signal using the ordinary `rx` API; the hub does not define a separate
 command or control model. Writable signals can also be changed with the forms
 in the HTML overview, which call the same `PATCH` endpoint without reloading the
 page.
+
+The hub does not provide authentication or authorization. If the handler is
+reachable outside a trusted local environment, put it behind the application's
+own authentication, authorization, and network controls—especially when using
+`WithWritableSignal`.
 
 ```http
 PATCH /signals/counter_enabled
@@ -487,7 +548,12 @@ stationary yellow state and turn the pedestrian signal off.
 ## Packages
 
 - `sup` — Core actors, supervisors, typed inboxes, and runtime events.
-- `rx` — Reactive signals, derived state, and channel helpers.
+- `sup/rx` — Reactive signals, derived state, and channel helpers.
 - `sup/hub` — HTTP API for actors, signals, supervision, and events.
 - `sup/process` — Actor adapter for `os/exec` commands.
-- `sup/resource` — Supervised, serialized access to acquired resources.
+
+For package-level documentation that is available through `go doc` and
+`pkg.go.dev`, start with the package comments in `doc.go`, `rx/doc.go`,
+`hub/doc.go`, and `process/doc.go`. Examples in this README are intended to be
+copied into an application and adapted to its own actors, messages, and
+shutdown policy.

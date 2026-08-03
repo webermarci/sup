@@ -1,4 +1,3 @@
-// Package process adapts standard-library os/exec commands to sup actors.
 package process
 
 import (

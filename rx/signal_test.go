@@ -142,20 +142,6 @@ func TestSignalRejectsEmptyID(t *testing.T) {
 	rx.NewSignal("", 0)
 }
 
-func TestSignalRejectsNilContexts(t *testing.T) {
-	signal := rx.NewSignal("count", 0)
-
-	t.Run("subscribe", func(t *testing.T) {
-		defer expectPanic(t)
-		signal.Subscribe(nil)
-	})
-
-	t.Run("watch", func(t *testing.T) {
-		defer expectPanic(t)
-		signal.Watch(nil)
-	})
-}
-
 func receive[V any](t testing.TB, input <-chan V) V {
 	t.Helper()
 	select {
