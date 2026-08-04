@@ -26,22 +26,6 @@ func TestCallInbox(t *testing.T) {
 	}
 }
 
-func TestCallInboxTryCall(t *testing.T) {
-	inbox := sup.NewCallInbox[string, int](1)
-	go func() {
-		req := <-inbox.Receive()
-		req.Reply(len(req.Payload()), nil)
-	}()
-
-	got, err := inbox.TryCall(t.Context(), "hello")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != 5 {
-		t.Fatalf("expected 5, got %d", got)
-	}
-}
-
 func TestCallInboxReplyError(t *testing.T) {
 	inbox := sup.NewCallInbox[string, string](1)
 	expectedErr := errors.New("hardware failure")
@@ -180,13 +164,6 @@ func TestZeroCallRequestReplyFails(t *testing.T) {
 	}
 	if req.Reply("reply", nil) {
 		t.Fatal("expected zero request reply to fail")
-	}
-}
-
-func TestCallInboxErrors(t *testing.T) {
-	inbox := sup.NewCallInbox[string, int](0)
-	if _, err := inbox.TryCall(t.Context(), "second"); !errors.Is(err, sup.ErrInboxFull) {
-		t.Fatalf("expected ErrInboxFull, got %v", err)
 	}
 }
 

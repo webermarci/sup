@@ -1,33 +1,12 @@
 package sup
 
-import (
-	"context"
-	"errors"
-)
-
-// ErrInboxFull is returned when a non-blocking send cannot be queued.
-var ErrInboxFull = errors.New("sup: inbox is full")
+import "context"
 
 type inbox[T any] chan T
 
-func (i inbox[T]) send(ctx context.Context, value T, block bool) error {
+func (i inbox[T]) send(ctx context.Context, value T) error {
 	if ctx == nil {
 		panic("sup: context cannot be nil")
-	}
-
-	if block {
-		select {
-		case i <- value:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
 	}
 
 	select {
@@ -35,8 +14,6 @@ func (i inbox[T]) send(ctx context.Context, value T, block bool) error {
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
-	default:
-		return ErrInboxFull
 	}
 }
 

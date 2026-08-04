@@ -48,25 +48,3 @@ func BenchmarkCastInbox_Parallel(b *testing.B) {
 		}
 	})
 }
-
-// BenchmarkCastInbox_TryCast measures the overhead of the non-blocking
-// path which avoids some of the select logic.
-func BenchmarkCastInbox_TryCast(b *testing.B) {
-	ctx := b.Context()
-	const batchSize = 1024
-	inbox := sup.NewCastInbox[int](batchSize)
-
-	b.ResetTimer()
-	for i := 0; b.Loop(); i++ {
-		if i > 0 && i%batchSize == 0 {
-			b.StopTimer()
-			for len(inbox.Receive()) > 0 {
-				<-inbox.Receive()
-			}
-			b.StartTimer()
-		}
-		if err := inbox.TryCast(ctx, i); err != nil {
-			b.Fatal(err)
-		}
-	}
-}

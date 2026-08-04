@@ -14,10 +14,5 @@ func NewCastInbox[T any](size int) *CastInbox[T] {
 
 // Cast sends a message, blocking until it is queued or the context is canceled.
 func (i *CastInbox[T]) Cast(ctx context.Context, message T) error {
-	return i.send(ctx, message, true)
-}
-
-// TryCast sends a message without blocking when the inbox is full.
-func (i *CastInbox[T]) TryCast(ctx context.Context, message T) error {
-	return i.send(ctx, message, false)
+	return i.send(ctx, message)
 }

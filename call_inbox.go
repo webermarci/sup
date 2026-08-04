@@ -17,20 +17,14 @@ func NewCallInbox[T any, R any](size int) *CallInbox[T, R] {
 
 // Call sends a request and waits for a reply or context cancellation.
 func (i *CallInbox[T, R]) Call(ctx context.Context, message T) (R, error) {
-	return i.call(ctx, message, true)
+	return i.call(ctx, message)
 }
 
-// TryCall attempts to queue a request without blocking on inbox capacity.
-// If the request is queued, it still waits for a reply or context cancellation.
-func (i *CallInbox[T, R]) TryCall(ctx context.Context, message T) (R, error) {
-	return i.call(ctx, message, false)
-}
-
-func (i *CallInbox[T, R]) call(ctx context.Context, message T, block bool) (R, error) {
+func (i *CallInbox[T, R]) call(ctx context.Context, message T) (R, error) {
 	var zero R
 	replyTo := make(chan result[R], 1)
 	req := CallRequest[T, R]{ctx: ctx, payload: message, replyTo: replyTo, replied: &atomic.Bool{}}
-	if err := i.send(ctx, req, block); err != nil {
+	if err := i.send(ctx, req); err != nil {
 		return zero, err
 	}
 

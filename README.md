@@ -316,7 +316,6 @@ or forward the same authoritative runtime event.
 inbox := sup.NewCastInbox[IncrementMessage](8)
 
 err := inbox.Cast(ctx, IncrementMessage{Amount: 1})    // blocks until queued or ctx is done
-err = inbox.TryCast(ctx, IncrementMessage{Amount: 1}) // returns ErrInboxFull if full
 
 for {
 	select {

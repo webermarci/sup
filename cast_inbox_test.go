@@ -18,16 +18,6 @@ func TestCastInbox(t *testing.T) {
 	}
 }
 
-func TestCastInboxErrors(t *testing.T) {
-	inbox := sup.NewCastInbox[int](1)
-	if err := inbox.TryCast(t.Context(), 1); err != nil {
-		t.Fatal(err)
-	}
-	if err := inbox.TryCast(t.Context(), 2); !errors.Is(err, sup.ErrInboxFull) {
-		t.Fatalf("expected ErrInboxFull, got %v", err)
-	}
-}
-
 func TestCastInboxCancellation(t *testing.T) {
 	inbox := sup.NewCastInbox[int](1)
 	if err := inbox.Cast(t.Context(), 1); err != nil {
@@ -36,12 +26,7 @@ func TestCastInboxCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	for _, send := range []func() error{
-		func() error { return inbox.Cast(ctx, 2) },
-		func() error { return inbox.TryCast(ctx, 2) },
-	} {
-		if err := send(); !errors.Is(err, context.Canceled) {
-			t.Fatalf("expected context cancellation, got %v", err)
-		}
+	if err := inbox.Cast(ctx, 2); !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context cancellation, got %v", err)
 	}
 }

@@ -25,14 +25,9 @@
 // # Communication
 //
 // Use CastInbox[T] for fire-and-forget messages and CallInbox[T, R] for
-// request/reply operations. Inboxes are bounded, so sending can block or fail
-// with a full-inbox error depending on whether Cast/Call or TryCast/TryCall is
-// used. Call handlers should reply at most once and should tolerate a caller
-// that has already canceled its context.
-//
-// A TryCall or TryCast only makes queue admission non-blocking. Once a call is
-// admitted, TryCall still waits for its reply or for the caller's context to
-// finish.
+// request/reply operations. Inboxes are bounded, so Cast and Call block until
+// admission or context cancellation. Call handlers should reply at most once
+// and should tolerate a caller that has already canceled its context.
 //
 // # Reactive state
 //
