@@ -28,6 +28,14 @@ const (
 	Temporary
 )
 
+// RestartDelayFunc calculates the delay before an actor restart. The restart
+// count starts at one for the first restart. A non-positive duration means no
+// delay.
+//
+// A supervisor may call the function concurrently for different actors, so it
+// must be safe for concurrent use.
+type RestartDelayFunc func(restartCount int) time.Duration
+
 // SupervisorOption configures a Supervisor during construction.
 type SupervisorOption func(*Supervisor)
 
@@ -75,6 +83,20 @@ func WithRestartDelay(delay time.Duration) SupervisorOption {
 			panic("sup: restart delay must be non-negative")
 		}
 		supervisor.restartDelay = delay
+		supervisor.restartDelayFunc = nil
+	}
+}
+
+// WithRestartDelayFunc configures a function that calculates the delay before
+// each actor restart. The restart count starts at one for the first restart.
+// A non-positive result means that the actor should restart immediately.
+func WithRestartDelayFunc(delay RestartDelayFunc) SupervisorOption {
+	if delay == nil {
+		panic("sup: restart delay function cannot be nil")
+	}
+
+	return func(supervisor *Supervisor) {
+		supervisor.restartDelayFunc = delay
 	}
 }
 
@@ -137,11 +159,16 @@ func (s *Supervisor) runActor(ctx context.Context, actor Actor) error {
 		if ctx.Err() != nil {
 			return nil
 		}
-		if s.restartDelay > 0 {
+
+		delay := s.restartDelay
+		if s.restartDelayFunc != nil {
+			delay = s.restartDelayFunc(restarts)
+		}
+		if delay > 0 {
 			select {
 			case <-ctx.Done():
 				return nil
-			case <-time.After(s.restartDelay):
+			case <-time.After(delay):
 			}
 		}
 	}
@@ -150,14 +177,15 @@ func (s *Supervisor) runActor(ctx context.Context, actor Actor) error {
 // Supervisor runs a fixed set of actors and restarts them according to its
 // restart policy. A supervisor is itself an Actor and may be nested.
 type Supervisor struct {
-	id            string
-	actors        []Actor
-	policy        RestartPolicy
-	restartDelay  time.Duration
-	maxRestarts   int
-	restartWindow time.Duration
-	eventSinks    []EventSink
-	running       atomic.Bool
+	id               string
+	actors           []Actor
+	policy           RestartPolicy
+	restartDelay     time.Duration
+	restartDelayFunc RestartDelayFunc
+	maxRestarts      int
+	restartWindow    time.Duration
+	eventSinks       []EventSink
+	running          atomic.Bool
 }
 
 var _ Actor = (*Supervisor)(nil)

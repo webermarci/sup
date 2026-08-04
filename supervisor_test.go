@@ -3,6 +3,7 @@ package sup_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -130,6 +131,39 @@ func TestSupervisor_RestartLimit(t *testing.T) {
 	}
 	if runs.Load() != 4 {
 		t.Fatalf("expected initial run and three restarts, got %d runs", runs.Load())
+	}
+}
+
+func TestSupervisor_RestartDelayFuncReceivesRestartCount(t *testing.T) {
+	var runs atomic.Int32
+	var mu sync.Mutex
+	var counts []int
+	actor := sup.ActorFunc("worker", func(context.Context) error {
+		if runs.Add(1) <= 2 {
+			return errors.New("fail")
+		}
+		return nil
+	})
+
+	supervisor := sup.NewSupervisor("sup",
+		sup.WithActors(actor),
+		sup.WithPolicy(sup.Transient),
+		sup.WithRestartDelayFunc(func(restartCount int) time.Duration {
+			mu.Lock()
+			counts = append(counts, restartCount)
+			mu.Unlock()
+			return 0
+		}),
+	)
+
+	if err := supervisor.Run(t.Context()); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(counts, []int{1, 2}) {
+		t.Fatalf("expected restart counts [1 2], got %v", counts)
 	}
 }
 
@@ -311,6 +345,9 @@ func TestSupervisorRejectsInvalidConfiguration(t *testing.T) {
 	})
 	requirePanic(t, func() {
 		sup.NewSupervisor("root", sup.WithRestartDelay(-time.Nanosecond))
+	})
+	requirePanic(t, func() {
+		sup.NewSupervisor("root", sup.WithRestartDelayFunc(nil))
 	})
 	requirePanic(t, func() {
 		sup.NewSupervisor("root", sup.WithRestartLimit(0, time.Second))

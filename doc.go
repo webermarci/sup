@@ -19,8 +19,9 @@
 // decide whether to restart it.
 //
 // NewSupervisor defaults to the Transient policy, a one-second restart delay,
-// and no restart limit. A restart limit can be added with
-// WithRestartLimit(maxRestarts, window).
+// and no restart limit. Configure a fixed delay with WithRestartDelay or
+// calculate one for each restart with WithRestartDelayFunc. A restart limit
+// can be added with WithRestartLimit(maxRestarts, window).
 //
 // # Communication
 //

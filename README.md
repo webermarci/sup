@@ -279,6 +279,20 @@ if err := supervisor.Run(ctx); err != nil {
 `NewSupervisor` defaults to the `Transient` policy, a one-second restart
 delay, and no restart limit. Configure the delay and limit explicitly when
 restart timing or failure budgets are part of the application's behavior.
+Use `WithRestartDelayFunc` when the application needs a different delay for
+each restart, such as a capped exponential backoff:
+
+```go
+sup.WithRestartDelayFunc(func(restartCount int) time.Duration {
+	if restartCount > 5 {
+		restartCount = 5
+	}
+	return time.Duration(1<<uint(restartCount-1)) * time.Second
+})
+```
+
+The function is called concurrently when multiple actors restart, and a
+non-positive result means restart immediately.
 
 ### Runtime events
 

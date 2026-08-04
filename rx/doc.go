@@ -1,17 +1,32 @@
 // Package rx provides shared reactive state and composable channel helpers.
 //
-// # Choosing a reactive type
+// # Getting started
 //
-// Signal is passive, concurrency-safe, writable state with independent
-// subscriptions. Derived is read-only state computed from one or more
-// dependencies. Unlike Signal, Derived is an actor: its Run method must be
-// managed by a supervisor if it should continue recomputing after construction.
+// Create a passive Signal for shared state and a Derived value for computed
+// state:
+//
+//	status := rx.NewSignal("status", "starting")
+//	summary := rx.NewDerived("summary", func() string {
+//		return "service: " + status.Value()
+//	}, status)
+//
+// A Derived value is an actor, so add it to a supervisor when it should keep
+// recomputing:
+//
+//	supervisor := sup.NewSupervisor("root", sup.WithActors(summary))
+//	go supervisor.Run(ctx)
+//
+// Subscribe to values or change notifications from any goroutine:
+//
+//	values := summary.Subscribe(ctx)
+//	status.Set("ready")
+//	value := <-values
 //
 // Map, Filter, Distinct, Debounce, and throttle helpers transform ordinary Go
 // channels. They can be nested into pipelines and do not require a separate
 // pipeline supervisor.
 //
-// # Important semantics
+// # Semantics
 //
 // Every Signal subscription starts with the current value. Subscriptions and
 // helper outputs have capacity one and coalesce pending values to the latest
