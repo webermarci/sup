@@ -41,8 +41,9 @@ A typical application built with `sup` has this shape:
 2. Put the actors under a root `Supervisor`.
 3. Expose actor operations through typed `CastInbox` and `CallInbox` values.
 4. Run the root supervisor with the application's context.
-5. Add `rx` for shared reactive state, `hub` for an HTTP inspection surface, or
-   `process` for supervised external commands.
+5. Add `rx` for shared reactive state, `hub` for an HTTP inspection surface,
+   `process` for supervised external commands, or `resource` for serialized
+   access to a resource such as a serial connection.
 
 The most important design rules are:
 
@@ -68,8 +69,9 @@ The most important design rules are:
 | `github.com/webermarci/sup/hub` | HTTP snapshots, live events, and optional signal controls |
 | `github.com/webermarci/sup/httpserver` | Supervised standard-library HTTP servers |
 | `github.com/webermarci/sup/process` | Running `os/exec.Cmd` values as supervised actors |
+| `github.com/webermarci/sup/resource` | Supervised, serialized access to acquired resources |
 
-For the API reference, see the [core package documentation](https://pkg.go.dev/github.com/webermarci/sup), [`rx`](https://pkg.go.dev/github.com/webermarci/sup/rx), [`hub`](https://pkg.go.dev/github.com/webermarci/sup/hub), [`httpserver`](https://pkg.go.dev/github.com/webermarci/sup/httpserver), and [`process`](https://pkg.go.dev/github.com/webermarci/sup/process) package pages. The repository also contains a minimal [simple example](examples/simple) and a complete [dashboard example](examples/dashboard).
+For the API reference, see the [core package documentation](https://pkg.go.dev/github.com/webermarci/sup), [`rx`](https://pkg.go.dev/github.com/webermarci/sup/rx), [`hub`](https://pkg.go.dev/github.com/webermarci/sup/hub), [`httpserver`](https://pkg.go.dev/github.com/webermarci/sup/httpserver), [`process`](https://pkg.go.dev/github.com/webermarci/sup/process), and [`resource`](https://pkg.go.dev/github.com/webermarci/sup/resource) package pages. The repository also contains a minimal [simple example](examples/simple) and a complete [dashboard example](examples/dashboard).
 
 ## Quick start
 
@@ -558,9 +560,11 @@ stationary yellow state and turn the pedestrian signal off.
 - `sup/hub` — HTTP API for actors, signals, supervision, and events.
 - `sup/httpserver` — Actor adapter for standard-library HTTP servers.
 - `sup/process` — Actor adapter for `os/exec` commands.
+- `sup/resource` — Serialized, supervised access to acquired resources.
 
 For package-level documentation that is available through `go doc` and
 `pkg.go.dev`, start with the package comments in `doc.go`, `rx/doc.go`,
-`hub/doc.go`, `httpserver/doc.go`, and `process/doc.go`. Examples in this README
+`hub/doc.go`, `httpserver/doc.go`, `process/doc.go`, and `resource/doc.go`.
+Examples in this README
 are intended to be copied into an application and adapted to its own actors,
 messages, and shutdown policy.
