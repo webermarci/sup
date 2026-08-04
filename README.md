@@ -66,9 +66,10 @@ The most important design rules are:
 | `github.com/webermarci/sup` | Actors, supervisors, typed inboxes, and runtime events |
 | `github.com/webermarci/sup/rx` | Signals, derived state, and channel pipelines |
 | `github.com/webermarci/sup/hub` | HTTP snapshots, live events, and optional signal controls |
+| `github.com/webermarci/sup/httpserver` | Supervised standard-library HTTP servers |
 | `github.com/webermarci/sup/process` | Running `os/exec.Cmd` values as supervised actors |
 
-For the API reference, see the [core package documentation](https://pkg.go.dev/github.com/webermarci/sup), [`rx`](https://pkg.go.dev/github.com/webermarci/sup/rx), [`hub`](https://pkg.go.dev/github.com/webermarci/sup/hub), and [`process`](https://pkg.go.dev/github.com/webermarci/sup/process) package pages. The repository also contains a minimal [simple example](examples/simple) and a complete [dashboard example](examples/dashboard).
+For the API reference, see the [core package documentation](https://pkg.go.dev/github.com/webermarci/sup), [`rx`](https://pkg.go.dev/github.com/webermarci/sup/rx), [`hub`](https://pkg.go.dev/github.com/webermarci/sup/hub), [`httpserver`](https://pkg.go.dev/github.com/webermarci/sup/httpserver), and [`process`](https://pkg.go.dev/github.com/webermarci/sup/process) package pages. The repository also contains a minimal [simple example](examples/simple) and a complete [dashboard example](examples/dashboard).
 
 ## Quick start
 
@@ -486,13 +487,19 @@ dashboard := hub.New("dashboard",
 	hub.WithEventHistoryLimit(128),
 )
 
+server := httpserver.NewActor("dashboard.http",
+	func(context.Context) (*http.Server, error) {
+		return &http.Server{Addr: ":8080", Handler: dashboard.Handler()}, nil
+	},
+	httpserver.WithShutdownTimeout(5*time.Second),
+)
+
 root := sup.NewSupervisor("root",
 	sup.WithEventSink(dashboard),
-	sup.WithActors(counter, dashboard),
+	sup.WithActors(counter, dashboard, server),
 )
 
 go root.Run(ctx)
-go http.ListenAndServe(":8080", dashboard.Handler())
 ```
 
 The overview is served at `/`. The handler is prefix-agnostic, so applications
@@ -550,10 +557,11 @@ stationary yellow state and turn the pedestrian signal off.
 - `sup` — Core actors, supervisors, typed inboxes, and runtime events.
 - `sup/rx` — Reactive signals, derived state, and channel helpers.
 - `sup/hub` — HTTP API for actors, signals, supervision, and events.
+- `sup/httpserver` — Actor adapter for standard-library HTTP servers.
 - `sup/process` — Actor adapter for `os/exec` commands.
 
 For package-level documentation that is available through `go doc` and
 `pkg.go.dev`, start with the package comments in `doc.go`, `rx/doc.go`,
-`hub/doc.go`, and `process/doc.go`. Examples in this README are intended to be
-copied into an application and adapted to its own actors, messages, and
-shutdown policy.
+`hub/doc.go`, `httpserver/doc.go`, and `process/doc.go`. Examples in this README
+are intended to be copied into an application and adapted to its own actors,
+messages, and shutdown policy.

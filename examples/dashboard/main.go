@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -11,6 +10,7 @@ import (
 	"time"
 
 	"github.com/webermarci/sup"
+	"github.com/webermarci/sup/httpserver"
 	"github.com/webermarci/sup/hub"
 	"github.com/webermarci/sup/rx"
 )
@@ -184,9 +184,16 @@ func main() {
 		hub.WithSignal(pedestrianSignal),
 	)
 
+	serverActor := httpserver.NewActor("dashboard.http",
+		func(context.Context) (*http.Server, error) {
+			return &http.Server{Addr: ":8080", Handler: dashboard.Handler()}, nil
+		},
+		httpserver.WithShutdownTimeout(2*time.Second),
+	)
+
 	root := sup.NewSupervisor("root",
 		sup.WithEventSink(dashboard),
-		sup.WithActors(intersection, pedestrianSignal, dashboard),
+		sup.WithActors(intersection, pedestrianSignal, dashboard, serverActor),
 	)
 
 	go func() {
@@ -196,17 +203,6 @@ func main() {
 		}
 	}()
 
-	server := &http.Server{Addr: ":8080", Handler: dashboard.Handler()}
-	go func() {
-		fmt.Println("traffic dashboard: http://localhost:8080")
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			fmt.Fprintln(os.Stderr, "dashboard stopped:", err)
-			cancel()
-		}
-	}()
-
+	fmt.Println("traffic dashboard: http://localhost:8080")
 	<-ctx.Done()
-	shutdownCtx, cancelShutdown := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancelShutdown()
-	_ = server.Shutdown(shutdownCtx)
 }
