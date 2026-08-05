@@ -11,7 +11,7 @@ import (
 func BenchmarkCallInbox_SingleWorker(b *testing.B) {
 	ctx := b.Context()
 
-	inbox := sup.NewCallInbox[int, int](128)
+	inbox := sup.NewCallInbox[int, int]()
 
 	go func() {
 		for req := range inbox.Receive() {
@@ -29,7 +29,7 @@ func BenchmarkCallInbox_SingleWorker(b *testing.B) {
 func BenchmarkCallInbox_Contention(b *testing.B) {
 	ctx := b.Context()
 
-	inbox := sup.NewCallInbox[int, int](1024)
+	inbox := sup.NewCallInbox[int, int]()
 
 	go func() {
 		for req := range inbox.Receive() {

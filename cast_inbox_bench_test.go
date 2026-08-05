@@ -10,7 +10,7 @@ import (
 // when there is a dedicated consumer clearing the queue.
 func BenchmarkCastInbox_SingleWorker(b *testing.B) {
 	ctx := b.Context()
-	inbox := sup.NewCastInbox[int](128)
+	inbox := sup.NewCastInbox[int]()
 
 	// Start a "sink" goroutine to drain the inbox as fast as possible
 	go func() {
@@ -31,7 +31,7 @@ func BenchmarkCastInbox_SingleWorker(b *testing.B) {
 // writers (multiple goroutines calling Cast at once).
 func BenchmarkCastInbox_Parallel(b *testing.B) {
 	ctx := b.Context()
-	inbox := sup.NewCastInbox[int](1024)
+	inbox := sup.NewCastInbox[int]()
 
 	go func() {
 		for range inbox.Receive() {

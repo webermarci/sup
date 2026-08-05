@@ -13,11 +13,6 @@ import (
 )
 
 const (
-	// DefaultCapacity is the default number of operations that may wait behind
-	// the operation currently using the resource. The active operation is not
-	// counted against this capacity.
-	DefaultCapacity = 8
-
 	// DefaultReleaseTimeout is the maximum duration supplied to a resource
 	// release function after an execution attempt ends.
 	DefaultReleaseTimeout = 5 * time.Second
@@ -52,33 +47,13 @@ type CallFunc[T any, R any] func(context.Context, T) (R, error)
 // terminates the resource actor and is handled by supervision.
 type CastFunc[T any] func(context.Context, T) error
 
-// Config contains resource actor configuration.
-type Config struct {
-	// Capacity is the number of operations that may wait behind the active
-	// operation. The active operation is not counted. Zero creates an
-	// unbuffered operation queue.
-	Capacity int
-
-	// ReleaseTimeout bounds the context passed to ReleaseFunc.
-	ReleaseTimeout time.Duration
+// config contains resource actor configuration.
+type config struct {
+	releaseTimeout time.Duration
 }
 
-// Option configures a resource actor during construction. The built-in
-// options are WithCapacity and WithReleaseTimeout; custom options can adjust
-// Config before the actor is created.
-type Option func(*Config)
-
-// WithCapacity sets the number of operations that may wait behind the active
-// operation. Calls block for admission when this queue is full.
-func WithCapacity(capacity int) Option {
-	if capacity < 0 {
-		panic("resource: capacity must be non-negative")
-	}
-
-	return func(config *Config) {
-		config.Capacity = capacity
-	}
-}
+// Option configures a resource actor during construction.
+type Option func(*config)
 
 // WithReleaseTimeout sets the maximum duration of the context passed to the
 // release function.
@@ -87,8 +62,8 @@ func WithReleaseTimeout(timeout time.Duration) Option {
 		panic("resource: release timeout must be positive")
 	}
 
-	return func(config *Config) {
-		config.ReleaseTimeout = timeout
+	return func(config *config) {
+		config.releaseTimeout = timeout
 	}
 }
 
@@ -99,7 +74,6 @@ type Actor[T any] struct {
 	id             string
 	acquire        AcquireFunc[T]
 	release        ReleaseFunc[T]
-	capacity       int
 	releaseTimeout time.Duration
 	running        atomic.Bool
 
@@ -151,9 +125,8 @@ func NewActor[T any](
 		panic("resource: release function cannot be nil")
 	}
 
-	config := Config{
-		Capacity:       DefaultCapacity,
-		ReleaseTimeout: DefaultReleaseTimeout,
+	config := config{
+		releaseTimeout: DefaultReleaseTimeout,
 	}
 	for _, option := range options {
 		if option == nil {
@@ -161,10 +134,7 @@ func NewActor[T any](
 		}
 		option(&config)
 	}
-	if config.Capacity < 0 {
-		panic("resource: capacity must be non-negative")
-	}
-	if config.ReleaseTimeout <= 0 {
+	if config.releaseTimeout <= 0 {
 		panic("resource: release timeout must be positive")
 	}
 
@@ -172,8 +142,7 @@ func NewActor[T any](
 		id:             id,
 		acquire:        acquire,
 		release:        release,
-		capacity:       config.Capacity,
-		releaseTimeout: config.ReleaseTimeout,
+		releaseTimeout: config.releaseTimeout,
 		startedC:       make(chan struct{}),
 	}
 }
@@ -189,7 +158,6 @@ func (a *Actor[T]) Inspect() sup.Spec {
 		Kind:         "resource",
 		Dependencies: []string{},
 		Metadata: map[string]any{
-			"capacity":        a.capacity,
 			"release_timeout": a.releaseTimeout,
 		},
 	}
@@ -208,7 +176,7 @@ func (a *Actor[T]) Run(ctx context.Context) (runErr error) {
 	}
 
 	current := &execution[T]{
-		requests: make(chan request[T], a.capacity),
+		requests: make(chan request[T]),
 		ready:    make(chan struct{}),
 		done:     make(chan struct{}),
 	}
@@ -284,11 +252,11 @@ func (a *Actor[T]) Run(ctx context.Context) (runErr error) {
 	}
 }
 
-// Call queues a request, waits for admission, and returns its typed result.
-// The operation is serialized with all other operations on the actor's
-// resource. It blocks while the queue is full. The caller's context controls
-// both queue admission and execution. Operation errors are returned to the
-// caller and do not stop the resource actor.
+// Call sends a request, waits for its typed result, and returns it. The
+// operation is serialized with all other operations on the actor's resource.
+// It blocks until the actor receives the request. The caller's context controls
+// both handoff and execution. Operation errors are returned to the caller and
+// do not stop the resource actor.
 func Call[T any, R any](
 	ctx context.Context,
 	actor *Actor[T],
@@ -342,12 +310,12 @@ func Call[T any, R any](
 	}
 }
 
-// Cast queues a fire-and-forget operation and returns once it has been
-// admitted. The operation is serialized with all other operations on the
-// actor's resource and may run after Cast returns. It blocks while the queue
-// is full. The context passed to operation is the actor's execution context;
-// ctx controls admission. If the operation returns an error, the resource
-// actor stops and supervision decides whether to restart it.
+// Cast sends a fire-and-forget operation and returns once the actor receives
+// it. The operation is serialized with all other operations on the actor's
+// resource and may run after Cast returns. The context passed to operation is
+// the actor's execution context; ctx controls handoff. If the operation
+// returns an error, the resource actor stops and supervision decides whether
+// to restart it.
 func Cast[T any](
 	ctx context.Context,
 	actor *Actor[T],

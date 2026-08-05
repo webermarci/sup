@@ -3,9 +3,9 @@
 //
 // # Getting started
 //
-// An Actor acquires a resource for each execution attempt, admits a bounded
-// queue of operations, runs them one at a time, and releases the resource when
-// the attempt ends. Acquisition failures and asynchronous Cast failures are
+// An Actor acquires a resource for each execution attempt, receives operations
+// directly, runs them one at a time, and releases the resource when the
+// attempt ends. Acquisition failures and asynchronous Cast failures are
 // returned to the supervisor. Call operation errors are returned to their
 // callers and do not automatically restart the resource.
 //
@@ -22,7 +22,6 @@
 //		func(ctx context.Context, device *Device) error {
 //			return device.Close(ctx)
 //		},
-//		resource.WithCapacity(16),
 //	)
 //
 //	supervisor := sup.NewSupervisor("root", sup.WithActors(device))
@@ -33,9 +32,9 @@
 //		return device.Read(ctx)
 //	})
 //
-// Use Cast when the caller only needs queue admission. A Cast operation error
+// Use Cast when the caller only needs direct handoff. A Cast operation error
 // stops the resource actor so its supervisor can apply the restart policy.
-// Both operations block when the configured operation queue is full and stop
+// Both operations block until the actor receives their request and stop
 // waiting when their context is canceled.
 //
 // A resource is released with a fresh timeout context when Run ends. That

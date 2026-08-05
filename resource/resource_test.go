@@ -41,7 +41,7 @@ func TestCallAndCast(t *testing.T) {
 		t.Fatalf("ID() = %q, want device", actor.ID())
 	}
 	spec := actor.Inspect()
-	if spec.Kind != "resource" || spec.Metadata["capacity"] != resource.DefaultCapacity {
+	if spec.Kind != "resource" || spec.Metadata["release_timeout"] != resource.DefaultReleaseTimeout {
 		t.Fatalf("unexpected spec: %#v", spec)
 	}
 
@@ -177,12 +177,11 @@ func TestOperationsAreSerialized(t *testing.T) {
 	}
 }
 
-func TestQueueCapacityHonorsCancellation(t *testing.T) {
+func TestOperationHandoffHonorsCancellation(t *testing.T) {
 	actor := resource.NewActor(
 		"device",
 		func(context.Context) (testResource, error) { return testResource{}, nil },
 		func(context.Context, testResource) error { return nil },
-		resource.WithCapacity(1),
 	)
 	cancelActor, done := startActor(t, actor)
 
@@ -199,14 +198,6 @@ func TestQueueCapacityHonorsCancellation(t *testing.T) {
 	case <-activeStarted:
 	case <-time.After(time.Second):
 		t.Fatal("active operation did not run")
-	}
-
-	queued := make(chan error, 1)
-	go func() {
-		queued <- resource.Cast(t.Context(), actor, func(context.Context, testResource) error { return nil })
-	}()
-	if err := awaitResult(t, queued); err != nil {
-		t.Fatalf("queued Cast() = %v, want nil", err)
 	}
 
 	callCtx, cancelCall := context.WithCancel(t.Context())
@@ -253,7 +244,7 @@ func TestCastFailureReleasesAndReacquires(t *testing.T) {
 	}
 	wantErr := errors.New("connection lost")
 	if err := resource.Cast(t.Context(), actor, func(context.Context, int) error { return wantErr }); err != nil {
-		t.Fatalf("failing Cast() = %v, want nil admission result", err)
+		t.Fatalf("failing Cast() = %v, want nil handoff result", err)
 	}
 	if err := awaitRun(t, firstDone); !errors.Is(err, wantErr) {
 		t.Fatalf("first Run() = %v, want connection lost", err)
@@ -327,7 +318,6 @@ func TestValidation(t *testing.T) {
 	requirePanic(t, func() {
 		resource.NewActor("actor", func(context.Context) (int, error) { return 0, nil }, func(context.Context, int) error { return nil }, nil)
 	})
-	requirePanic(t, func() { resource.WithCapacity(-1) })
 	requirePanic(t, func() { resource.WithReleaseTimeout(0) })
 
 	actor := resource.NewActor("actor", func(context.Context) (int, error) { return 0, nil }, func(context.Context, int) error { return nil })

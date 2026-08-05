@@ -11,7 +11,7 @@ import (
 )
 
 func TestCallInbox(t *testing.T) {
-	inbox := sup.NewCallInbox[string, int](1)
+	inbox := sup.NewCallInbox[string, int]()
 	go func() {
 		req := <-inbox.Receive()
 		req.Reply(len(req.Payload()), nil)
@@ -27,7 +27,7 @@ func TestCallInbox(t *testing.T) {
 }
 
 func TestCallInboxReplyError(t *testing.T) {
-	inbox := sup.NewCallInbox[string, string](1)
+	inbox := sup.NewCallInbox[string, string]()
 	expectedErr := errors.New("hardware failure")
 	go func() {
 		(<-inbox.Receive()).Reply("", expectedErr)
@@ -40,7 +40,7 @@ func TestCallInboxReplyError(t *testing.T) {
 
 func TestCallInboxWaitingForReplyCanBeCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	inbox := sup.NewCallInbox[string, int](1)
+	inbox := sup.NewCallInbox[string, int]()
 	queued := make(chan struct{})
 	go func() {
 		<-inbox.Receive()
@@ -59,7 +59,7 @@ func TestCallInboxWaitingForReplyCanBeCanceled(t *testing.T) {
 func TestCallRequestExposesCallerContext(t *testing.T) {
 	type key struct{}
 	ctx := context.WithValue(t.Context(), key{}, "value")
-	inbox := sup.NewCallInbox[string, string](1)
+	inbox := sup.NewCallInbox[string, string]()
 
 	done := make(chan struct{})
 	go func() {
@@ -78,7 +78,7 @@ func TestCallRequestExposesCallerContext(t *testing.T) {
 }
 
 func TestCallRequestReplyOnlySucceedsOnce(t *testing.T) {
-	inbox := sup.NewCallInbox[string, string](1)
+	inbox := sup.NewCallInbox[string, string]()
 	received := make(chan struct{})
 	go func() {
 		req := <-inbox.Receive()
@@ -98,7 +98,7 @@ func TestCallRequestReplyOnlySucceedsOnce(t *testing.T) {
 }
 
 func TestCallRequestReplyHasOneConcurrentWinner(t *testing.T) {
-	inbox := sup.NewCallInbox[string, int](1)
+	inbox := sup.NewCallInbox[string, int]()
 	requestCh := make(chan sup.CallRequest[string, int], 1)
 	go func() { requestCh <- <-inbox.Receive() }()
 
@@ -138,7 +138,7 @@ func TestCallRequestReplyHasOneConcurrentWinner(t *testing.T) {
 
 func TestCallRequestReplyFailsAfterCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
-	inbox := sup.NewCallInbox[string, string](1)
+	inbox := sup.NewCallInbox[string, string]()
 	reqCh := make(chan sup.CallRequest[string, string], 1)
 	go func() { reqCh <- <-inbox.Receive() }()
 
@@ -168,7 +168,7 @@ func TestZeroCallRequestReplyFails(t *testing.T) {
 }
 
 func TestCallInboxCallCanBeCanceledWhileAdmissionIsBlocked(t *testing.T) {
-	inbox := sup.NewCallInbox[string, int](0)
+	inbox := sup.NewCallInbox[string, int]()
 	baseCtx, cancel := context.WithCancel(t.Context())
 	ctx := &doneObservedContext{
 		Context:  baseCtx,

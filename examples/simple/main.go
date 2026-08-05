@@ -27,8 +27,8 @@ type Counter struct {
 func NewCounter(id string) *Counter {
 	return &Counter{
 		id:             id,
-		GetInbox:       sup.NewCallInbox[GetMessage, int](8),
-		IncrementInbox: sup.NewCastInbox[IncrementMessage](8),
+		GetInbox:       sup.NewCallInbox[GetMessage, int](),
+		IncrementInbox: sup.NewCastInbox[IncrementMessage](),
 	}
 }
 

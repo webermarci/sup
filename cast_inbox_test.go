@@ -9,20 +9,20 @@ import (
 )
 
 func TestCastInbox(t *testing.T) {
-	inbox := sup.NewCastInbox[string](1)
+	inbox := sup.NewCastInbox[string]()
+	received := make(chan string, 1)
+	go func() { received <- <-inbox.Receive() }()
+
 	if err := inbox.Cast(t.Context(), "hello"); err != nil {
 		t.Fatal(err)
 	}
-	if got := <-inbox.Receive(); got != "hello" {
+	if got := <-received; got != "hello" {
 		t.Fatalf("expected hello, got %q", got)
 	}
 }
 
 func TestCastInboxCancellation(t *testing.T) {
-	inbox := sup.NewCastInbox[int](1)
-	if err := inbox.Cast(t.Context(), 1); err != nil {
-		t.Fatal(err)
-	}
+	inbox := sup.NewCastInbox[int]()
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

@@ -17,7 +17,7 @@ func (i inbox[T]) send(ctx context.Context, value T) error {
 	}
 }
 
-// Receive returns the read-only queue channel.
+// Receive returns the read-only message channel.
 func (i inbox[T]) Receive() <-chan T {
 	return i
 }

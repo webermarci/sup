@@ -34,7 +34,7 @@ func NewTrafficLight(
 	paused *rx.Signal[bool],
 ) *TrafficLight {
 	return &TrafficLight{
-		ticks:              sup.NewCastInbox[Tick](1),
+		ticks:              sup.NewCastInbox[Tick](),
 		light:              rx.NewSignal("traffic_light", "green"),
 		secondsRemaining:   rx.NewSignal("seconds_remaining", cycleLengthSeconds.Value()),
 		cyclesCompleted:    rx.NewSignal("cycles_completed", 0),

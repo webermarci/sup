@@ -5,14 +5,14 @@ import (
 	"sync/atomic"
 )
 
-// CallInbox queues synchronous requests and delivers replies to callers.
+// CallInbox delivers synchronous requests and replies to callers.
 type CallInbox[T any, R any] struct {
 	inbox[CallRequest[T, R]]
 }
 
-// NewCallInbox creates a call inbox with the given buffer size.
-func NewCallInbox[T any, R any](size int) *CallInbox[T, R] {
-	return &CallInbox[T, R]{inbox: make(inbox[CallRequest[T, R]], size)}
+// NewCallInbox creates an unbuffered call inbox.
+func NewCallInbox[T any, R any]() *CallInbox[T, R] {
+	return &CallInbox[T, R]{inbox: make(inbox[CallRequest[T, R]])}
 }
 
 // Call sends a request and waits for a reply or context cancellation.

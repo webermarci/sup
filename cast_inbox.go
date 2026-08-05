@@ -2,17 +2,18 @@ package sup
 
 import "context"
 
-// CastInbox queues asynchronous messages for an actor.
+// CastInbox delivers asynchronous messages to an actor.
 type CastInbox[T any] struct {
 	inbox[T]
 }
 
-// NewCastInbox creates a cast inbox with the given buffer size.
-func NewCastInbox[T any](size int) *CastInbox[T] {
-	return &CastInbox[T]{inbox: make(inbox[T], size)}
+// NewCastInbox creates an unbuffered cast inbox.
+func NewCastInbox[T any]() *CastInbox[T] {
+	return &CastInbox[T]{inbox: make(inbox[T])}
 }
 
-// Cast sends a message, blocking until it is queued or the context is canceled.
+// Cast sends a message, blocking until an actor receives it or the context is
+// canceled.
 func (i *CastInbox[T]) Cast(ctx context.Context, message T) error {
 	return i.send(ctx, message)
 }
