@@ -21,5 +21,20 @@ jobs:
           check-latest: true
           cache: true
 
+      - name: Check formatting
+        shell: bash
+        run: |
+          files=( $(git ls-files -- '*.go') )
+          unformatted=$(gofmt -l "${files[@]}")
+
+          if [[ -n "$unformatted" ]]; then
+            echo "The following Go files are not formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
       - name: Test
         run: go test -v -race ./...

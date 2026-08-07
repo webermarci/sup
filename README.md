@@ -31,7 +31,7 @@ those capabilities.
 go get github.com/webermarci/sup
 ```
 
-The module requires Go 1.26.3 or newer.
+The module requires Go 1.26.5 or newer.
 
 ## Start here
 
