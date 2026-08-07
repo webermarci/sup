@@ -66,7 +66,6 @@ The most important design rules are:
 | --- | --- |
 | `github.com/webermarci/sup` | Actors, supervisors, typed inboxes, and runtime events |
 | `github.com/webermarci/sup/rx` | Signals, derived state, and channel pipelines |
-| `github.com/webermarci/sup/pubsub` | Typed in-memory topics for one-to-many actor communication |
 | `github.com/webermarci/sup/hub` | HTTP snapshots, live events, and optional signal controls |
 | `github.com/webermarci/sup/httpserver` | Supervised standard-library HTTP servers |
 | `github.com/webermarci/sup/process` | Running `os/exec.Cmd` values as supervised actors |
