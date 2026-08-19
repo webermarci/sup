@@ -42,7 +42,7 @@ func TestHubServesDebugPageAtMountedPath(t *testing.T) {
 		t.Fatalf("unexpected content type: %q", contentType)
 	}
 	for _, content := range []string{
-		"<h1>sup debug</h1>",
+		"<h1>sup/debug</h1>",
 		"data-graph",
 		"data-actors",
 		"data-signals",
