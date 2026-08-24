@@ -422,6 +422,9 @@ Available helpers:
 - `Filter` drops values that do not match.
 - `Distinct` drops consecutive equal comparable values.
 - `DistinctFunc` uses a custom equality function.
+- `Transitions` emits the previous and current values for each distinct change.
+- `TransitionsFunc` detects transitions with a custom equality function.
+- `Edges` emits rising and falling boolean transitions.
 - `Debounce` emits after a quiet period.
 - `ThrottleFirst` immediately emits the first value in each interval.
 - `ThrottleLatest` emits the latest value at the end of each interval.
