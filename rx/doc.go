@@ -22,6 +22,12 @@
 //	status.Set("ready")
 //	value := <-values
 //
+// Update performs an atomic read-modify-write and publishes the result:
+//
+//	count.Update(func(current int) int {
+//		return current + 1
+//	})
+//
 // Map, Filter, Distinct, Transitions, Edges, Debounce, and throttle helpers
 // transform ordinary Go channels. They can be nested into pipelines and do not
 // require a separate pipeline supervisor.

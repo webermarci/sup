@@ -2,6 +2,7 @@ package rx_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -68,6 +69,40 @@ func TestSignalSetPublishesRepeatedValue(t *testing.T) {
 
 	if got := receive(t, values); got != 1 {
 		t.Fatalf("expected repeated value 1, got %d", got)
+	}
+}
+
+func TestSignalUpdateAtomicallyReplacesAndPublishesValue(t *testing.T) {
+	signal := rx.NewSignal("count", 1)
+	values := signal.Subscribe(t.Context())
+	_ = receive(t, values)
+
+	if got := signal.Update(func(current int) int { return current + 1 }); got != 2 {
+		t.Fatalf("expected updated value 2, got %d", got)
+	}
+	if got := signal.Value(); got != 2 {
+		t.Fatalf("expected stored value 2, got %d", got)
+	}
+	if got := receive(t, values); got != 2 {
+		t.Fatalf("expected published value 2, got %d", got)
+	}
+}
+
+func TestSignalUpdateSerializesConcurrentUpdates(t *testing.T) {
+	signal := rx.NewSignal("count", 0)
+	var updates sync.WaitGroup
+
+	for range 100 {
+		updates.Go(func() {
+			for range 100 {
+				signal.Update(func(current int) int { return current + 1 })
+			}
+		})
+	}
+
+	updates.Wait()
+	if got := signal.Value(); got != 10_000 {
+		t.Fatalf("expected 10000 updates, got %d", got)
 	}
 }
 

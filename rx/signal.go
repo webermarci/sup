@@ -78,6 +78,24 @@ func (s *Signal[V]) Set(value V) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.setLocked(value)
+}
+
+// Update atomically replaces the current value with the result of update,
+// publishes it to every subscriber, and returns the new value.
+//
+// Update calls update while holding the signal lock. The function must not call
+// Value, Set, or Update on the same signal.
+func (s *Signal[V]) Update(update func(V) V) V {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	value := update(s.value)
+	s.setLocked(value)
+	return value
+}
+
+func (s *Signal[V]) setLocked(value V) {
 	s.value = value
 	for subscriber := range s.valueSubscribers {
 		sendLatest(subscriber, value)

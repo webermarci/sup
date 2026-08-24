@@ -371,6 +371,14 @@ count.Set(1)
 fmt.Println(count.Value())
 ```
 
+Use `Update` for an atomic read-modify-write:
+
+```go
+count.Update(func(current int) int {
+	return current + 1
+})
+```
+
 Every subscription starts with the current value and has capacity one. Pending
 updates are coalesced to the latest value, so slow subscribers never block
 `Set`. Each call to `Subscribe` creates an independent stream, and its channel
