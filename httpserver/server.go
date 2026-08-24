@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -34,49 +35,26 @@ type ServerFunc func(context.Context) (*http.Server, error)
 // supervisor restarts can serve again.
 type ServeFunc func(context.Context, *http.Server) error
 
-// Option configures an HTTP server actor during construction.
-type Option func(*Actor)
-
-// WithServe configures how the HTTP server is started. By default the actor
-// calls (*http.Server).ListenAndServe.
-func WithServe(serve ServeFunc) Option {
-	if serve == nil {
-		panic("httpserver: serve function cannot be nil")
-	}
-
-	return func(actor *Actor) {
-		actor.serve = serve
-	}
-}
-
-// WithShutdownTimeout configures the maximum time allowed for graceful
-// shutdown after the actor context is canceled.
-func WithShutdownTimeout(timeout time.Duration) Option {
-	if timeout <= 0 {
-		panic("httpserver: shutdown timeout must be positive")
-	}
-
-	return func(actor *Actor) {
-		actor.shutdownTimeout = timeout
-	}
-}
-
 // Actor creates and serves a fresh net/http Server for each execution attempt.
 // It is safe to call Run sequentially and rejects concurrent calls.
 type Actor struct {
-	id              string
-	server          ServerFunc
-	serve           ServeFunc
-	shutdownTimeout time.Duration
-	running         atomic.Bool
+	id                  string
+	server              ServerFunc
+	serve               ServeFunc
+	shutdownTimeout     time.Duration
+	configMu            sync.Mutex
+	configurationFrozen bool
+	running             atomic.Bool
 }
 
 var _ sup.Actor = (*Actor)(nil)
 var _ sup.Inspectable = (*Actor)(nil)
 
 // NewActor creates an HTTP server actor. The server function is called once
-// for each execution attempt and must return a fresh *http.Server.
-func NewActor(id string, server ServerFunc, options ...Option) *Actor {
+// for each execution attempt and must return a fresh *http.Server. Optional
+// configuration is added with methods before the first Run call. Configuration
+// is frozen after Run is called, and later setter calls panic.
+func NewActor(id string, server ServerFunc) *Actor {
 	if id == "" {
 		panic("httpserver: actor id cannot be empty")
 	}
@@ -90,14 +68,41 @@ func NewActor(id string, server ServerFunc, options ...Option) *Actor {
 		serve:           defaultServe,
 		shutdownTimeout: defaultShutdownTimeout,
 	}
-	for _, option := range options {
-		if option == nil {
-			panic("httpserver: option cannot be nil")
-		}
-		option(actor)
-	}
-
 	return actor
+}
+
+// SetServeFunc configures how the HTTP server is started and returns the
+// actor for chaining. By default the actor calls
+// (*http.Server).ListenAndServe.
+func (a *Actor) SetServeFunc(serve ServeFunc) *Actor {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
+	if a.configurationFrozen {
+		panic("httpserver: actor configuration is frozen")
+	}
+	if serve == nil {
+		panic("httpserver: serve function cannot be nil")
+	}
+	a.serve = serve
+	return a
+}
+
+// SetShutdownTimeout configures the maximum time allowed for graceful
+// shutdown after the actor context is canceled and returns the actor for
+// chaining.
+func (a *Actor) SetShutdownTimeout(timeout time.Duration) *Actor {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
+	if a.configurationFrozen {
+		panic("httpserver: actor configuration is frozen")
+	}
+	if timeout <= 0 {
+		panic("httpserver: shutdown timeout must be positive")
+	}
+	a.shutdownTimeout = timeout
+	return a
 }
 
 // ID returns the actor id.
@@ -107,6 +112,9 @@ func (a *Actor) ID() string {
 
 // Inspect returns the HTTP server actor spec.
 func (a *Actor) Inspect() sup.Spec {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
 	return sup.Spec{
 		Kind: "http_server",
 		Metadata: map[string]any{
@@ -127,6 +135,12 @@ func (a *Actor) Run(ctx context.Context) error {
 	}
 	defer a.running.Store(false)
 
+	a.configMu.Lock()
+	a.configurationFrozen = true
+	serve := a.serve
+	shutdownTimeout := a.shutdownTimeout
+	a.configMu.Unlock()
+
 	if ctx.Err() != nil {
 		return nil
 	}
@@ -144,14 +158,14 @@ func (a *Actor) Run(ctx context.Context) error {
 
 	served := make(chan error, 1)
 	go func() {
-		served <- a.serve(ctx, server)
+		served <- serve(ctx, server)
 	}()
 
 	select {
 	case err := <-served:
 		return normalizeServeError(ctx, err)
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), a.shutdownTimeout)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		_ = server.Shutdown(shutdownCtx)
 		cancel()
 		<-served

@@ -187,8 +187,7 @@ func main() {
 		func(context.Context) (*http.Server, error) {
 			return &http.Server{Addr: ":8080", Handler: dashboard.Handler()}, nil
 		},
-		httpserver.WithShutdownTimeout(2*time.Second),
-	)
+	).SetShutdownTimeout(2 * time.Second)
 
 	root := sup.NewSupervisor("root", sup.Transient).
 		AddEventSink(dashboard).

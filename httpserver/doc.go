@@ -15,9 +15,9 @@
 //
 // The ServerFunc is called once for every execution attempt and must return a
 // fresh *http.Server because a server cannot be reused after Shutdown. By
-// default, the actor calls ListenAndServe. Use WithServe for TLS, custom
-// listeners, or another serving mode. Use WithShutdownTimeout to bound the
-// graceful shutdown period.
+// default, the actor calls ListenAndServe. Use SetServeFunc for TLS, custom
+// listeners, or another serving mode. Use SetShutdownTimeout to bound the
+// graceful shutdown period. Configure these methods before the first Run call.
 //
 // Context cancellation performs graceful shutdown with the configured timeout.
 // http.ErrServerClosed is treated as a clean stop. Startup and unexpected

@@ -29,17 +29,16 @@ func TestActorServesAndShutsDownGracefully(t *testing.T) {
 				w.WriteHeader(http.StatusNoContent)
 			}),
 		}, nil
-	},
-		httpserver.WithShutdownTimeout(time.Second),
-		httpserver.WithServe(func(_ context.Context, server *http.Server) error {
+	}).
+		SetShutdownTimeout(time.Second).
+		SetServeFunc(func(_ context.Context, server *http.Server) error {
 			listener, err := net.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
 				return err
 			}
 			started <- "http://" + listener.Addr().String()
 			return server.Serve(listener)
-		}),
-	)
+		})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -75,9 +74,9 @@ func TestActorServesAndShutsDownGracefully(t *testing.T) {
 func TestActorNormalizesServerClosed(t *testing.T) {
 	actor := httpserver.NewActor("server", func(context.Context) (*http.Server, error) {
 		return &http.Server{}, nil
-	}, httpserver.WithServe(func(context.Context, *http.Server) error {
+	}).SetServeFunc(func(context.Context, *http.Server) error {
 		return http.ErrServerClosed
-	}))
+	})
 
 	if err := actor.Run(t.Context()); err != nil {
 		t.Fatalf("expected clean stop, got %v", err)
@@ -88,9 +87,9 @@ func TestActorReturnsServeError(t *testing.T) {
 	want := errors.New("serve failed")
 	actor := httpserver.NewActor("server", func(context.Context) (*http.Server, error) {
 		return &http.Server{}, nil
-	}, httpserver.WithServe(func(context.Context, *http.Server) error {
+	}).SetServeFunc(func(context.Context, *http.Server) error {
 		return want
-	}))
+	})
 
 	if err := actor.Run(t.Context()); !errors.Is(err, want) {
 		t.Fatalf("expected serve error %v, got %v", want, err)
@@ -123,9 +122,9 @@ func TestActorCreatesFreshServerForEveryRun(t *testing.T) {
 	actor := httpserver.NewActor("server", func(context.Context) (*http.Server, error) {
 		factories.Add(1)
 		return &http.Server{}, nil
-	}, httpserver.WithServe(func(context.Context, *http.Server) error {
+	}).SetServeFunc(func(context.Context, *http.Server) error {
 		return http.ErrServerClosed
-	}))
+	})
 
 	for range 2 {
 		if err := actor.Run(t.Context()); err != nil {
@@ -141,11 +140,11 @@ func TestActorRejectsConcurrentRun(t *testing.T) {
 	started := make(chan struct{})
 	actor := httpserver.NewActor("server", func(context.Context) (*http.Server, error) {
 		return &http.Server{}, nil
-	}, httpserver.WithServe(func(ctx context.Context, _ *http.Server) error {
+	}).SetServeFunc(func(ctx context.Context, _ *http.Server) error {
 		close(started)
 		<-ctx.Done()
 		return nil
-	}))
+	})
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -183,15 +182,29 @@ func TestActorValidation(t *testing.T) {
 	server := func(context.Context) (*http.Server, error) { return &http.Server{}, nil }
 	requirePanic(t, func() { httpserver.NewActor("", server) })
 	requirePanic(t, func() { httpserver.NewActor("server", nil) })
-	requirePanic(t, func() { httpserver.NewActor("server", server, nil) })
-	requirePanic(t, func() { httpserver.NewActor("server", server, httpserver.WithServe(nil)) })
-	requirePanic(t, func() { httpserver.NewActor("server", server, httpserver.WithShutdownTimeout(0)) })
+	requirePanic(t, func() { httpserver.NewActor("server", server).SetServeFunc(nil) })
+	requirePanic(t, func() { httpserver.NewActor("server", server).SetShutdownTimeout(0) })
+}
+
+func TestActorConfigurationFreezesAfterFirstRun(t *testing.T) {
+	actor := httpserver.NewActor("server", func(context.Context) (*http.Server, error) {
+		return &http.Server{}, nil
+	}).SetServeFunc(func(context.Context, *http.Server) error {
+		return http.ErrServerClosed
+	})
+
+	if err := actor.Run(t.Context()); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	requirePanic(t, func() { actor.SetServeFunc(func(context.Context, *http.Server) error { return nil }) })
+	requirePanic(t, func() { actor.SetShutdownTimeout(time.Second) })
 }
 
 func TestActorInspect(t *testing.T) {
 	actor := httpserver.NewActor("server", func(context.Context) (*http.Server, error) {
 		return &http.Server{}, nil
-	}, httpserver.WithShutdownTimeout(2*time.Second))
+	}).SetShutdownTimeout(2 * time.Second)
 
 	spec := actor.Inspect()
 	if spec.Kind != "http_server" {

@@ -501,8 +501,7 @@ server := httpserver.NewActor("dashboard.http",
 	func(context.Context) (*http.Server, error) {
 		return &http.Server{Addr: ":8080", Handler: dashboard.Handler()}, nil
 	},
-	httpserver.WithShutdownTimeout(5*time.Second),
-)
+).SetShutdownTimeout(5 * time.Second)
 
 root := sup.NewSupervisor("root", sup.Transient).
 	AddEventSink(dashboard).
