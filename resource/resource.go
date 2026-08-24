@@ -47,40 +47,21 @@ type CallFunc[T any, R any] func(context.Context, T) (R, error)
 // terminates the resource actor and is handled by supervision.
 type CastFunc[T any] func(context.Context, T) error
 
-// config contains resource actor configuration.
-type config struct {
-	releaseTimeout time.Duration
-}
-
-// Option configures a resource actor during construction.
-type Option func(*config)
-
-// WithReleaseTimeout sets the maximum duration of the context passed to the
-// release function.
-func WithReleaseTimeout(timeout time.Duration) Option {
-	if timeout <= 0 {
-		panic("resource: release timeout must be positive")
-	}
-
-	return func(config *config) {
-		config.releaseTimeout = timeout
-	}
-}
-
 // Actor acquires a resource for each execution attempt and serializes Call and
 // Cast operations against it until its context is canceled or a Cast
 // operation fails. A supervisor can restart it to acquire a fresh resource.
 type Actor[T any] struct {
-	id             string
-	acquire        AcquireFunc[T]
-	release        ReleaseFunc[T]
-	releaseTimeout time.Duration
-	running        atomic.Bool
-
-	mu       sync.Mutex
-	current  *execution[T]
-	started  bool
-	startedC chan struct{}
+	id                  string
+	acquire             AcquireFunc[T]
+	release             ReleaseFunc[T]
+	releaseTimeout      time.Duration
+	configMu            sync.Mutex
+	configurationFrozen bool
+	running             atomic.Bool
+	mu                  sync.Mutex
+	current             *execution[T]
+	started             bool
+	startedC            chan struct{}
 }
 
 type execution[T any] struct {
@@ -109,11 +90,11 @@ var _ sup.Inspectable = (*Actor[any])(nil)
 // successful acquisition, including when the resource actor fails. Calls made
 // before the first Run wait for the actor to become ready; calls made after an
 // execution stops return ErrActorNotRunning.
+// Optional configuration is added with methods before the first Run call.
 func NewActor[T any](
 	id string,
 	acquire AcquireFunc[T],
 	release ReleaseFunc[T],
-	options ...Option,
 ) *Actor[T] {
 	if id == "" {
 		panic("resource: actor id cannot be empty")
@@ -125,26 +106,29 @@ func NewActor[T any](
 		panic("resource: release function cannot be nil")
 	}
 
-	config := config{
-		releaseTimeout: DefaultReleaseTimeout,
-	}
-	for _, option := range options {
-		if option == nil {
-			panic("resource: option cannot be nil")
-		}
-		option(&config)
-	}
-	if config.releaseTimeout <= 0 {
-		panic("resource: release timeout must be positive")
-	}
-
 	return &Actor[T]{
 		id:             id,
 		acquire:        acquire,
 		release:        release,
-		releaseTimeout: config.releaseTimeout,
+		releaseTimeout: DefaultReleaseTimeout,
 		startedC:       make(chan struct{}),
 	}
+}
+
+// SetReleaseTimeout sets the maximum duration of the context passed to the
+// release function and returns the actor for chaining.
+func (a *Actor[T]) SetReleaseTimeout(timeout time.Duration) *Actor[T] {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
+	if a.configurationFrozen {
+		panic("resource: actor configuration is frozen")
+	}
+	if timeout <= 0 {
+		panic("resource: release timeout must be positive")
+	}
+	a.releaseTimeout = timeout
+	return a
 }
 
 // ID returns the actor id.
@@ -154,6 +138,9 @@ func (a *Actor[T]) ID() string {
 
 // Inspect returns the resource actor spec.
 func (a *Actor[T]) Inspect() sup.Spec {
+	a.configMu.Lock()
+	defer a.configMu.Unlock()
+
 	return sup.Spec{
 		Kind:         "resource",
 		Dependencies: []string{},
@@ -174,6 +161,11 @@ func (a *Actor[T]) Run(ctx context.Context) (runErr error) {
 	if !a.running.CompareAndSwap(false, true) {
 		return ErrActorRunning
 	}
+
+	a.configMu.Lock()
+	a.configurationFrozen = true
+	releaseTimeout := a.releaseTimeout
+	a.configMu.Unlock()
 
 	current := &execution[T]{
 		requests: make(chan request[T]),
@@ -198,7 +190,7 @@ func (a *Actor[T]) Run(ctx context.Context) (runErr error) {
 	defer func() {
 		releaseCtx, cancelRelease := context.WithTimeout(
 			context.WithoutCancel(ctx),
-			a.releaseTimeout,
+			releaseTimeout,
 		)
 		defer cancelRelease()
 		releaseErr := a.release(releaseCtx, value)

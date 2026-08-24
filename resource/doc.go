@@ -26,6 +26,9 @@
 //
 //	supervisor := sup.NewSupervisor("root", sup.Transient).AddActor(device)
 //
+// Use SetReleaseTimeout before the first Run call to bound the release
+// context, when the default timeout is not appropriate.
+//
 // Use Call when the caller needs a typed result:
 //
 //	value, err := resource.Call(ctx, device, func(ctx context.Context, device Device) (int, error) {

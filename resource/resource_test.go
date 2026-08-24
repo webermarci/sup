@@ -316,15 +316,30 @@ func TestValidation(t *testing.T) {
 	requirePanic(t, func() { resource.NewActor("actor", nil, func(context.Context, int) error { return nil }) })
 	requirePanic(t, func() { resource.NewActor("actor", func(context.Context) (int, error) { return 0, nil }, nil) })
 	requirePanic(t, func() {
-		resource.NewActor("actor", func(context.Context) (int, error) { return 0, nil }, func(context.Context, int) error { return nil }, nil)
+		resource.NewActor("actor", func(context.Context) (int, error) { return 0, nil }, func(context.Context, int) error { return nil }).SetReleaseTimeout(0)
 	})
-	requirePanic(t, func() { resource.WithReleaseTimeout(0) })
 
 	actor := resource.NewActor("actor", func(context.Context) (int, error) { return 0, nil }, func(context.Context, int) error { return nil })
 	var nilCall resource.CallFunc[int, int]
 	requirePanic(t, func() { resource.Call(t.Context(), actor, nilCall) })
 	var nilCast resource.CastFunc[int]
 	requirePanic(t, func() { resource.Cast(t.Context(), actor, nilCast) })
+}
+
+func TestConfigurationFreezesAfterFirstRun(t *testing.T) {
+	actor := resource.NewActor(
+		"actor",
+		func(context.Context) (int, error) { return 0, nil },
+		func(context.Context, int) error { return nil },
+	).SetReleaseTimeout(time.Second)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := actor.Run(ctx); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	requirePanic(t, func() { actor.SetReleaseTimeout(2 * time.Second) })
 }
 
 func startActor[T any](t *testing.T, actor *resource.Actor[T]) (context.CancelFunc, <-chan error) {
