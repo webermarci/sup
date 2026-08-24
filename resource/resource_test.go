@@ -3,6 +3,7 @@ package resource_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -80,39 +81,240 @@ func TestCallAndCast(t *testing.T) {
 	}
 }
 
-func TestCallErrorsDoNotStopActor(t *testing.T) {
+func TestCallFailureReleasesAndReacquires(t *testing.T) {
+	acquired := make(chan int, 2)
+	released := make(chan int, 2)
+	var next atomic.Int32
 	actor := resource.NewActor(
 		"device",
-		func(context.Context) (testResource, error) { return testResource{}, nil },
-		func(context.Context, testResource) error { return nil },
+		func(context.Context) (int, error) {
+			value := int(next.Add(1))
+			acquired <- value
+			return value, nil
+		},
+		func(_ context.Context, value int) error {
+			released <- value
+			return nil
+		},
 	)
-	cancel, done := startActor(t, actor)
-	wantErr := errors.New("read failed")
 
-	value, err := resource.Call(t.Context(), actor, func(context.Context, testResource) (int, error) {
+	_, firstDone := startActor(t, actor)
+	if got := awaitInt(t, acquired); got != 1 {
+		t.Fatalf("first acquired resource = %d, want 1", got)
+	}
+	wantErr := errors.New("read failed")
+	value, err := resource.Call(t.Context(), actor, func(context.Context, int) (int, error) {
 		return 0, wantErr
 	})
 	if value != 0 || !errors.Is(err, wantErr) {
 		t.Fatalf("Call() = (%d, %v), want (0, read failed)", value, err)
 	}
+	if err := awaitRun(t, firstDone); !errors.Is(err, wantErr) {
+		t.Fatalf("first Run() = %v, want read failed", err)
+	}
+	if got := awaitInt(t, released); got != 1 {
+		t.Fatalf("first released resource = %d, want 1", got)
+	}
 
-	value, err = resource.Call(t.Context(), actor, func(context.Context, testResource) (int, error) {
+	cancel, secondDone := startActor(t, actor)
+	if got := awaitInt(t, acquired); got != 2 {
+		t.Fatalf("second acquired resource = %d, want 2", got)
+	}
+	value, err = resource.Call(t.Context(), actor, func(context.Context, int) (int, error) {
 		return 7, nil
 	})
 	if err != nil || value != 7 {
 		t.Fatalf("second Call() = (%d, %v), want (7, nil)", value, err)
 	}
-
 	cancel()
-	if err := awaitRun(t, done); err != nil {
-		t.Fatalf("Run() = %v, want nil after cancellation", err)
+	if err := awaitRun(t, secondDone); err != nil {
+		t.Fatalf("second Run() = %v, want nil after cancellation", err)
 	}
-	_, err = resource.Call(t.Context(), actor, func(context.Context, testResource) (int, error) {
-		return 0, nil
+	if got := awaitInt(t, released); got != 2 {
+		t.Fatalf("second released resource = %d, want 2", got)
+	}
+}
+
+func TestCallReturnsExecutionStoppedWhenOperationPanics(t *testing.T) {
+	acquired := make(chan struct{})
+	released := make(chan struct{})
+	actor := resource.NewActor(
+		"device",
+		func(context.Context) (int, error) {
+			close(acquired)
+			return 1, nil
+		},
+		func(context.Context, int) error {
+			close(released)
+			return nil
+		},
+	)
+
+	panicValue := make(chan any, 1)
+	go func() {
+		defer func() { panicValue <- recover() }()
+		_ = actor.Run(t.Context())
+	}()
+	select {
+	case <-acquired:
+	case <-time.After(time.Second):
+		t.Fatal("resource was not acquired")
+	}
+
+	_, err := resource.Call(t.Context(), actor, func(context.Context, int) (int, error) {
+		panic("operation panicked")
 	})
-	if !errors.Is(err, resource.ErrActorNotRunning) {
-		t.Fatalf("Call() after stop = %v, want ErrActorNotRunning", err)
+	if !errors.Is(err, resource.ErrExecutionStopped) {
+		t.Fatalf("Call() = %v, want ErrExecutionStopped", err)
 	}
+	select {
+	case value := <-panicValue:
+		if value != "operation panicked" {
+			t.Fatalf("panic value = %v, want operation panicked", value)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run() did not propagate the panic")
+	}
+	select {
+	case <-released:
+	case <-time.After(time.Second):
+		t.Fatal("resource was not released")
+	}
+}
+
+func TestOperationsWaitBetweenExecutions(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		acquired := make(chan int, 2)
+		var next atomic.Int32
+		actor := resource.NewActor(
+			"device",
+			func(context.Context) (int, error) {
+				value := int(next.Add(1))
+				acquired <- value
+				return value, nil
+			},
+			func(context.Context, int) error { return nil },
+		)
+
+		_, firstDone := startActor(t, actor)
+		if got := awaitInt(t, acquired); got != 1 {
+			t.Fatalf("first acquired resource = %d, want 1", got)
+		}
+		wantErr := errors.New("connection lost")
+		if _, err := resource.Call(t.Context(), actor, func(context.Context, int) (int, error) {
+			return 0, wantErr
+		}); !errors.Is(err, wantErr) {
+			t.Fatalf("failing Call() = %v, want connection lost", err)
+		}
+		if err := awaitRun(t, firstDone); !errors.Is(err, wantErr) {
+			t.Fatalf("first Run() = %v, want connection lost", err)
+		}
+
+		type callResult struct {
+			value int
+			err   error
+		}
+		callDone := make(chan callResult, 1)
+		castDone := make(chan error, 1)
+		castRan := make(chan struct{})
+		go func() {
+			value, err := resource.Call(t.Context(), actor, func(_ context.Context, value int) (int, error) {
+				return value, nil
+			})
+			callDone <- callResult{value: value, err: err}
+		}()
+		go func() {
+			castDone <- resource.Cast(t.Context(), actor, func(context.Context, int) error {
+				close(castRan)
+				return nil
+			})
+		}()
+		synctest.Wait()
+		select {
+		case result := <-callDone:
+			t.Fatalf("Call() completed between executions: %#v", result)
+		default:
+		}
+		select {
+		case err := <-castDone:
+			t.Fatalf("Cast() completed between executions: %v", err)
+		default:
+		}
+
+		cancel, secondDone := startActor(t, actor)
+		if got := awaitInt(t, acquired); got != 2 {
+			t.Fatalf("second acquired resource = %d, want 2", got)
+		}
+		select {
+		case result := <-callDone:
+			if result.value != 2 || result.err != nil {
+				t.Fatalf("Call() = (%d, %v), want (2, nil)", result.value, result.err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("Call() did not continue on the next execution")
+		}
+		if err := awaitResult(t, castDone); err != nil {
+			t.Fatalf("Cast() = %v, want nil", err)
+		}
+		select {
+		case <-castRan:
+		case <-time.After(time.Second):
+			t.Fatal("Cast operation did not run on the next execution")
+		}
+
+		cancel()
+		if err := awaitRun(t, secondDone); err != nil {
+			t.Fatalf("second Run() = %v, want nil after cancellation", err)
+		}
+	})
+}
+
+func TestCallWaitsAcrossAcquisitionFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var attempts atomic.Int32
+		wantErr := errors.New("connection refused")
+		actor := resource.NewActor(
+			"device",
+			func(context.Context) (int, error) {
+				if attempts.Add(1) == 1 {
+					return 0, wantErr
+				}
+				return 42, nil
+			},
+			func(context.Context, int) error { return nil },
+		)
+
+		result := make(chan error, 1)
+		go func() {
+			value, err := resource.Call(t.Context(), actor, func(_ context.Context, value int) (int, error) {
+				return value, nil
+			})
+			if err == nil && value != 42 {
+				err = fmt.Errorf("value = %d, want 42", value)
+			}
+			result <- err
+		}()
+
+		_, firstDone := startActor(t, actor)
+		if err := awaitRun(t, firstDone); !errors.Is(err, wantErr) {
+			t.Fatalf("first Run() = %v, want connection refused", err)
+		}
+		synctest.Wait()
+		select {
+		case err := <-result:
+			t.Fatalf("Call() completed after failed acquisition: %v", err)
+		default:
+		}
+
+		cancel, secondDone := startActor(t, actor)
+		if err := awaitResult(t, result); err != nil {
+			t.Fatalf("Call() = %v, want nil", err)
+		}
+		cancel()
+		if err := awaitRun(t, secondDone); err != nil {
+			t.Fatalf("second Run() = %v, want nil after cancellation", err)
+		}
+	})
 }
 
 func TestOperationsAreSerialized(t *testing.T) {
@@ -315,7 +517,6 @@ func TestValidation(t *testing.T) {
 	requirePanic(t, func() {
 		resource.NewActor("actor", func(context.Context) (int, error) { return 0, nil }, func(context.Context, int) error { return nil }).SetReleaseTimeout(0)
 	})
-
 }
 
 func startActor[T any](t *testing.T, actor *resource.Actor[T]) (context.CancelFunc, <-chan error) {

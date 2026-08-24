@@ -6,8 +6,8 @@
 // An Actor acquires a resource for each execution attempt, receives operations
 // directly, runs them one at a time, and releases the resource when the
 // attempt ends. Acquisition failures and asynchronous Cast failures are
-// returned to the supervisor. Call operation errors are returned to their
-// callers and do not automatically restart the resource.
+// returned to the supervisor. Call operation errors are also returned to their
+// callers before the resource actor stops.
 //
 // The resource can be anything that should be owned and accessed serially: a
 // serial port, a Modbus client, a network connection, or a device handle.
@@ -37,8 +37,10 @@
 //
 // Use Cast when the caller only needs direct handoff. A Cast operation error
 // stops the resource actor so its supervisor can apply the restart policy.
-// Both operations block until the actor receives their request and stop
-// waiting when their context is canceled.
+// Both operations wait across acquisition attempts and supervisor restart
+// delays until the actor receives their request, and stop waiting when their
+// context is canceled. Requests that have already been received are never
+// replayed on a new resource execution.
 //
 // A resource is released with a fresh timeout context when Run ends. That
 // context preserves values from the actor context but is not canceled by the
