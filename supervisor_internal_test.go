@@ -9,7 +9,7 @@ import (
 )
 
 func TestSupervisor_EmptyRunReturns(t *testing.T) {
-	if err := NewSupervisor("sup").Run(t.Context()); err != nil {
+	if err := NewSupervisor("sup", Transient).Run(t.Context()); err != nil {
 		t.Fatalf("empty Run returned error: %v", err)
 	}
 }
@@ -17,11 +17,12 @@ func TestSupervisor_EmptyRunReturns(t *testing.T) {
 func TestSupervisor_RejectsConcurrentRun(t *testing.T) {
 	started := make(chan struct{})
 	ctx, cancel := context.WithCancel(t.Context())
-	supervisor := NewSupervisor("sup", WithActors(ActorFunc("worker", func(ctx context.Context) error {
-		close(started)
-		<-ctx.Done()
-		return nil
-	})))
+	supervisor := NewSupervisor("sup", Transient).
+		AddActor(ActorFunc("worker", func(ctx context.Context) error {
+			close(started)
+			<-ctx.Done()
+			return nil
+		}))
 
 	done := make(chan error, 1)
 	go func() { done <- supervisor.Run(ctx) }()
@@ -40,15 +41,13 @@ func TestSupervisor_RejectsConcurrentRun(t *testing.T) {
 func TestSupervisor_SequentialRuns(t *testing.T) {
 	var runs atomic.Int32
 	started := make(chan struct{}, 2)
-	supervisor := NewSupervisor("sup",
-		WithActors(ActorFunc("worker", func(ctx context.Context) error {
+	supervisor := NewSupervisor("sup", Temporary).
+		AddActor(ActorFunc("worker", func(ctx context.Context) error {
 			runs.Add(1)
 			started <- struct{}{}
 			<-ctx.Done()
 			return nil
-		})),
-		WithPolicy(Temporary),
-	)
+		}))
 
 	for run := range 2 {
 		ctx, cancel := context.WithCancel(t.Context())
@@ -87,11 +86,9 @@ func TestSupervisor_CancelsAttemptContextBeforeRestart(t *testing.T) {
 		}
 	})
 
-	supervisor := NewSupervisor("sup",
-		WithActors(actor),
-		WithPolicy(Transient),
-		WithRestartDelay(0),
-	)
+	supervisor := NewSupervisor("sup", Transient).
+		AddActor(actor).
+		SetRestartDelay(0)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- supervisor.Run(ctx) }()
@@ -106,13 +103,11 @@ func TestSupervisor_CancellationNormalizesChildError(t *testing.T) {
 	for range 100 {
 		ctx, cancel := context.WithCancel(t.Context())
 		release := make(chan struct{})
-		supervisor := NewSupervisor("sup",
-			WithActors(ActorFunc("worker", func(context.Context) error {
+		supervisor := NewSupervisor("sup", Temporary).
+			AddActor(ActorFunc("worker", func(context.Context) error {
 				<-release
 				return errors.New("failure during shutdown")
-			})),
-			WithPolicy(Temporary),
-		)
+			}))
 
 		done := make(chan error, 1)
 		go func() { done <- supervisor.Run(ctx) }()

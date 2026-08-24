@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"runtime/debug"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -35,95 +36,6 @@ const (
 // A supervisor may call the function concurrently for different actors, so it
 // must be safe for concurrent use.
 type RestartDelayFunc func(restartCount int) time.Duration
-
-// SupervisorOption configures a Supervisor during construction.
-type SupervisorOption func(*Supervisor)
-
-// WithActors adds actors that start with the supervisor.
-func WithActors(actors ...Actor) SupervisorOption {
-	configured := slices.Clone(actors)
-	return func(supervisor *Supervisor) {
-		actorIDs := make(map[string]struct{}, len(supervisor.actors)+len(configured))
-		for _, actor := range supervisor.actors {
-			actorIDs[actor.ID()] = struct{}{}
-		}
-
-		for _, actor := range configured {
-			if actor == nil {
-				panic("sup: cannot add nil actor")
-			}
-
-			id := actor.ID()
-			if id == "" {
-				panic("sup: actor id cannot be empty")
-			}
-			if _, exists := actorIDs[id]; exists {
-				panic("sup: duplicate actor id: " + id)
-			}
-			actorIDs[id] = struct{}{}
-		}
-		supervisor.actors = append(supervisor.actors, configured...)
-	}
-}
-
-// WithPolicy configures the supervisor restart policy.
-func WithPolicy(policy RestartPolicy) SupervisorOption {
-	return func(supervisor *Supervisor) {
-		if policy > Temporary {
-			panic("sup: invalid restart policy")
-		}
-		supervisor.policy = policy
-	}
-}
-
-// WithRestartDelay configures the exact delay between actor restart attempts.
-func WithRestartDelay(delay time.Duration) SupervisorOption {
-	return func(supervisor *Supervisor) {
-		if delay < 0 {
-			panic("sup: restart delay must be non-negative")
-		}
-		supervisor.restartDelay = delay
-		supervisor.restartDelayFunc = nil
-	}
-}
-
-// WithRestartDelayFunc configures a function that calculates the delay before
-// each actor restart. The restart count starts at one for the first restart.
-// A non-positive result means that the actor should restart immediately.
-func WithRestartDelayFunc(delay RestartDelayFunc) SupervisorOption {
-	if delay == nil {
-		panic("sup: restart delay function cannot be nil")
-	}
-
-	return func(supervisor *Supervisor) {
-		supervisor.restartDelayFunc = delay
-	}
-}
-
-// WithRestartLimit limits restarts within a time window.
-func WithRestartLimit(maxRestarts int, window time.Duration) SupervisorOption {
-	return func(supervisor *Supervisor) {
-		if maxRestarts <= 0 || window <= 0 {
-			panic("sup: maxRestarts and window must be positive")
-		}
-		supervisor.maxRestarts = maxRestarts
-		supervisor.restartWindow = window
-	}
-}
-
-// WithEventSink adds an event sink for runtime events from this supervisor and
-// its descendants.
-func WithEventSink(sinks ...EventSink) SupervisorOption {
-	configured := slices.Clone(sinks)
-	return func(supervisor *Supervisor) {
-		for _, sink := range configured {
-			if sink == nil {
-				panic("sup: cannot add nil event sink")
-			}
-		}
-		supervisor.eventSinks = append(supervisor.eventSinks, configured...)
-	}
-}
 
 func (s *Supervisor) runActor(ctx context.Context, actor Actor) error {
 	emitSupervisorEvent(ctx, s, EventActorRegistered, actor, nil, 0)
@@ -177,38 +89,154 @@ func (s *Supervisor) runActor(ctx context.Context, actor Actor) error {
 // Supervisor runs a fixed set of actors and restarts them according to its
 // restart policy. A supervisor is itself an Actor and may be nested.
 type Supervisor struct {
-	id               string
-	actors           []Actor
-	policy           RestartPolicy
-	restartDelay     time.Duration
-	restartDelayFunc RestartDelayFunc
-	maxRestarts      int
-	restartWindow    time.Duration
-	eventSinks       []EventSink
-	running          atomic.Bool
+	id                  string
+	actors              []Actor
+	policy              RestartPolicy
+	restartDelay        time.Duration
+	restartDelayFunc    RestartDelayFunc
+	maxRestarts         int
+	restartWindow       time.Duration
+	eventSinks          []EventSink
+	configMu            sync.Mutex
+	configurationFrozen bool
+	running             atomic.Bool
 }
 
 var _ Actor = (*Supervisor)(nil)
 var _ Inspectable = (*Supervisor)(nil)
 
-// NewSupervisor creates a supervisor with the given id and options.
-func NewSupervisor(id string, options ...SupervisorOption) *Supervisor {
+// NewSupervisor creates a supervisor with the given id and restart policy.
+// Optional configuration is added with methods before the first Run call.
+func NewSupervisor(id string, policy RestartPolicy) *Supervisor {
 	if id == "" {
 		panic("sup: supervisor id cannot be empty")
 	}
+	if policy > Temporary {
+		panic("sup: invalid restart policy")
+	}
 	supervisor := &Supervisor{
 		id:           id,
-		policy:       Transient,
+		policy:       policy,
 		restartDelay: time.Second,
 	}
-	for _, option := range options {
-		if option == nil {
-			panic("sup: supervisor option cannot be nil")
-		}
-		option(supervisor)
+	return supervisor
+}
+
+// AddActor adds one actor that starts with the supervisor and returns the
+// supervisor for chaining.
+func (s *Supervisor) AddActor(actor Actor) *Supervisor {
+	return s.AddActors(actor)
+}
+
+// AddActors adds actors that start with the supervisor and returns the
+// supervisor for chaining.
+func (s *Supervisor) AddActors(actors ...Actor) *Supervisor {
+	configured := slices.Clone(actors)
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+
+	if s.configurationFrozen {
+		panic("sup: supervisor configuration is frozen")
 	}
 
-	return supervisor
+	actorIDs := make(map[string]struct{}, len(s.actors)+len(configured))
+	for _, actor := range s.actors {
+		actorIDs[actor.ID()] = struct{}{}
+	}
+
+	for _, actor := range configured {
+		if actor == nil {
+			panic("sup: cannot add nil actor")
+		}
+
+		id := actor.ID()
+		if id == "" {
+			panic("sup: actor id cannot be empty")
+		}
+		if _, exists := actorIDs[id]; exists {
+			panic("sup: duplicate actor id: " + id)
+		}
+		actorIDs[id] = struct{}{}
+	}
+	s.actors = append(s.actors, configured...)
+	return s
+}
+
+// SetRestartDelay configures the exact delay between actor restart attempts
+// and returns the supervisor for chaining.
+func (s *Supervisor) SetRestartDelay(delay time.Duration) *Supervisor {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+
+	if s.configurationFrozen {
+		panic("sup: supervisor configuration is frozen")
+	}
+	if delay < 0 {
+		panic("sup: restart delay must be non-negative")
+	}
+	s.restartDelay = delay
+	s.restartDelayFunc = nil
+	return s
+}
+
+// SetRestartDelayFunc configures a function that calculates the delay before
+// each actor restart. The restart count starts at one for the first restart.
+// A non-positive result means that the actor should restart immediately. It
+// returns the supervisor for chaining.
+func (s *Supervisor) SetRestartDelayFunc(delay RestartDelayFunc) *Supervisor {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+
+	if s.configurationFrozen {
+		panic("sup: supervisor configuration is frozen")
+	}
+	if delay == nil {
+		panic("sup: restart delay function cannot be nil")
+	}
+	s.restartDelayFunc = delay
+	return s
+}
+
+// SetRestartLimit limits restarts within a time window and returns the
+// supervisor for chaining.
+func (s *Supervisor) SetRestartLimit(maxRestarts int, window time.Duration) *Supervisor {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+
+	if s.configurationFrozen {
+		panic("sup: supervisor configuration is frozen")
+	}
+	if maxRestarts <= 0 || window <= 0 {
+		panic("sup: maxRestarts and window must be positive")
+	}
+	s.maxRestarts = maxRestarts
+	s.restartWindow = window
+	return s
+}
+
+// AddEventSink adds an event sink for runtime events from this supervisor and
+// its descendants and returns the supervisor for chaining.
+func (s *Supervisor) AddEventSink(sink EventSink) *Supervisor {
+	return s.AddEventSinks(sink)
+}
+
+// AddEventSinks adds event sinks for runtime events from this supervisor and
+// its descendants and returns the supervisor for chaining.
+func (s *Supervisor) AddEventSinks(sinks ...EventSink) *Supervisor {
+	configured := slices.Clone(sinks)
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+
+	if s.configurationFrozen {
+		panic("sup: supervisor configuration is frozen")
+	}
+	for _, sink := range configured {
+		if sink == nil {
+			panic("sup: cannot add nil event sink")
+		}
+	}
+	s.eventSinks = append(s.eventSinks, configured...)
+	return s
 }
 
 // ID returns the supervisor id.
@@ -226,21 +254,27 @@ func (s *Supervisor) Run(ctx context.Context) error {
 	}
 	defer s.running.Store(false)
 
-	if len(s.actors) == 0 {
+	s.configMu.Lock()
+	s.configurationFrozen = true
+	actors := slices.Clone(s.actors)
+	eventSinks := slices.Clone(s.eventSinks)
+	s.configMu.Unlock()
+
+	if len(actors) == 0 {
 		return nil
 	}
 
-	runCtx, cancel := context.WithCancel(withEventSinks(ctx, s.eventSinks))
+	runCtx, cancel := context.WithCancel(withEventSinks(ctx, eventSinks))
 	defer cancel()
 
-	results := make(chan error, len(s.actors))
-	for _, actor := range s.actors {
+	results := make(chan error, len(actors))
+	for _, actor := range actors {
 		go func() {
 			results <- s.runActor(runCtx, actor)
 		}()
 	}
 
-	remaining := len(s.actors)
+	remaining := len(actors)
 	for remaining > 0 {
 		select {
 		case <-ctx.Done():
@@ -273,6 +307,9 @@ func drain(results <-chan error, remaining int) {
 
 // Inspect returns the supervisor spec.
 func (s *Supervisor) Inspect() Spec {
+	s.configMu.Lock()
+	defer s.configMu.Unlock()
+
 	return Spec{
 		Kind:         "supervisor",
 		Dependencies: []string{},

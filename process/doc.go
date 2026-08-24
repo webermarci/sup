@@ -9,10 +9,7 @@
 //		return exec.CommandContext(ctx, "./worker", "--serve")
 //	})
 //
-//	supervisor := sup.NewSupervisor("root",
-//		sup.WithPolicy(sup.Transient),
-//		sup.WithActors(worker),
-//	)
+//	supervisor := sup.NewSupervisor("root", sup.Transient).AddActor(worker)
 //
 // The command factory is called once for every execution attempt and must
 // return a fresh *exec.Cmd. Configure environment, working directory, output,

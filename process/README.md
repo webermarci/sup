@@ -33,10 +33,7 @@ func main() {
 		return cmd
 	})
 
-	supervisor := sup.NewSupervisor("root",
-		sup.WithActors(worker),
-		sup.WithPolicy(sup.Transient),
-	)
+	supervisor := sup.NewSupervisor("root", sup.Transient).AddActor(worker)
 
 	if err := supervisor.Run(context.Background()); err != nil {
 		fmt.Println("supervisor failed:", err)

@@ -11,10 +11,7 @@
 //		}, nil
 //	})
 //
-//	supervisor := sup.NewSupervisor("root",
-//		sup.WithPolicy(sup.Transient),
-//		sup.WithActors(server),
-//	)
+//	supervisor := sup.NewSupervisor("root", sup.Transient).AddActor(server)
 //
 // The ServerFunc is called once for every execution attempt and must return a
 // fresh *http.Server because a server cannot be reused after Shutdown. By

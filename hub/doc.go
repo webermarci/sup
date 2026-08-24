@@ -10,10 +10,9 @@
 //		hub.WithSignal(status),
 //	)
 //
-//	root := sup.NewSupervisor("root",
-//		sup.WithEventSink(h),
-//		sup.WithActors(worker, h),
-//	)
+//	root := sup.NewSupervisor("root", sup.Transient).
+//		AddEventSink(h).
+//		AddActors(worker, h)
 //
 //	go root.Run(ctx)
 //	http.ListenAndServe(":8080", h.Handler())

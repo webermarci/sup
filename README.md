@@ -145,17 +145,15 @@ func main() {
 
 	counter := NewCounter("counter")
 
-	supervisor := sup.NewSupervisor("root",
-		sup.WithPolicy(sup.Permanent),
-		sup.WithRestartDelay(time.Second),
-		sup.WithRestartLimit(5, 10*time.Second),
-		sup.WithEventSink(sup.EventSinkFunc(func(event sup.Event) {
+	supervisor := sup.NewSupervisor("root", sup.Permanent).
+		SetRestartDelay(time.Second).
+		SetRestartLimit(5, 10*time.Second).
+		AddEventSink(sup.EventSinkFunc(func(event sup.Event) {
 			if event.Type == sup.EventActorStopped && event.Err != nil {
 				fmt.Printf("actor %s failed: %v\n", event.Actor.ID(), event.Err)
 			}
-		})),
-		sup.WithActors(counter),
-	)
+		})).
+		AddActor(counter)
 
 	done := make(chan error, 1)
 	go func() { done <- supervisor.Run(ctx) }()
@@ -256,12 +254,10 @@ the same supervisor is run concurrently.
 Supervisors run actors and restart them according to a restart policy.
 
 ```go
-supervisor := sup.NewSupervisor("root",
-	sup.WithPolicy(sup.Transient),
-	sup.WithRestartDelay(500*time.Millisecond),
-	sup.WithRestartLimit(3, time.Minute),
-	sup.WithActors(actorA, actorB),
-)
+supervisor := sup.NewSupervisor("root", sup.Transient).
+	SetRestartDelay(500 * time.Millisecond).
+	SetRestartLimit(3, time.Minute).
+	AddActors(actorA, actorB)
 
 if err := supervisor.Run(ctx); err != nil {
 	// A restart limit or concurrent Run stopped the supervisor.
@@ -276,14 +272,14 @@ if err := supervisor.Run(ctx); err != nil {
 | `Transient` | stop | restart |
 | `Temporary` | stop | stop |
 
-`NewSupervisor` defaults to the `Transient` policy, a one-second restart
-delay, and no restart limit. Configure the delay and limit explicitly when
+`NewSupervisor` requires a restart policy and defaults to a one-second restart
+delay with no restart limit. Configure the delay and limit explicitly when
 restart timing or failure budgets are part of the application's behavior.
-Use `WithRestartDelayFunc` when the application needs a different delay for
-each restart, such as a capped exponential backoff:
+Use `SetRestartDelayFunc` when the application needs a different delay for each
+restart, such as a capped exponential backoff:
 
 ```go
-sup.WithRestartDelayFunc(func(restartCount int) time.Duration {
+supervisor.SetRestartDelayFunc(func(restartCount int) time.Duration {
 	if restartCount > 5 {
 		restartCount = 5
 	}
@@ -310,10 +306,9 @@ events := sup.EventSinkFunc(func(event sup.Event) {
 	}
 })
 
-root := sup.NewSupervisor("root",
-	sup.WithEventSink(events),
-	sup.WithActors(worker),
-)
+root := sup.NewSupervisor("root", sup.Transient).
+	AddEventSink(events).
+	AddActor(worker)
 ```
 
 Each event carries its occurrence time, actor, supervisor, error, and restart
@@ -465,7 +460,7 @@ doubled := rx.NewDerived("doubled", func() int {
 	return count.Value() * 2
 }, count)
 
-root := sup.NewSupervisor("root", sup.WithActors(doubled))
+root := sup.NewSupervisor("root", sup.Transient).AddActor(doubled)
 go root.Run(ctx)
 ```
 
@@ -509,10 +504,9 @@ server := httpserver.NewActor("dashboard.http",
 	httpserver.WithShutdownTimeout(5*time.Second),
 )
 
-root := sup.NewSupervisor("root",
-	sup.WithEventSink(dashboard),
-	sup.WithActors(counter, dashboard, server),
-)
+root := sup.NewSupervisor("root", sup.Transient).
+	AddEventSink(dashboard).
+	AddActors(counter, dashboard, server)
 
 go root.Run(ctx)
 ```

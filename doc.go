@@ -8,20 +8,17 @@
 //
 // Define an Actor with an ID and a Run method, then add it to a Supervisor:
 //
-//	supervisor := sup.NewSupervisor("root",
-//		sup.WithPolicy(sup.Transient),
-//		sup.WithActors(worker),
-//	)
+//	supervisor := sup.NewSupervisor("root", sup.Transient).AddActor(worker)
 //
 // Run the root supervisor with the application's context. Context cancellation
 // is a clean shutdown and should make Run return nil. Return a non-nil error
 // only when the actor has failed and the configured supervisor policy should
 // decide whether to restart it.
 //
-// NewSupervisor defaults to the Transient policy, a one-second restart delay,
-// and no restart limit. Configure a fixed delay with WithRestartDelay or
-// calculate one for each restart with WithRestartDelayFunc. A restart limit
-// can be added with WithRestartLimit(maxRestarts, window).
+// NewSupervisor requires a restart policy and defaults to a one-second restart
+// delay with no restart limit. Configure optional restart behavior with
+// SetRestartDelay, SetRestartDelayFunc, and SetRestartLimit before the first
+// Run call.
 //
 // # Communication
 //

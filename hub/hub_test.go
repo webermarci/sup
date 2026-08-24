@@ -87,11 +87,9 @@ func TestHubExposesOnlyRegisteredActors(t *testing.T) {
 	exposed := sup.ActorFunc("exposed", func(context.Context) error { return nil })
 	internal := sup.ActorFunc("internal", func(context.Context) error { return nil })
 	h := New("hub", WithActor(exposed))
-	root := sup.NewSupervisor("root",
-		sup.WithEventSink(h),
-		sup.WithActors(exposed, internal),
-		sup.WithPolicy(sup.Temporary),
-	)
+	root := sup.NewSupervisor("root", sup.Temporary).
+		AddEventSink(h).
+		AddActors(exposed, internal)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -133,20 +131,12 @@ func TestHubBuildsPrunedSupervisionGraphFromEvents(t *testing.T) {
 		<-ctx.Done()
 		return nil
 	})
-	exposedBranch := sup.NewSupervisor("branch.exposed",
-		sup.WithActors(exposed),
-		sup.WithPolicy(sup.Temporary),
-	)
-	internalBranch := sup.NewSupervisor("branch.internal",
-		sup.WithActors(internal),
-		sup.WithPolicy(sup.Temporary),
-	)
+	exposedBranch := sup.NewSupervisor("branch.exposed", sup.Temporary).AddActor(exposed)
+	internalBranch := sup.NewSupervisor("branch.internal", sup.Temporary).AddActor(internal)
 	h := New("hub", WithActor(exposed))
-	root := sup.NewSupervisor("root",
-		sup.WithEventSink(h),
-		sup.WithActors(exposedBranch, internalBranch),
-		sup.WithPolicy(sup.Temporary),
-	)
+	root := sup.NewSupervisor("root", sup.Temporary).
+		AddEventSink(h).
+		AddActors(exposedBranch, internalBranch)
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -181,7 +171,7 @@ func TestHubBuildsPrunedSupervisionGraphFromEvents(t *testing.T) {
 
 func TestHubProjectsActorLifecycleState(t *testing.T) {
 	worker := sup.ActorFunc("worker", func(context.Context) error { return nil })
-	root := sup.NewSupervisor("root")
+	root := sup.NewSupervisor("root", sup.Transient)
 	h := New("hub", WithActor(worker))
 
 	tests := []struct {
@@ -221,10 +211,9 @@ func TestHubCanProjectItsOwnRegistration(t *testing.T) {
 		return nil
 	})
 	h := New("hub", WithActor(worker))
-	root := sup.NewSupervisor("root",
-		sup.WithEventSink(h),
-		sup.WithActors(worker, h),
-	)
+	root := sup.NewSupervisor("root", sup.Transient).
+		AddEventSink(h).
+		AddActors(worker, h)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- root.Run(ctx) }()
@@ -252,11 +241,9 @@ func TestHubHandleGraph(t *testing.T) {
 		return nil
 	})
 	h := New("hub", WithActor(actor))
-	root := sup.NewSupervisor("root",
-		sup.WithEventSink(h),
-		sup.WithActors(actor),
-		sup.WithPolicy(sup.Temporary),
-	)
+	root := sup.NewSupervisor("root", sup.Temporary).
+		AddEventSink(h).
+		AddActor(actor)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
 	go func() { done <- root.Run(ctx) }()
@@ -664,7 +651,7 @@ func TestHubSerializesRegistrationSpec(t *testing.T) {
 		Type:       sup.EventActorRegistered,
 		Time:       time.Unix(123, 0),
 		Actor:      actor,
-		Supervisor: sup.NewSupervisor("root"),
+		Supervisor: sup.NewSupervisor("root", sup.Transient),
 	})
 
 	payload, ok := event.Payload.(actorRegisteredPayload)
@@ -678,7 +665,7 @@ func TestHubSerializesRegistrationSpec(t *testing.T) {
 
 func TestHubSerializesRuntimeRestartEvent(t *testing.T) {
 	actor := sup.ActorFunc("worker", func(context.Context) error { return nil })
-	supervisor := sup.NewSupervisor("root")
+	supervisor := sup.NewSupervisor("root", sup.Transient)
 	eventTime := time.Unix(123, 456000000)
 	boom := errors.New("boom")
 

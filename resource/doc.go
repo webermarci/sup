@@ -24,7 +24,7 @@
 //		},
 //	)
 //
-//	supervisor := sup.NewSupervisor("root", sup.WithActors(device))
+//	supervisor := sup.NewSupervisor("root", sup.Transient).AddActor(device)
 //
 // Use Call when the caller needs a typed result:
 //

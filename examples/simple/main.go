@@ -70,7 +70,7 @@ func main() {
 
 	actor := NewCounter("counter")
 
-	supervisor := sup.NewSupervisor("root", sup.WithActors(actor))
+	supervisor := sup.NewSupervisor("root", sup.Transient).AddActor(actor)
 
 	go supervisor.Run(ctx)
 

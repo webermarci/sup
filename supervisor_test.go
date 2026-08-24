@@ -21,13 +21,11 @@ func (emptyIDActor) Run(context.Context) error { return nil }
 func TestSupervisor_Temporary(t *testing.T) {
 	var runs atomic.Int32
 
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithPolicy(sup.Temporary),
-		sup.WithActors(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
+	supervisor := sup.NewSupervisor("sup", sup.Temporary).
+		AddActor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
 			runs.Add(1)
 			panic("fatal error")
-		})),
-	)
+		}))
 
 	if err := runUntilSupervisorEmpty(t, supervisor); err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -41,17 +39,15 @@ func TestSupervisor_Temporary(t *testing.T) {
 func TestSupervisor_Transient(t *testing.T) {
 	var runs atomic.Int32
 
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithPolicy(sup.Transient),
-		sup.WithRestartDelay(time.Millisecond),
-		sup.WithActors(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
+	supervisor := sup.NewSupervisor("sup", sup.Transient).
+		SetRestartDelay(time.Millisecond).
+		AddActor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
 			count := runs.Add(1)
 			if count == 1 {
 				return errors.New("abnormal exit")
 			}
 			return nil
-		})),
-	)
+		}))
 
 	if err := runUntilSupervisorEmpty(t, supervisor); err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -64,15 +60,13 @@ func TestSupervisor_Transient(t *testing.T) {
 
 func TestSupervisor_PermanentRestartsCleanExit(t *testing.T) {
 	var runs atomic.Int32
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithActors(sup.ActorFunc("worker", func(context.Context) error {
+	supervisor := sup.NewSupervisor("sup", sup.Permanent).
+		AddActor(sup.ActorFunc("worker", func(context.Context) error {
 			runs.Add(1)
 			return nil
-		})),
-		sup.WithPolicy(sup.Permanent),
-		sup.WithRestartDelay(0),
-		sup.WithRestartLimit(2, time.Second),
-	)
+		})).
+		SetRestartDelay(0).
+		SetRestartLimit(2, time.Second)
 
 	if err := supervisor.Run(t.Context()); err == nil {
 		t.Fatal("expected restart limit error")
@@ -86,19 +80,17 @@ func TestSupervisor_CancellationDuringRestartDelay(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	var runs atomic.Int32
 	restarting := make(chan struct{})
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithActors(sup.ActorFunc("worker", func(context.Context) error {
+	supervisor := sup.NewSupervisor("sup", sup.Transient).
+		AddActor(sup.ActorFunc("worker", func(context.Context) error {
 			runs.Add(1)
 			return errors.New("fail")
-		})),
-		sup.WithPolicy(sup.Transient),
-		sup.WithRestartDelay(time.Hour),
-		sup.WithEventSink(sup.EventSinkFunc(func(event sup.Event) {
+		})).
+		SetRestartDelay(time.Hour).
+		AddEventSink(sup.EventSinkFunc(func(event sup.Event) {
 			if event.Type == sup.EventActorRestarting {
 				close(restarting)
 			}
-		})),
-	)
+		}))
 
 	done := make(chan error, 1)
 	go func() { done <- supervisor.Run(ctx) }()
@@ -115,15 +107,13 @@ func TestSupervisor_CancellationDuringRestartDelay(t *testing.T) {
 
 func TestSupervisor_RestartLimit(t *testing.T) {
 	var runs atomic.Int32
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithActors(sup.ActorFunc("worker", func(context.Context) error {
+	supervisor := sup.NewSupervisor("sup", sup.Permanent).
+		AddActor(sup.ActorFunc("worker", func(context.Context) error {
 			runs.Add(1)
 			return errors.New("fail")
-		})),
-		sup.WithPolicy(sup.Permanent),
-		sup.WithRestartDelay(0),
-		sup.WithRestartLimit(3, time.Second),
-	)
+		})).
+		SetRestartDelay(0).
+		SetRestartLimit(3, time.Second)
 
 	err := supervisor.Run(t.Context())
 	if err == nil || !strings.Contains(err.Error(), "exceeded") {
@@ -145,16 +135,14 @@ func TestSupervisor_RestartDelayFuncReceivesRestartCount(t *testing.T) {
 		return nil
 	})
 
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithActors(actor),
-		sup.WithPolicy(sup.Transient),
-		sup.WithRestartDelayFunc(func(restartCount int) time.Duration {
+	supervisor := sup.NewSupervisor("sup", sup.Transient).
+		AddActor(actor).
+		SetRestartDelayFunc(func(restartCount int) time.Duration {
 			mu.Lock()
 			counts = append(counts, restartCount)
 			mu.Unlock()
 			return 0
-		}),
-	)
+		})
 
 	if err := supervisor.Run(t.Context()); err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -169,8 +157,8 @@ func TestSupervisor_RestartDelayFuncReceivesRestartCount(t *testing.T) {
 
 func TestSupervisor_RestartLimitWindowResets(t *testing.T) {
 	var runs atomic.Int32
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithActors(sup.ActorFunc("worker", func(context.Context) error {
+	supervisor := sup.NewSupervisor("sup", sup.Transient).
+		AddActor(sup.ActorFunc("worker", func(context.Context) error {
 			run := runs.Add(1)
 			if run == 3 {
 				time.Sleep(50 * time.Millisecond)
@@ -179,11 +167,9 @@ func TestSupervisor_RestartLimitWindowResets(t *testing.T) {
 				return errors.New("fail")
 			}
 			return nil
-		})),
-		sup.WithPolicy(sup.Transient),
-		sup.WithRestartDelay(0),
-		sup.WithRestartLimit(2, 20*time.Millisecond),
-	)
+		})).
+		SetRestartDelay(0).
+		SetRestartLimit(2, 20*time.Millisecond)
 
 	if err := runUntilSupervisorEmpty(t, supervisor); err != nil {
 		t.Fatalf("expected restart window to reset, got %v", err)
@@ -196,17 +182,15 @@ func TestSupervisor_RestartLimitWindowResets(t *testing.T) {
 func TestSupervisor_PanicStackTrace(t *testing.T) {
 	var capturedErr error
 
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithActors(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
+	supervisor := sup.NewSupervisor("sup", sup.Temporary).
+		AddActor(sup.ActorFunc(t.Name(), func(ctx context.Context) error {
 			panic("extreme failure")
-		})),
-		sup.WithPolicy(sup.Temporary),
-		sup.WithEventSink(sup.EventSinkFunc(func(event sup.Event) {
+		})).
+		AddEventSink(sup.EventSinkFunc(func(event sup.Event) {
 			if event.Type == sup.EventActorStopped {
 				capturedErr = event.Err
 			}
-		})),
-	)
+		}))
 
 	if err := runUntilSupervisorEmpty(t, supervisor); err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -235,12 +219,10 @@ func TestSupervisor_EventSinkReceivesRichEvents(t *testing.T) {
 		mu.Unlock()
 	})
 
-	supervisor := sup.NewSupervisor("root",
-		sup.WithActors(actor),
-		sup.WithPolicy(sup.Transient),
-		sup.WithRestartDelay(0),
-		sup.WithEventSink(sink),
-	)
+	supervisor := sup.NewSupervisor("root", sup.Transient).
+		AddActor(actor).
+		SetRestartDelay(0).
+		AddEventSink(sink)
 
 	if err := runUntilSupervisorEmpty(t, supervisor); err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -285,14 +267,12 @@ func TestSupervisor_EventSinkPanicDoesNotInterruptSupervision(t *testing.T) {
 	var received atomic.Int32
 	actor := sup.ActorFunc("worker", func(context.Context) error { return nil })
 
-	supervisor := sup.NewSupervisor("root",
-		sup.WithActors(actor),
-		sup.WithPolicy(sup.Temporary),
-		sup.WithEventSink(
+	supervisor := sup.NewSupervisor("root", sup.Temporary).
+		AddActor(actor).
+		AddEventSinks(
 			sup.EventSinkFunc(func(sup.Event) { panic("sink failure") }),
 			sup.EventSinkFunc(func(sup.Event) { received.Add(1) }),
-		),
-	)
+		)
 
 	if err := runUntilSupervisorEmpty(t, supervisor); err != nil {
 		t.Fatalf("Run returned error: %v", err)
@@ -306,7 +286,7 @@ func TestSupervisor_Inspect(t *testing.T) {
 	child1 := sup.ActorFunc("child1", func(ctx context.Context) error { return nil })
 	child2 := sup.ActorFunc("child2", func(ctx context.Context) error { return nil })
 
-	s := sup.NewSupervisor("root", sup.WithActors(child1, child2))
+	s := sup.NewSupervisor("root", sup.Transient).AddActors(child1, child2)
 
 	spec := s.Inspect()
 
@@ -330,34 +310,72 @@ func TestSupervisor_Inspect(t *testing.T) {
 func TestSupervisorRejectsInvalidConfiguration(t *testing.T) {
 	actor := sup.ActorFunc("worker", func(context.Context) error { return nil })
 
-	requirePanic(t, func() { sup.NewSupervisor("") })
-	requirePanic(t, func() { sup.NewSupervisor("root", nil) })
-	requirePanic(t, func() { sup.NewSupervisor("root", sup.WithActors(nil)) })
-	requirePanic(t, func() { sup.NewSupervisor("root", sup.WithActors(emptyIDActor{})) })
+	requirePanic(t, func() { sup.NewSupervisor("", sup.Transient) })
+	requirePanic(t, func() { sup.NewSupervisor("root", sup.RestartPolicy(255)) })
+
 	requirePanic(t, func() {
-		sup.NewSupervisor("root", sup.WithActors(actor, actor))
+		sup.NewSupervisor("root", sup.Transient).AddActor(nil)
 	})
 	requirePanic(t, func() {
-		sup.NewSupervisor("root", sup.WithActors(actor), sup.WithActors(actor))
+		sup.NewSupervisor("root", sup.Transient).AddActor(emptyIDActor{})
 	})
 	requirePanic(t, func() {
-		sup.NewSupervisor("root", sup.WithPolicy(sup.RestartPolicy(255)))
+		sup.NewSupervisor("root", sup.Transient).AddActors(actor, actor)
 	})
 	requirePanic(t, func() {
-		sup.NewSupervisor("root", sup.WithRestartDelay(-time.Nanosecond))
+		sup.NewSupervisor("root", sup.Transient).AddActor(actor).AddActor(actor)
 	})
 	requirePanic(t, func() {
-		sup.NewSupervisor("root", sup.WithRestartDelayFunc(nil))
+		sup.NewSupervisor("root", sup.Transient).SetRestartDelay(-time.Nanosecond)
 	})
 	requirePanic(t, func() {
-		sup.NewSupervisor("root", sup.WithRestartLimit(0, time.Second))
+		sup.NewSupervisor("root", sup.Transient).SetRestartDelayFunc(nil)
 	})
 	requirePanic(t, func() {
-		sup.NewSupervisor("root", sup.WithRestartLimit(1, 0))
+		sup.NewSupervisor("root", sup.Transient).SetRestartLimit(0, time.Second)
 	})
 	requirePanic(t, func() {
-		sup.NewSupervisor("root", sup.WithEventSink(nil))
+		sup.NewSupervisor("root", sup.Transient).SetRestartLimit(1, 0)
 	})
+	requirePanic(t, func() {
+		sup.NewSupervisor("root", sup.Transient).AddEventSink(nil)
+	})
+}
+
+func TestSupervisor_ConfigurationFreezesAfterFirstRun(t *testing.T) {
+	supervisor := sup.NewSupervisor("root", sup.Transient)
+	if err := supervisor.Run(t.Context()); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
+
+	actor := sup.ActorFunc("worker", func(context.Context) error { return nil })
+	sink := sup.EventSinkFunc(func(sup.Event) {})
+	requirePanic(t, func() { supervisor.AddActor(actor) })
+	requirePanic(t, func() { supervisor.AddActors(actor) })
+	requirePanic(t, func() { supervisor.SetRestartDelay(time.Second) })
+	requirePanic(t, func() { supervisor.SetRestartDelayFunc(func(int) time.Duration { return 0 }) })
+	requirePanic(t, func() { supervisor.SetRestartLimit(1, time.Second) })
+	requirePanic(t, func() { supervisor.AddEventSink(sink) })
+	requirePanic(t, func() { supervisor.AddEventSinks(sink) })
+}
+
+func TestSupervisor_ConfigurationMethodsAreChainable(t *testing.T) {
+	actor := sup.ActorFunc("worker", func(context.Context) error { return nil })
+	secondActor := sup.ActorFunc("second-worker", func(context.Context) error { return nil })
+	sink := sup.EventSinkFunc(func(sup.Event) {})
+
+	supervisor := sup.NewSupervisor("root", sup.Transient).
+		SetRestartDelay(0).
+		SetRestartDelayFunc(func(int) time.Duration { return 0 }).
+		SetRestartLimit(1, time.Second).
+		AddEventSinks(sink).
+		AddEventSink(sink).
+		AddActor(actor).
+		AddActors(secondActor)
+
+	if err := supervisor.Run(t.Context()); err != nil {
+		t.Fatalf("Run returned error: %v", err)
+	}
 }
 
 func TestSupervisor_EventSinkPropagatesThroughSupervisorTree(t *testing.T) {
@@ -367,15 +385,9 @@ func TestSupervisor_EventSinkPropagatesThroughSupervisorTree(t *testing.T) {
 		return nil
 	})
 
-	leaf := sup.NewSupervisor("leaf",
-		sup.WithActors(worker),
-		sup.WithPolicy(sup.Transient),
-	)
+	leaf := sup.NewSupervisor("leaf", sup.Transient).AddActor(worker)
 
-	middle := sup.NewSupervisor("middle",
-		sup.WithActors(leaf),
-		sup.WithPolicy(sup.Transient),
-	)
+	middle := sup.NewSupervisor("middle", sup.Transient).AddActor(leaf)
 
 	rootSink := sup.EventSinkFunc(func(event sup.Event) {
 		if event.Type == sup.EventActorStarted && event.Actor != nil && event.Actor.ID() == "leaf-worker" {
@@ -383,11 +395,9 @@ func TestSupervisor_EventSinkPropagatesThroughSupervisorTree(t *testing.T) {
 		}
 	})
 
-	root := sup.NewSupervisor("root",
-		sup.WithEventSink(rootSink),
-		sup.WithActors(middle),
-		sup.WithPolicy(sup.Transient),
-	)
+	root := sup.NewSupervisor("root", sup.Transient).
+		AddEventSink(rootSink).
+		AddActor(middle)
 
 	if err := runSupervisorUntil(t, root, func() bool {
 		return observedLeafWorkerStarted.Load() == 1
@@ -418,17 +428,13 @@ func TestSupervisor_LocalAndParentEventSinksReceiveChildEvents(t *testing.T) {
 		return nil
 	})
 
-	child := sup.NewSupervisor("child",
-		sup.WithEventSink(childSink),
-		sup.WithActors(worker),
-		sup.WithPolicy(sup.Transient),
-	)
+	child := sup.NewSupervisor("child", sup.Transient).
+		AddEventSink(childSink).
+		AddActor(worker)
 
-	root := sup.NewSupervisor("root",
-		sup.WithEventSink(parentSink),
-		sup.WithActors(child),
-		sup.WithPolicy(sup.Transient),
-	)
+	root := sup.NewSupervisor("root", sup.Transient).
+		AddEventSink(parentSink).
+		AddActor(child)
 
 	if err := runSupervisorUntil(t, root, func() bool {
 		return parentObserved.Load() == 1 && childObserved.Load() == 1

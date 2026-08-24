@@ -149,16 +149,14 @@ func TestActorSupervision(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	supervisor := sup.NewSupervisor("sup",
-		sup.WithPolicy(sup.Permanent),
-		sup.WithRestartDelay(10*time.Millisecond),
-		sup.WithEventSink(sup.EventSinkFunc(func(event sup.Event) {
+	supervisor := sup.NewSupervisor("sup", sup.Permanent).
+		SetRestartDelay(10 * time.Millisecond).
+		AddEventSink(sup.EventSinkFunc(func(event sup.Event) {
 			if event.Type == sup.EventActorStarted && starts.Add(1) == 2 {
 				cancel()
 			}
-		})),
-		sup.WithActors(actor),
-	)
+		})).
+		AddActor(actor)
 
 	if err := supervisor.Run(ctx); err != nil {
 		t.Fatalf("unexpected supervisor error: %v", err)

@@ -167,11 +167,10 @@ func main() {
 		return "wait"
 	}, paused, light.light)
 
-	intersection := sup.NewSupervisor("intersection",
-		sup.WithRestartDelay(750*time.Millisecond),
-		sup.WithRestartLimit(5, time.Minute),
-		sup.WithActors(clock, light),
-	)
+	intersection := sup.NewSupervisor("intersection", sup.Transient).
+		SetRestartDelay(750*time.Millisecond).
+		SetRestartLimit(5, time.Minute).
+		AddActors(clock, light)
 
 	dashboard := hub.New("dashboard",
 		hub.WithActor(clock),
@@ -191,10 +190,9 @@ func main() {
 		httpserver.WithShutdownTimeout(2*time.Second),
 	)
 
-	root := sup.NewSupervisor("root",
-		sup.WithEventSink(dashboard),
-		sup.WithActors(intersection, pedestrianSignal, dashboard, serverActor),
-	)
+	root := sup.NewSupervisor("root", sup.Transient).
+		AddEventSink(dashboard).
+		AddActors(intersection, pedestrianSignal, dashboard, serverActor)
 
 	go func() {
 		if err := root.Run(ctx); err != nil {
