@@ -19,7 +19,6 @@ const (
 
 type graphNode struct {
 	ID    string     `json:"id"`
-	Spec  sup.Spec   `json:"spec"`
 	State actorState `json:"state"`
 }
 
@@ -36,7 +35,6 @@ type supervisionGraph struct {
 func newGraphNode(actor sup.Actor) graphNode {
 	return graphNode{
 		ID:    actor.ID(),
-		Spec:  inspectActor(actor),
 		State: actorStateRegistered,
 	}
 }
@@ -57,26 +55,21 @@ func (h *Hub) projectRuntimeEvent(event sup.Event) {
 		return
 	}
 
-	var supervisorNode graphNode
-	if event.Supervisor != nil {
-		supervisorNode = newGraphNode(event.Supervisor)
-		supervisorNode.State = actorStateRunning
-	}
+	supervisorNode := newGraphNode(event.Supervisor)
+	supervisorNode.State = actorStateRunning
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
 	actorID := event.Actor.ID()
 	h.graphNodes[actorID] = actorNode
-	if event.Supervisor != nil {
-		supervisorID := event.Supervisor.ID()
-		h.graphNodes[supervisorID] = supervisorNode
-		h.parents[actorID] = supervisorID
-	}
+	supervisorID := event.Supervisor.ID()
+	h.graphNodes[supervisorID] = supervisorNode
+	h.parents[actorID] = supervisorID
 }
 
 func (h *Hub) graphSnapshot() supervisionGraph {
-	exposed := slices.Collect(maps.Keys(h.actors))
+	exposed := slices.Collect(maps.Keys(h.exposedActors))
 
 	h.mu.RLock()
 	nodes := maps.Clone(h.graphNodes)

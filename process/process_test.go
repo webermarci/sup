@@ -81,6 +81,19 @@ type readyWriter struct {
 	once  sync.Once
 }
 
+type eventHandlerActor struct {
+	handle func(sup.Event)
+}
+
+func (a *eventHandlerActor) ID() string { return "events" }
+func (a *eventHandlerActor) Run(ctx context.Context) error {
+	<-ctx.Done()
+	return nil
+}
+func (a *eventHandlerActor) HandleEvent(event sup.Event) {
+	a.handle(event)
+}
+
 func (w *readyWriter) Write(p []byte) (int, error) {
 	if bytes.Contains(p, []byte("ready")) {
 		w.once.Do(func() { close(w.ready) })
@@ -148,15 +161,15 @@ func TestActorSupervision(t *testing.T) {
 	actor := newHelperActor("process", "echo", nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	observer := &eventHandlerActor{handle: func(event sup.Event) {
+		if event.Type == sup.EventActorStarted && event.Actor == actor && starts.Add(1) == 2 {
+			cancel()
+		}
+	}}
 
 	supervisor := sup.NewSupervisor("sup", sup.Permanent).
-		SetRestartDelay(10 * time.Millisecond).
-		AddEventSink(sup.EventSinkFunc(func(event sup.Event) {
-			if event.Type == sup.EventActorStarted && starts.Add(1) == 2 {
-				cancel()
-			}
-		})).
-		AddActor(actor)
+		SetRestartDelay(10*time.Millisecond).
+		AddActors(actor, observer)
 
 	if err := supervisor.Run(ctx); err != nil {
 		t.Fatalf("unexpected supervisor error: %v", err)
@@ -188,47 +201,7 @@ func TestActorCancellation(t *testing.T) {
 	}
 }
 
-func TestActorRejectsConcurrentRun(t *testing.T) {
-	ready := &readyWriter{ready: make(chan struct{})}
-	actor := newHelperActor("wait", "wait", ready)
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- actor.Run(ctx) }()
-
-	select {
-	case <-ready.ready:
-	case <-time.After(5 * time.Second):
-		t.Fatal("process did not start")
-	}
-
-	if err := actor.Run(t.Context()); !errors.Is(err, process.ErrActorRunning) {
-		t.Fatalf("expected ErrActorRunning, got %v", err)
-	}
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatalf("expected clean cancellation, got %v", err)
-	}
-}
-
-func TestActorInspect(t *testing.T) {
-	actor := newHelperActor("process", "echo", nil)
-	if actor.ID() != "process" {
-		t.Fatalf("unexpected actor id: %q", actor.ID())
-	}
-	if spec := actor.Inspect(); spec.Kind != "process" {
-		t.Fatalf("unexpected actor spec: %+v", spec)
-	}
-}
-
 func TestNewActorValidation(t *testing.T) {
 	command := func(ctx context.Context) *exec.Cmd { return helperCommand(ctx, "echo") }
 	requirePanic(t, func() { process.NewActor("", command) })
-	requirePanic(t, func() { process.NewActor("actor", nil) })
-}
-
-func TestActorRejectsNilCommand(t *testing.T) {
-	actor := process.NewActor("nil", func(context.Context) *exec.Cmd { return nil })
-	if err := actor.Run(t.Context()); !errors.Is(err, process.ErrNilCommand) {
-		t.Fatalf("expected ErrNilCommand, got %v", err)
-	}
 }

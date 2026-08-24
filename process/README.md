@@ -33,7 +33,7 @@ func main() {
 		return cmd
 	})
 
-	supervisor := sup.NewSupervisor("root", sup.Transient).AddActor(worker)
+	supervisor := sup.NewSupervisor("root", sup.Transient).AddActors(worker)
 
 	if err := supervisor.Run(context.Background()); err != nil {
 		fmt.Println("supervisor failed:", err)
@@ -52,8 +52,6 @@ func main() {
   configured directly on `os/exec.Cmd`.
 - Context cancellation is a clean actor shutdown and makes `Run` return `nil`.
 - Other command errors are returned to the supervisor.
-- A nil command returns `process.ErrNilCommand`.
-- Concurrent calls to `Run` return `process.ErrActorRunning`.
 
 Process restarts, restart delays, restart limits, logging, and application state
 belong to the supervisor or application rather than this package.

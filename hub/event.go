@@ -1,7 +1,7 @@
 package hub
 
 import (
-	"encoding/json"
+	"encoding/json/v2"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -9,8 +9,7 @@ import (
 	"github.com/webermarci/sup"
 )
 
-// EventSignalUpdated identifies a signal value update in the hub event stream.
-const EventSignalUpdated sup.EventType = "signal:updated"
+const eventSignalUpdated sup.EventType = "signal:updated"
 
 type hubEvent struct {
 	ID        string        `json:"id"`
@@ -21,8 +20,7 @@ type hubEvent struct {
 }
 
 type actorRegisteredPayload struct {
-	SupervisorID string   `json:"supervisor_id"`
-	Spec         sup.Spec `json:"spec"`
+	SupervisorID string `json:"supervisor_id"`
 }
 
 type actorStartedPayload struct {
@@ -73,22 +71,12 @@ func snapshotHubEvent(event hubEvent) (hubEvent, []byte, error) {
 }
 
 func hubEventFromRuntime(event sup.Event) hubEvent {
-	var sourceID string
-	if event.Actor != nil {
-		sourceID = event.Actor.ID()
-	}
-
-	var supervisorID string
-	if event.Supervisor != nil {
-		supervisorID = event.Supervisor.ID()
-	}
-
+	supervisorID := event.Supervisor.ID()
 	var payload any
 	switch event.Type {
 	case sup.EventActorRegistered:
 		payload = actorRegisteredPayload{
 			SupervisorID: supervisorID,
-			Spec:         inspectActor(event.Actor),
 		}
 	case sup.EventActorStarted:
 		payload = actorStartedPayload{SupervisorID: supervisorID}
@@ -102,7 +90,7 @@ func hubEventFromRuntime(event sup.Event) hubEvent {
 		}
 	}
 
-	return newHubEvent(event.Type, sourceID, payload, event.Time)
+	return newHubEvent(event.Type, event.Actor.ID(), payload, event.Time)
 }
 
 func errorString(err error) string {

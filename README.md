@@ -23,7 +23,7 @@ those capabilities.
 - **Typed inboxes** — `CastInbox[T]` and `CallInbox[T, R]` provide type-safe asynchronous and request/reply messaging.
 - **Reactive signals** — The `rx` package provides passive signals and supervised derived state.
 - **Channel helpers** — `Map`, `Filter`, `Distinct`, `Debounce`, and explicit throttle helpers compose ordinary channels.
-- **Runtime inspection** — Optional `Inspect`, runtime events, and `hub` expose useful metadata for debugging and dashboards.
+- **Runtime debugging** — Runtime events and `hub` expose actor state, supervision, and signals.
 
 ## Installation
 
@@ -31,7 +31,7 @@ those capabilities.
 go get github.com/webermarci/sup
 ```
 
-The module requires Go 1.26 or newer.
+The module requires Go 1.27 or newer.
 
 ## Start here
 
@@ -148,12 +148,7 @@ func main() {
 	supervisor := sup.NewSupervisor("root", sup.Permanent).
 		SetRestartDelay(time.Second).
 		SetRestartLimit(5, 10*time.Second).
-		AddEventSink(sup.EventSinkFunc(func(event sup.Event) {
-			if event.Type == sup.EventActorStopped && event.Err != nil {
-				fmt.Printf("actor %s failed: %v\n", event.Actor.ID(), event.Err)
-			}
-		})).
-		AddActor(counter)
+		AddActors(counter)
 
 	done := make(chan error, 1)
 	go func() { done <- supervisor.Run(ctx) }()
@@ -186,14 +181,6 @@ type Actor interface {
 }
 ```
 
-Inspection is an optional capability:
-
-```go
-type Inspectable interface {
-	Inspect() sup.Spec
-}
-```
-
 Actor identity is ordinary application state:
 
 ```go
@@ -219,23 +206,6 @@ worker := sup.ActorFunc("health", func(ctx context.Context) error {
 })
 ```
 
-Actor functions are inspectable by default with kind `"actor"`. Use
-`WithSpec` to declare a more specific description:
-
-```go
-poller := sup.ActorFunc(
-	"temperature.poller",
-	runPoller,
-	sup.WithSpec(sup.Spec{
-		Kind:         "poller",
-		Dependencies: []string{"temperature"},
-		Metadata: map[string]any{
-			"interval": time.Second.String(),
-		},
-	}),
-)
-```
-
 ### Lifecycle contract
 
 Every actor follows the same `Run` contract:
@@ -244,10 +214,14 @@ Every actor follows the same `Run` contract:
 - Intentional completion returns `nil`.
 - A failure that may require a restart returns a non-nil error.
 - A panic is recovered by the supervisor and treated as a failure.
+- Each actor instance belongs to exactly one supervisor in a running tree.
+- Complete all actor, supervisor, and hub configuration before running the tree.
+- Applications call `Run` only on the root supervisor.
+- Supervisors may call a child's `Run` again sequentially when restarting it,
+  but the same actor instance must never run concurrently.
 
 Supervisors follow the same actor contract, so they can be nested as ordinary
-actors. A supervisor returns an error when a restart limit is exceeded or when
-the same supervisor is run concurrently.
+actors. A supervisor returns an error when a restart limit is exceeded.
 
 ## Supervisors
 
@@ -260,7 +234,7 @@ supervisor := sup.NewSupervisor("root", sup.Transient).
 	AddActors(actorA, actorB)
 
 if err := supervisor.Run(ctx); err != nil {
-	// A restart limit or concurrent Run stopped the supervisor.
+	// A restart limit stopped the supervisor.
 }
 ```
 
@@ -292,30 +266,39 @@ non-positive result means restart immediately.
 
 ### Runtime events
 
-An `EventSink` receives lifecycle events from a supervisor and all of its
-descendant supervisors. Different actors may call event sinks concurrently, so
-event sinks should return promptly and synchronize their own state. Sink
-panics are recovered and do not interrupt supervision.
+`EventHandler` is an optional actor capability. When an actor implements it, its
+supervisor automatically sends it lifecycle events from that supervisor and
+all descendants. Different actors may call event handlers concurrently, so
+handlers should return promptly and synchronize their own state. Handler panics
+are recovered and do not interrupt supervision.
 
 ```go
-events := sup.EventSinkFunc(func(event sup.Event) {
+type EventLogger struct{}
+
+func (*EventLogger) ID() string { return "events" }
+
+func (*EventLogger) Run(ctx context.Context) error {
+	<-ctx.Done()
+	return nil
+}
+
+func (*EventLogger) HandleEvent(event sup.Event) {
 	fmt.Printf("%s %s\n", event.Type, event.Actor.ID())
 
 	if event.Err != nil {
 		fmt.Println("error:", event.Err)
 	}
-})
+}
 
 root := sup.NewSupervisor("root", sup.Transient).
-	AddEventSink(events).
-	AddActor(worker)
+	AddActors(worker, &EventLogger{})
 ```
 
 Each event carries its occurrence time, actor, supervisor, error, and restart
 count as native Go values. `EventActorRegistered` marks the beginning of active
 supervision during a `Run`. Presentation layers such as `hub` decide how to
-serialize events. Multiple event sinks can independently record, log, aggregate,
-or forward the same authoritative runtime event.
+serialize events. Multiple event-handler actors can independently record, log,
+aggregate, or forward the same authoritative runtime event.
 
 ## Typed inboxes
 
@@ -460,7 +443,7 @@ doubled := rx.NewDerived("doubled", func() int {
 	return count.Value() * 2
 }, count)
 
-root := sup.NewSupervisor("root", sup.Transient).AddActor(doubled)
+root := sup.NewSupervisor("root", sup.Transient).AddActors(doubled)
 go root.Run(ctx)
 ```
 
@@ -490,21 +473,19 @@ and event updates from the SSE stream. It has no frontend dependencies.
 enabled := rx.NewSignal("counter_enabled", true)
 status := rx.NewSignal("counter_status", "ready")
 
-dashboard := hub.New("dashboard",
-	hub.WithActor(counter),
-	hub.WithSignal(status),
-	hub.WithWritableSignal(enabled),
-	hub.WithEventHistoryLimit(128),
-)
+dashboard := hub.New("dashboard").
+	RegisterActors(counter).
+	RegisterSignal(status).
+	RegisterWritableSignal(enabled).
+	SetEventHistoryLimit(128)
 
 server := httpserver.NewActor("dashboard.http",
 	func(context.Context) (*http.Server, error) {
-		return &http.Server{Addr: ":8080", Handler: dashboard.Handler()}, nil
+		return &http.Server{Addr: ":8080", Handler: dashboard}, nil
 	},
 ).SetShutdownTimeout(5 * time.Second)
 
 root := sup.NewSupervisor("root", sup.Transient).
-	AddEventSink(dashboard).
 	AddActors(counter, dashboard, server)
 
 go root.Run(ctx)
@@ -513,17 +494,21 @@ go root.Run(ctx)
 The overview is served at `/`. The handler is prefix-agnostic, so applications
 can also mount it below a path with `http.StripPrefix`.
 
-`WithSignal` is always read-only over HTTP. `WithWritableSignal` explicitly
+`RegisterSignal` is always read-only over HTTP. `RegisterWritableSignal` explicitly
 allows outside clients to change the signal with `PATCH`. Actors can subscribe
 to that signal using the ordinary `rx` API; the hub does not define a separate
 command or control model. Writable signals can also be changed with the forms
 in the HTML overview, which call the same `PATCH` endpoint without reloading the
 page.
 
+Writable updates reject cross-origin browser requests, unknown JSON members,
+and request bodies larger than 1 MiB. Requests from non-browser clients and
+same-origin browser pages are allowed.
+
 The hub does not provide authentication or authorization. If the handler is
 reachable outside a trusted local environment, put it behind the application's
 own authentication, authorization, and network controls—especially when using
-`WithWritableSignal`.
+`RegisterWritableSignal`.
 
 ```http
 PATCH /signals/counter_enabled
@@ -540,8 +525,6 @@ live event streaming is unaffected by the history limit.
 Endpoints include:
 
 - `GET /`
-- `GET /actors`
-- `GET /actors/{actorID}`
 - `GET /signals`
 - `GET /signals/{signalID}`
 - `PATCH /signals/{signalID}`

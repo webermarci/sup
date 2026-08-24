@@ -8,12 +8,17 @@
 //
 // Define an Actor with an ID and a Run method, then add it to a Supervisor:
 //
-//	supervisor := sup.NewSupervisor("root", sup.Transient).AddActor(worker)
+//	supervisor := sup.NewSupervisor("root", sup.Transient).AddActors(worker)
 //
 // Run the root supervisor with the application's context. Context cancellation
 // is a clean shutdown and should make Run return nil. Return a non-nil error
 // only when the actor has failed and the configured supervisor policy should
 // decide whether to restart it.
+//
+// Each actor instance must belong to exactly one supervisor in a running tree.
+// Complete all configuration before calling Run on the root supervisor.
+// Supervisors invoke child Run methods and may invoke them again sequentially
+// for restarts; the same actor instance must never run concurrently.
 //
 // NewSupervisor requires a restart policy and defaults to a one-second restart
 // delay with no restart limit. Configure optional restart behavior with
@@ -35,11 +40,11 @@
 // a Derived value actively watches dependencies and must be added to a
 // supervisor tree if it is expected to update.
 //
-// # Runtime inspection
+// # Runtime debugging
 //
-// Inspectable actors can expose a Spec, and EventSink values can observe
-// lifecycle events. The optional hub package builds an HTTP inspection surface
-// from explicitly registered actors and signals.
+// Actors implementing EventHandler observe lifecycle events. The optional hub
+// package builds an HTTP debugging surface from explicitly registered actors
+// and signals.
 //
 // See the README for application-oriented examples and the package reference
 // at https://pkg.go.dev/github.com/webermarci/sup for the complete API.

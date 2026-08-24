@@ -20,9 +20,6 @@ type CallRequest[T any, R any] struct {
 
 // Context returns the caller's context.
 func (r CallRequest[T, R]) Context() context.Context {
-	if r.ctx == nil {
-		return context.Background()
-	}
 	return r.ctx
 }
 
@@ -32,12 +29,8 @@ func (r CallRequest[T, R]) Payload() T {
 }
 
 // Reply sends the response back to the caller. It returns false when the caller
-// has canceled, the request is invalid, or a reply was already sent.
+// has canceled or a reply was already sent.
 func (r CallRequest[T, R]) Reply(value R, err error) bool {
-	if r.replyTo == nil || r.replied == nil {
-		return false
-	}
-
 	select {
 	case <-r.Context().Done():
 		return false

@@ -7,10 +7,6 @@ import "time"
 // Closing input stops the timer without flushing a pending value and closes
 // the output.
 func Debounce[V any](input <-chan V, wait time.Duration) <-chan V {
-	if input == nil {
-		panic("rx: debounce input cannot be nil")
-	}
-
 	if wait <= 0 {
 		panic("rx: debounce wait must be positive")
 	}

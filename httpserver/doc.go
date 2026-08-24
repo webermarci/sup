@@ -11,9 +11,9 @@
 //		}, nil
 //	})
 //
-//	supervisor := sup.NewSupervisor("root", sup.Transient).AddActor(server)
+//	supervisor := sup.NewSupervisor("root", sup.Transient).AddActors(server)
 //
-// The ServerFunc is called once for every execution attempt and must return a
+// The server factory is called once for every execution attempt and must return a
 // fresh *http.Server because a server cannot be reused after Shutdown. By
 // default, the actor calls ListenAndServe. Use SetServeFunc for TLS, custom
 // listeners, or another serving mode. Use SetShutdownTimeout to bound the
@@ -24,8 +24,6 @@
 // serving errors are returned to the supervisor and handled by its restart
 // policy.
 //
-// A nil server produces ErrNilServer, and concurrent calls to Run produce
-// ErrActorRunning. See the package README and the package reference at
-// https://pkg.go.dev/github.com/webermarci/sup/httpserver for the complete
-// API.
+// See the package README and the package reference at
+// https://pkg.go.dev/github.com/webermarci/sup/httpserver for the complete API.
 package httpserver

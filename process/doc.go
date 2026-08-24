@@ -9,7 +9,7 @@
 //		return exec.CommandContext(ctx, "./worker", "--serve")
 //	})
 //
-//	supervisor := sup.NewSupervisor("root", sup.Transient).AddActor(worker)
+//	supervisor := sup.NewSupervisor("root", sup.Transient).AddActors(worker)
 //
 // The command factory is called once for every execution attempt and must
 // return a fresh *exec.Cmd. Configure environment, working directory, output,
@@ -20,8 +20,6 @@
 // Run return nil. Other command errors are returned to the supervisor and are
 // handled by its restart policy.
 //
-// A command factory that returns nil produces ErrNilCommand. Concurrent calls
-// to Run produce ErrActorRunning. See the package README and the package
-// reference at https://pkg.go.dev/github.com/webermarci/sup/process for the
-// complete API.
+// See the package README and the package reference at
+// https://pkg.go.dev/github.com/webermarci/sup/process for the complete API.
 package process

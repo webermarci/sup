@@ -2,7 +2,6 @@ package rx_test
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"testing"
 
@@ -135,50 +134,9 @@ func TestDerivedRestartRecomputesChangesWhileStopped(t *testing.T) {
 	}
 }
 
-func TestDerivedRejectsConcurrentRun(t *testing.T) {
-	dependency := newObservedDependency("dependency", 0)
-	derived := rx.NewDerived("derived", func() int {
-		return dependency.Value()
-	}, dependency)
-
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan error, 1)
-	go func() { done <- derived.Run(ctx) }()
-	receive(t, dependency.watched)
-
-	if err := derived.Run(t.Context()); !errors.Is(err, rx.ErrDerivedRunning) {
-		t.Fatalf("expected ErrDerivedRunning, got %v", err)
-	}
-
-	cancel()
-	if err := receive(t, done); err != nil {
-		t.Fatalf("derived shutdown failed: %v", err)
-	}
-}
-
-func TestDerivedInspect(t *testing.T) {
-	first := rx.NewSignal("first", 1)
-	second := rx.NewSignal("second", 2)
-	derived := rx.NewDerived("sum", func() int {
-		return first.Value() + second.Value()
-	}, first, second)
-
-	spec := derived.Inspect()
-	if spec.Kind != "derived" {
-		t.Fatalf("expected derived kind, got %q", spec.Kind)
-	}
-	if len(spec.Dependencies) != 2 ||
-		spec.Dependencies[0] != "first" ||
-		spec.Dependencies[1] != "second" {
-		t.Fatalf("unexpected dependencies %v", spec.Dependencies)
-	}
-}
-
 func TestDerivedValidatesArguments(t *testing.T) {
 	tests := map[string]func(){
-		"empty id":       func() { rx.NewDerived("", func() int { return 0 }) },
-		"nil compute":    func() { rx.NewDerived[int]("derived", nil) },
-		"nil dependency": func() { rx.NewDerived("derived", func() int { return 0 }, nil) },
+		"empty id": func() { rx.NewDerived("", func() int { return 0 }) },
 	}
 
 	for name, test := range tests {

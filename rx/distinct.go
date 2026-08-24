@@ -14,14 +14,6 @@ func DistinctFunc[V any](
 	input <-chan V,
 	equal func(V, V) bool,
 ) <-chan V {
-	if input == nil {
-		panic("rx: distinct input cannot be nil")
-	}
-
-	if equal == nil {
-		panic("rx: distinct equality function cannot be nil")
-	}
-
 	output := make(chan V, 1)
 
 	go func() {

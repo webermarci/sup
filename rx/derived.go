@@ -2,17 +2,8 @@ package rx
 
 import (
 	"context"
-	"errors"
-	"slices"
 	"sync"
-	"sync/atomic"
-
-	"github.com/webermarci/sup"
 )
-
-// ErrDerivedRunning is returned when Run is called while the derived value is
-// already running.
-var ErrDerivedRunning = errors.New("rx: derived is already running")
 
 // Derived is read-only reactive state computed from one or more dependencies.
 //
@@ -23,7 +14,6 @@ type Derived[V any] struct {
 	value   *Signal[V]
 	compute func() V
 	deps    []Dependency
-	running atomic.Bool
 }
 
 // NewDerived creates a derived value with an initial computed value.
@@ -36,21 +26,10 @@ func NewDerived[V any](
 		panic("rx: derived id cannot be empty")
 	}
 
-	if compute == nil {
-		panic("rx: derived compute function cannot be nil")
-	}
-
-	deps := slices.Clone(dependencies)
-	for _, dependency := range deps {
-		if dependency == nil {
-			panic("rx: derived dependency cannot be nil")
-		}
-	}
-
 	return &Derived[V]{
 		value:   NewSignal(id, compute()),
 		compute: compute,
-		deps:    deps,
+		deps:    dependencies,
 	}
 }
 
@@ -76,14 +55,6 @@ func (d *Derived[V]) Watch(ctx context.Context) <-chan struct{} {
 
 // Run watches dependencies and recomputes the value until ctx is canceled.
 func (d *Derived[V]) Run(ctx context.Context) error {
-	if ctx == nil {
-		panic("rx: derived context cannot be nil")
-	}
-	if !d.running.CompareAndSwap(false, true) {
-		return ErrDerivedRunning
-	}
-	defer d.running.Store(false)
-
 	runCtx, cancel := context.WithCancel(ctx)
 	changed := make(chan struct{}, 1)
 	var watchers sync.WaitGroup
@@ -134,19 +105,5 @@ func (d *Derived[V]) Run(ctx context.Context) error {
 			}
 			d.value.Set(d.compute())
 		}
-	}
-}
-
-// Inspect returns the derived value spec.
-func (d *Derived[V]) Inspect() sup.Spec {
-	dependencies := make([]string, 0, len(d.deps))
-	for _, dependency := range d.deps {
-		dependencies = append(dependencies, dependency.ID())
-	}
-
-	return sup.Spec{
-		Kind:         "derived",
-		Dependencies: dependencies,
-		Metadata:     map[string]any{},
 	}
 }

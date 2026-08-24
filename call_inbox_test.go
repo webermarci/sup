@@ -157,16 +157,6 @@ func TestCallRequestReplyFailsAfterCancellation(t *testing.T) {
 	}
 }
 
-func TestZeroCallRequestReplyFails(t *testing.T) {
-	var req sup.CallRequest[string, string]
-	if req.Context() != context.Background() {
-		t.Fatal("expected zero request to use a background context")
-	}
-	if req.Reply("reply", nil) {
-		t.Fatal("expected zero request reply to fail")
-	}
-}
-
 func TestCallInboxCallCanBeCanceledWhileAdmissionIsBlocked(t *testing.T) {
 	inbox := sup.NewCallInbox[string, int]()
 	baseCtx, cancel := context.WithCancel(t.Context())

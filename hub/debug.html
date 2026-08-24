@@ -108,21 +108,11 @@
 			width: 100%;
 		}
 
-		table[data-fill-last-two] :is(th, td):nth-child(-n + 3) {
-			width: 1%;
-			white-space: nowrap;
-		}
-
-		table[data-fill-last-two] :is(th, td):nth-last-child(-n + 2) {
-			width: 50%;
-		}
-
 		table[data-bold-first] tbody td:first-child,
 		table[data-bold-second] tbody td:nth-child(2) {
 			font-weight: 600;
 		}
 
-		table[data-center-second] :is(th, td):nth-child(2),
 		table[data-center-third] :is(th, td):nth-child(3) {
 			text-align: center;
 		}
@@ -135,6 +125,10 @@
 			background: var(--subtle);
 			font-size: 0.75rem;
 			line-height: 1.25;
+		}
+
+		[data-graph-state] {
+			color: var(--muted);
 		}
 
 		code,
@@ -243,38 +237,26 @@
 
 	<main>
 		<section>
-			<h2>Supervision graph</h2>
+			<h2>Supervision Graph (<span data-actor-count>0</span>)</h2>
 			<div data-graph>
 				<p>Loading…</p>
 			</div>
 		</section>
 
 		<section>
-			<h2>Actors (<span data-actor-count>0</span>)</h2>
-			<table data-fill-last-two data-bold-first data-center-second data-center-third>
-				<thead>
-					<tr><th>ID</th><th>Kind</th><th>State</th><th>Dependencies</th><th>Metadata</th></tr>
-				</thead>
-				<tbody data-actors>
-					<tr><td colspan="5">Loading…</td></tr>
-				</tbody>
-			</table>
-		</section>
-
-		<section>
 			<h2>Signals (<span data-signal-count>0</span>)</h2>
-			<table data-fill-last data-bold-first data-center-second data-center-third>
+			<table data-fill-last data-bold-first>
 				<thead>
-					<tr><th>ID</th><th>Kind</th><th>Type</th><th>Value</th></tr>
+					<tr><th>ID</th><th>Value</th></tr>
 				</thead>
 				<tbody data-signals>
-					<tr><td colspan="4">Loading…</td></tr>
+					<tr><td colspan="2">Loading…</td></tr>
 				</tbody>
 			</table>
 		</section>
 
 		<section>
-			<h2>Recent events (<span data-event-count>0</span>)</h2>
+			<h2>Recent Events (<span data-event-count>0</span>)</h2>
 			<table data-fill-last data-bold-second data-center-third>
 				<thead>
 					<tr><th>Time</th><th>Source</th><th>Type</th><th>Payload</th></tr>
@@ -393,8 +375,6 @@
 
 				row.append(
 					makeCell(signal.id),
-					makeCell(makeBadge(signal.spec.kind)),
-					makeCell(makeBadge(signal.type)),
 					valueCell,
 				);
 				rows.append(row);
@@ -402,7 +382,7 @@
 
 			if (signals.length === 0) {
 				const cell = makeCell("No signals registered.");
-				cell.colSpan = 4;
+				cell.colSpan = 2;
 				const row = makeElement("tr");
 				row.append(cell);
 				rows.append(row);
@@ -482,6 +462,7 @@
 
 		const renderGraph = (graph) => {
 			const container = document.querySelector("[data-graph]");
+			document.querySelector("[data-actor-count]").textContent = graph.nodes.length;
 			container.replaceChildren();
 			if (graph.nodes.length === 0) {
 				const empty = document.createElement("p");
@@ -506,7 +487,10 @@
 				const item = document.createElement("li");
 				const name = document.createElement("strong");
 				name.textContent = id;
-				item.append(name, ` (${node.spec.kind})`);
+				const state = document.createElement("span");
+				state.dataset.graphState = "";
+				state.textContent = ` (${node.state})`;
+				item.append(name, state);
 				rendered.add(id);
 
 				const childIDs = children.get(id) ?? [];
@@ -529,38 +513,6 @@
 			container.append(forest);
 		};
 
-		const renderActors = (nodes) => {
-			const actors = document.querySelector("[data-actors]");
-			actors.replaceChildren();
-
-			for (const node of nodes) {
-				const row = makeElement("tr");
-				row.append(
-					makeCell(node.id),
-					makeCell(makeBadge(node.spec.kind)),
-					makeCell(makeBadge(node.state)),
-					makeCell(makeElement("code", JSON.stringify(node.spec.dependencies ?? []))),
-					makeCell(makeElement("code", JSON.stringify(node.spec.metadata ?? {}))),
-				);
-				actors.append(row);
-			}
-
-			if (nodes.length === 0) {
-				const row = document.createElement("tr");
-				const cell = document.createElement("td");
-				cell.colSpan = 5;
-				cell.textContent = "No actors registered.";
-				row.append(cell);
-				actors.append(row);
-			}
-			document.querySelector("[data-actor-count]").textContent = nodes.length;
-		};
-
-		const renderGraphSnapshot = (graph) => {
-			renderGraph(graph);
-			renderActors(graph.nodes);
-		};
-
 		let refreshingGraph = false;
 		let graphRefreshRequested = false;
 		const refreshGraph = async () => {
@@ -571,7 +523,7 @@
 				while (graphRefreshRequested) {
 					graphRefreshRequested = false;
 					const graph = await fetchJSON("graph");
-					renderGraphSnapshot(graph);
+					renderGraph(graph);
 				}
 			} finally {
 				refreshingGraph = false;
@@ -655,7 +607,7 @@
 			const history = await eventsResponse.json();
 			const limit = Number(eventsResponse.headers.get("Event-History-Limit")) || 0;
 
-			renderGraphSnapshot(graph);
+			renderGraph(graph);
 			renderSignals(signals);
 			renderEvents(history, limit);
 			hydrated = true;

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/webermarci/sup/resource"
@@ -39,10 +40,6 @@ func TestCallAndCast(t *testing.T) {
 
 	if actor.ID() != "device" {
 		t.Fatalf("ID() = %q, want device", actor.ID())
-	}
-	spec := actor.Inspect()
-	if spec.Kind != "resource" || spec.Metadata["release_timeout"] != resource.DefaultReleaseTimeout {
-		t.Fatalf("unexpected spec: %#v", spec)
 	}
 
 	cancel, done := startActor(t, actor)
@@ -178,44 +175,46 @@ func TestOperationsAreSerialized(t *testing.T) {
 }
 
 func TestOperationHandoffHonorsCancellation(t *testing.T) {
-	actor := resource.NewActor(
-		"device",
-		func(context.Context) (testResource, error) { return testResource{}, nil },
-		func(context.Context, testResource) error { return nil },
-	)
-	cancelActor, done := startActor(t, actor)
+	synctest.Test(t, func(t *testing.T) {
+		actor := resource.NewActor(
+			"device",
+			func(context.Context) (testResource, error) { return testResource{}, nil },
+			func(context.Context, testResource) error { return nil },
+		)
+		cancelActor, done := startActor(t, actor)
 
-	activeStarted := make(chan struct{})
-	releaseActive := make(chan struct{})
-	if err := resource.Cast(t.Context(), actor, func(context.Context, testResource) error {
-		close(activeStarted)
-		<-releaseActive
-		return nil
-	}); err != nil {
-		t.Fatalf("active Cast() = %v, want nil", err)
-	}
-	select {
-	case <-activeStarted:
-	case <-time.After(time.Second):
-		t.Fatal("active operation did not run")
-	}
+		activeStarted := make(chan struct{})
+		releaseActive := make(chan struct{})
+		if err := resource.Cast(t.Context(), actor, func(context.Context, testResource) error {
+			close(activeStarted)
+			<-releaseActive
+			return nil
+		}); err != nil {
+			t.Fatalf("active Cast() = %v, want nil", err)
+		}
+		select {
+		case <-activeStarted:
+		case <-time.After(time.Second):
+			t.Fatal("active operation did not run")
+		}
 
-	callCtx, cancelCall := context.WithCancel(t.Context())
-	blocked := make(chan error, 1)
-	go func() {
-		blocked <- resource.Cast(callCtx, actor, func(context.Context, testResource) error { return nil })
-	}()
-	time.Sleep(10 * time.Millisecond)
-	cancelCall()
-	if err := awaitResult(t, blocked); !errors.Is(err, context.Canceled) {
-		t.Fatalf("blocked Cast() = %v, want context.Canceled", err)
-	}
+		callCtx, cancelCall := context.WithCancel(t.Context())
+		blocked := make(chan error, 1)
+		go func() {
+			blocked <- resource.Cast(callCtx, actor, func(context.Context, testResource) error { return nil })
+		}()
+		synctest.Wait()
+		cancelCall()
+		if err := awaitResult(t, blocked); !errors.Is(err, context.Canceled) {
+			t.Fatalf("blocked Cast() = %v, want context.Canceled", err)
+		}
 
-	close(releaseActive)
-	cancelActor()
-	if err := awaitRun(t, done); err != nil {
-		t.Fatalf("Run() = %v, want nil after cancellation", err)
-	}
+		close(releaseActive)
+		cancelActor()
+		if err := awaitRun(t, done); err != nil {
+			t.Fatalf("Run() = %v, want nil after cancellation", err)
+		}
+	})
 }
 
 func TestCastFailureReleasesAndReacquires(t *testing.T) {
@@ -313,33 +312,10 @@ func TestValidation(t *testing.T) {
 	requirePanic(t, func() {
 		resource.NewActor("", func(context.Context) (int, error) { return 0, nil }, func(context.Context, int) error { return nil })
 	})
-	requirePanic(t, func() { resource.NewActor("actor", nil, func(context.Context, int) error { return nil }) })
-	requirePanic(t, func() { resource.NewActor("actor", func(context.Context) (int, error) { return 0, nil }, nil) })
 	requirePanic(t, func() {
 		resource.NewActor("actor", func(context.Context) (int, error) { return 0, nil }, func(context.Context, int) error { return nil }).SetReleaseTimeout(0)
 	})
 
-	actor := resource.NewActor("actor", func(context.Context) (int, error) { return 0, nil }, func(context.Context, int) error { return nil })
-	var nilCall resource.CallFunc[int, int]
-	requirePanic(t, func() { resource.Call(t.Context(), actor, nilCall) })
-	var nilCast resource.CastFunc[int]
-	requirePanic(t, func() { resource.Cast(t.Context(), actor, nilCast) })
-}
-
-func TestConfigurationFreezesAfterFirstRun(t *testing.T) {
-	actor := resource.NewActor(
-		"actor",
-		func(context.Context) (int, error) { return 0, nil },
-		func(context.Context, int) error { return nil },
-	).SetReleaseTimeout(time.Second)
-
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if err := actor.Run(ctx); err != nil {
-		t.Fatalf("Run returned error: %v", err)
-	}
-
-	requirePanic(t, func() { actor.SetReleaseTimeout(2 * time.Second) })
 }
 
 func startActor[T any](t *testing.T, actor *resource.Actor[T]) (context.CancelFunc, <-chan error) {

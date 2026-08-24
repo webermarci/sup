@@ -25,11 +25,6 @@ func TestFilterEmitsAcceptedValues(t *testing.T) {
 	}
 }
 
-func TestFilterRejectsNilFunction(t *testing.T) {
-	defer expectPanic(t)
-	rx.Filter[int](make(chan int), nil)
-}
-
 func expectPanic(t testing.TB) {
 	t.Helper()
 	if recover() == nil {

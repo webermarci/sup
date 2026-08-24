@@ -16,7 +16,7 @@ func BenchmarkSupervisor_RunAndCancel(b *testing.B) {
 		<-ctx.Done()
 		return nil
 	})
-	supervisor := sup.NewSupervisor("bench", sup.Temporary).AddActor(actor)
+	supervisor := sup.NewSupervisor("bench", sup.Temporary).AddActors(actor)
 
 	for b.Loop() {
 		ctx, cancel := context.WithCancel(b.Context())
@@ -40,7 +40,7 @@ func BenchmarkSupervisor_RestartCycle(b *testing.B) {
 		return errors.New("restart")
 	})
 	supervisor := sup.NewSupervisor("bench", sup.Permanent).
-		AddActor(actor).
+		AddActors(actor).
 		SetRestartDelay(0)
 
 	b.ResetTimer()

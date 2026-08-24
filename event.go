@@ -6,19 +6,13 @@ import (
 	"time"
 )
 
-// EventSink consumes runtime events emitted by a supervisor tree. HandleEvent may
-// be called concurrently by different actors and must return promptly. A panic
-// is recovered so that event handling cannot interrupt supervision.
-type EventSink interface {
+// EventHandler is an optional actor capability for handling runtime events emitted
+// by its supervisor tree. Supervisors register the capability when the actor is
+// added. HandleEvent may be called concurrently by different actors and must
+// return promptly. A panic is recovered so that event handling cannot interrupt
+// supervision.
+type EventHandler interface {
 	HandleEvent(Event)
-}
-
-// EventSinkFunc adapts a function into an EventSink.
-type EventSinkFunc func(Event)
-
-// HandleEvent calls f with event.
-func (f EventSinkFunc) HandleEvent(event Event) {
-	f(event)
 }
 
 // EventType identifies the kind of event that occurred.
@@ -49,24 +43,24 @@ type Event struct {
 	RestartCount int
 }
 
-type eventSinksContextKey struct{}
+type eventHandlersContextKey struct{}
 
-func withEventSinks(ctx context.Context, sinks []EventSink) context.Context {
-	if len(sinks) == 0 {
+func withEventHandlers(ctx context.Context, handlers []EventHandler) context.Context {
+	if len(handlers) == 0 {
 		return ctx
 	}
 
-	parent, _ := ctx.Value(eventSinksContextKey{}).([]EventSink)
-	return context.WithValue(ctx, eventSinksContextKey{}, slices.Concat(parent, sinks))
+	parent, _ := ctx.Value(eventHandlersContextKey{}).([]EventHandler)
+	return context.WithValue(ctx, eventHandlersContextKey{}, slices.Concat(parent, handlers))
 }
 
 func emitEvent(ctx context.Context, event Event) {
 	event.Time = time.Now()
-	sinks, _ := ctx.Value(eventSinksContextKey{}).([]EventSink)
-	for _, sink := range sinks {
+	handlers, _ := ctx.Value(eventHandlersContextKey{}).([]EventHandler)
+	for _, handler := range handlers {
 		func() {
 			defer func() { _ = recover() }()
-			sink.HandleEvent(event)
+			handler.HandleEvent(event)
 		}()
 	}
 }

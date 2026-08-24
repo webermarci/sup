@@ -13,7 +13,7 @@
 // A Derived value is an actor, so add it to a supervisor when it should keep
 // recomputing:
 //
-//	supervisor := sup.NewSupervisor("root", sup.Transient).AddActor(summary)
+//	supervisor := sup.NewSupervisor("root", sup.Transient).AddActors(summary)
 //	go supervisor.Run(ctx)
 //
 // Subscribe to values or change notifications from any goroutine:

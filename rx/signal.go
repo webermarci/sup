@@ -3,8 +3,6 @@ package rx
 import (
 	"context"
 	"sync"
-
-	"github.com/webermarci/sup"
 )
 
 // Dependency is a named reactive value that publishes change notifications.
@@ -98,10 +96,6 @@ func (s *Signal[V]) Set(value V) {
 // The current value is sent first. Later publications are coalesced to the
 // latest pending value. The channel closes when ctx is canceled.
 func (s *Signal[V]) Subscribe(ctx context.Context) <-chan V {
-	if ctx == nil {
-		panic("rx: subscription context cannot be nil")
-	}
-
 	subscriber := make(chan V, 1)
 
 	s.mu.Lock()
@@ -137,10 +131,6 @@ func (s *Signal[V]) Subscribe(ctx context.Context) <-chan V {
 // An initial notification is available immediately. Later notifications are
 // coalesced while one is pending. The channel closes when ctx is canceled.
 func (s *Signal[V]) Watch(ctx context.Context) <-chan struct{} {
-	if ctx == nil {
-		panic("rx: watch context cannot be nil")
-	}
-
 	subscriber := make(chan struct{}, 1)
 
 	s.mu.Lock()
@@ -169,14 +159,6 @@ func (s *Signal[V]) Watch(ctx context.Context) <-chan struct{} {
 	})
 
 	return subscriber
-}
-
-// Inspect returns the signal spec.
-func (s *Signal[V]) Inspect() sup.Spec {
-	return sup.Spec{
-		Kind:     "signal",
-		Metadata: map[string]any{},
-	}
 }
 
 func sendLatest[V any](output chan V, value V) {

@@ -7,6 +7,12 @@ import "context"
 // Run must return nil when its context is canceled or the actor completes
 // intentionally. It should return a non-nil error only for failures that may
 // require a restart. Panics are recovered by supervisors and treated as failures.
+//
+// Each actor instance must belong to exactly one supervisor in a running tree.
+// Applications must finish configuring the tree before running only its root
+// supervisor. Supervisors invoke child Run methods and may invoke them again
+// sequentially when restarting actors. Run must never be called concurrently
+// on the same actor instance.
 type Actor interface {
 	// ID returns the actor id.
 	ID() string
@@ -16,17 +22,12 @@ type Actor interface {
 	Run(context.Context) error
 }
 
-// Inspectable is implemented by actors that expose structured metadata.
-// Inspection is optional and does not affect actor execution or supervision.
-type Inspectable interface {
-	Inspect() Spec
+type actorFunc struct {
+	id string
+	fn func(ctx context.Context) error
 }
 
-type actorFunc struct {
-	id   string
-	fn   func(ctx context.Context) error
-	spec Spec
-}
+var _ Actor = (*actorFunc)(nil)
 
 // ID returns the actor id.
 func (a *actorFunc) ID() string {
@@ -35,25 +36,10 @@ func (a *actorFunc) ID() string {
 
 // Run calls the wrapped actor function.
 func (a *actorFunc) Run(ctx context.Context) error {
-	err := a.fn(ctx)
-	if ctx.Err() != nil {
+	if err := a.fn(ctx); ctx.Err() != nil {
 		return nil
-	}
-	return err
-}
-
-// Inspect returns the actor function spec.
-func (a *actorFunc) Inspect() Spec {
-	return a.spec
-}
-
-// ActorFuncOption configures an actor created by ActorFunc.
-type ActorFuncOption func(*actorFunc)
-
-// WithSpec configures an actor function's structured inspection spec.
-func WithSpec(spec Spec) ActorFuncOption {
-	return func(actor *actorFunc) {
-		actor.spec = spec
+	} else {
+		return err
 	}
 }
 
@@ -61,28 +47,12 @@ func WithSpec(spec Spec) ActorFuncOption {
 func ActorFunc(
 	id string,
 	fn func(ctx context.Context) error,
-	options ...ActorFuncOption,
 ) Actor {
 	if id == "" {
 		panic("sup: actor id cannot be empty")
 	}
-	if fn == nil {
-		panic("sup: actor function cannot be nil")
-	}
-
-	actor := &actorFunc{
+	return &actorFunc{
 		id: id,
 		fn: fn,
-		spec: Spec{
-			Kind:     "actor",
-			Metadata: map[string]any{},
-		},
 	}
-	for _, option := range options {
-		if option == nil {
-			panic("sup: actor function option cannot be nil")
-		}
-		option(actor)
-	}
-	return actor
 }

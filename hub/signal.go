@@ -3,13 +3,13 @@ package hub
 import (
 	"cmp"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"maps"
 	"reflect"
 	"slices"
 
-	"github.com/webermarci/sup"
 	"github.com/webermarci/sup/rx"
 )
 
@@ -26,7 +26,6 @@ const (
 
 type hubSignal struct {
 	ID       string             `json:"id"`
-	Spec     sup.Spec           `json:"spec"`
 	Type     hubSignalValueType `json:"type"`
 	Value    any                `json:"value"`
 	Writable bool               `json:"writable"`
@@ -34,18 +33,16 @@ type hubSignal struct {
 
 type registeredSignal struct {
 	id        string
-	spec      sup.Spec
 	valueType hubSignalValueType
 	writable  bool
 	read      func() any
-	write     func(json.RawMessage) error
+	write     func(jsontext.Value) error
 	observe   func(context.Context, func(any))
 }
 
 func newReadableSignal[V any](signal rx.Readable[V]) registeredSignal {
 	return registeredSignal{
 		id:        signal.ID(),
-		spec:      inspectSignal(signal),
 		valueType: inferSignalValueType[V](),
 		read:      func() any { return signal.Value() },
 		observe: func(ctx context.Context, publish func(any)) {
@@ -55,9 +52,9 @@ func newReadableSignal[V any](signal rx.Readable[V]) registeredSignal {
 }
 
 func newWritableSignal[V any](signal rx.Writable[V]) registeredSignal {
-	registered := newReadableSignal[V](signal)
+	registered := newReadableSignal(signal)
 	registered.writable = true
-	registered.write = func(raw json.RawMessage) error {
+	registered.write = func(raw jsontext.Value) error {
 		var value V
 		if err := json.Unmarshal(raw, &value); err != nil {
 			return err
@@ -66,13 +63,6 @@ func newWritableSignal[V any](signal rx.Writable[V]) registeredSignal {
 		return nil
 	}
 	return registered
-}
-
-func inspectSignal(signal any) sup.Spec {
-	if inspectable, ok := signal.(sup.Inspectable); ok {
-		return normalizeSpec(inspectable.Inspect(), "signal")
-	}
-	return normalizeSpec(sup.Spec{}, "signal")
 }
 
 func observeSignal[V any](ctx context.Context, signal rx.Readable[V], publish func(any)) {
@@ -105,14 +95,13 @@ func observeSignal[V any](ctx context.Context, signal rx.Readable[V], publish fu
 func (s registeredSignal) describe() hubSignal {
 	return hubSignal{
 		ID:       s.id,
-		Spec:     s.spec,
 		Type:     s.valueType,
 		Value:    s.read(),
 		Writable: s.writable,
 	}
 }
 
-func (s registeredSignal) set(raw json.RawMessage) error {
+func (s registeredSignal) set(raw jsontext.Value) error {
 	if s.write == nil {
 		return errSignalReadOnly
 	}

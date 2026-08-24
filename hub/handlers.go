@@ -1,34 +1,15 @@
 package hub
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
-	"io"
 	"net/http"
 	"strconv"
 	"time"
 )
 
-func (h *Hub) handleActors(w http.ResponseWriter, _ *http.Request) {
-	actors := h.actorsSnapshot()
-	response := make([]hubActor, 0, len(actors))
-
-	for _, actor := range actors {
-		response = append(response, describeActor(actor))
-	}
-
-	writeJSON(w, response)
-}
-
-func (h *Hub) handleActor(w http.ResponseWriter, r *http.Request) {
-	actor, ok := h.actors[r.PathValue("actorID")]
-	if !ok {
-		http.Error(w, "actor not found", http.StatusNotFound)
-		return
-	}
-
-	writeJSON(w, describeActor(actor))
-}
+const maxSignalUpdateBodyBytes int64 = 1 << 20
 
 func (h *Hub) handleSignals(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, h.signalsSnapshot())
@@ -52,18 +33,14 @@ func (h *Hub) handleSetSignal(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var request struct {
-		Value json.RawMessage `json:"value"`
+		Value jsontext.Value `json:"value"`
 	}
 
-	decoder := json.NewDecoder(r.Body)
-	if err := decoder.Decode(&request); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		if err == nil {
-			err = errors.New("request body must contain a single JSON value")
+	r.Body = http.MaxBytesReader(w, r.Body, maxSignalUpdateBodyBytes)
+	if err := json.UnmarshalRead(r.Body, &request, json.RejectUnknownMembers(true)); err != nil {
+		if _, oversized := errors.AsType[*http.MaxBytesError](err); oversized {
+			http.Error(w, err.Error(), http.StatusRequestEntityTooLarge)
+			return
 		}
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -105,7 +82,6 @@ func (h *Hub) handleEventStream(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
 
 	events := make(chan []byte, 16)
 

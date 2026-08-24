@@ -126,13 +126,6 @@ func TestSignalWatchStartsAndCoalesces(t *testing.T) {
 	}
 }
 
-func TestSignalInspect(t *testing.T) {
-	spec := rx.NewSignal("count", 0).Inspect()
-	if spec.Kind != "signal" {
-		t.Fatalf("expected signal kind, got %q", spec.Kind)
-	}
-}
-
 func TestSignalRejectsEmptyID(t *testing.T) {
 	defer func() {
 		if recover() == nil {

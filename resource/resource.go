@@ -1,32 +1,19 @@
-// Package resource provides supervised, serialized access to acquired
-// resources.
 package resource
 
 import (
 	"context"
 	"errors"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/webermarci/sup"
 )
 
-const (
-	// DefaultReleaseTimeout is the maximum duration supplied to a resource
-	// release function after an execution attempt ends.
-	DefaultReleaseTimeout = 5 * time.Second
-)
+const defaultReleaseTimeout = 5 * time.Second
 
-var (
-	// ErrActorRunning is returned when Run is called while the resource actor is
-	// already running.
-	ErrActorRunning = errors.New("resource: actor is already running")
-
-	// ErrActorNotRunning is returned when an operation cannot be handled because
-	// the resource actor has not started or has already stopped.
-	ErrActorNotRunning = errors.New("resource: actor is not running")
-)
+// ErrActorNotRunning is returned when an operation cannot be handled because
+// the resource actor has not started or has already stopped.
+var ErrActorNotRunning = errors.New("resource: actor is not running")
 
 // AcquireFunc creates a resource for one execution attempt. It should honor
 // ctx and return a fresh resource for every attempt because the previous
@@ -51,17 +38,14 @@ type CastFunc[T any] func(context.Context, T) error
 // Cast operations against it until its context is canceled or a Cast
 // operation fails. A supervisor can restart it to acquire a fresh resource.
 type Actor[T any] struct {
-	id                  string
-	acquire             AcquireFunc[T]
-	release             ReleaseFunc[T]
-	releaseTimeout      time.Duration
-	configMu            sync.Mutex
-	configurationFrozen bool
-	running             atomic.Bool
-	mu                  sync.Mutex
-	current             *execution[T]
-	started             bool
-	startedC            chan struct{}
+	id             string
+	acquire        AcquireFunc[T]
+	release        ReleaseFunc[T]
+	releaseTimeout time.Duration
+	mu             sync.Mutex
+	current        *execution[T]
+	started        bool
+	startedC       chan struct{}
 }
 
 type execution[T any] struct {
@@ -83,13 +67,13 @@ type callResult struct {
 }
 
 var _ sup.Actor = (*Actor[any])(nil)
-var _ sup.Inspectable = (*Actor[any])(nil)
 
 // NewActor creates a resource actor. The acquire function is called once per
 // execution attempt, and the release function is called exactly once after a
 // successful acquisition, including when the resource actor fails. Calls made
 // before the first Run wait for the actor to become ready; calls made after an
-// execution stops return ErrActorNotRunning.
+// execution stops return ErrActorNotRunning. Release defaults to a five-second
+// timeout.
 // Optional configuration is added with methods before the first Run call.
 func NewActor[T any](
 	id string,
@@ -99,18 +83,11 @@ func NewActor[T any](
 	if id == "" {
 		panic("resource: actor id cannot be empty")
 	}
-	if acquire == nil {
-		panic("resource: acquire function cannot be nil")
-	}
-	if release == nil {
-		panic("resource: release function cannot be nil")
-	}
-
 	return &Actor[T]{
 		id:             id,
 		acquire:        acquire,
 		release:        release,
-		releaseTimeout: DefaultReleaseTimeout,
+		releaseTimeout: defaultReleaseTimeout,
 		startedC:       make(chan struct{}),
 	}
 }
@@ -118,12 +95,6 @@ func NewActor[T any](
 // SetReleaseTimeout sets the maximum duration of the context passed to the
 // release function and returns the actor for chaining.
 func (a *Actor[T]) SetReleaseTimeout(timeout time.Duration) *Actor[T] {
-	a.configMu.Lock()
-	defer a.configMu.Unlock()
-
-	if a.configurationFrozen {
-		panic("resource: actor configuration is frozen")
-	}
 	if timeout <= 0 {
 		panic("resource: release timeout must be positive")
 	}
@@ -136,37 +107,11 @@ func (a *Actor[T]) ID() string {
 	return a.id
 }
 
-// Inspect returns the resource actor spec.
-func (a *Actor[T]) Inspect() sup.Spec {
-	a.configMu.Lock()
-	defer a.configMu.Unlock()
-
-	return sup.Spec{
-		Kind:         "resource",
-		Dependencies: []string{},
-		Metadata: map[string]any{
-			"release_timeout": a.releaseTimeout,
-		},
-	}
-}
-
 // Run acquires one resource and processes serialized operations until the
 // actor context is canceled or a Cast operation returns an error. Cancellation
 // is a clean shutdown and returns nil. A Call error is returned to its caller;
 // a Cast error is returned from Run for supervision.
 func (a *Actor[T]) Run(ctx context.Context) (runErr error) {
-	if ctx == nil {
-		panic("resource: context cannot be nil")
-	}
-	if !a.running.CompareAndSwap(false, true) {
-		return ErrActorRunning
-	}
-
-	a.configMu.Lock()
-	a.configurationFrozen = true
-	releaseTimeout := a.releaseTimeout
-	a.configMu.Unlock()
-
 	current := &execution[T]{
 		requests: make(chan request[T]),
 		ready:    make(chan struct{}),
@@ -190,7 +135,7 @@ func (a *Actor[T]) Run(ctx context.Context) (runErr error) {
 	defer func() {
 		releaseCtx, cancelRelease := context.WithTimeout(
 			context.WithoutCancel(ctx),
-			releaseTimeout,
+			a.releaseTimeout,
 		)
 		defer cancelRelease()
 		releaseErr := a.release(releaseCtx, value)
@@ -255,16 +200,6 @@ func Call[T any, R any](
 	operation CallFunc[T, R],
 ) (R, error) {
 	var zero R
-	if ctx == nil {
-		panic("resource: context cannot be nil")
-	}
-	if actor == nil {
-		panic("resource: actor cannot be nil")
-	}
-	if operation == nil {
-		panic("resource: operation cannot be nil")
-	}
-
 	current, err := actor.waitForExecution(ctx)
 	if err != nil {
 		return zero, err
@@ -313,16 +248,6 @@ func Cast[T any](
 	actor *Actor[T],
 	operation CastFunc[T],
 ) error {
-	if ctx == nil {
-		panic("resource: context cannot be nil")
-	}
-	if actor == nil {
-		panic("resource: actor cannot be nil")
-	}
-	if operation == nil {
-		panic("resource: operation cannot be nil")
-	}
-
 	current, err := actor.waitForExecution(ctx)
 	if err != nil {
 		return err
@@ -332,8 +257,7 @@ func Cast[T any](
 	}
 
 	return enqueue(ctx, current, request[T]{
-		caller: ctx,
-		cast:   operation,
+		cast: operation,
 	})
 }
 
@@ -356,7 +280,6 @@ func (a *Actor[T]) finish(current *execution[T]) {
 		a.current = nil
 	}
 	a.mu.Unlock()
-	a.running.Store(false)
 }
 
 func (a *Actor[T]) waitForExecution(ctx context.Context) (*execution[T], error) {

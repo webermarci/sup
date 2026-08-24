@@ -24,7 +24,7 @@
 //		},
 //	)
 //
-//	supervisor := sup.NewSupervisor("root", sup.Transient).AddActor(device)
+//	supervisor := sup.NewSupervisor("root", sup.Transient).AddActors(device)
 //
 // Use SetReleaseTimeout before the first Run call to bound the release
 // context, when the default timeout is not appropriate.

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,6 +18,9 @@ func TestActorServesAndShutsDownGracefully(t *testing.T) {
 	started := make(chan string, 1)
 	requestStarted := make(chan struct{})
 	releaseRequest := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseRequest) }) }
+	defer release()
 
 	actor := httpserver.NewActor("server", func(context.Context) (*http.Server, error) {
 		return &http.Server{
@@ -41,10 +46,19 @@ func TestActorServesAndShutsDownGracefully(t *testing.T) {
 		})
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	done := make(chan error, 1)
 	go func() { done <- actor.Run(ctx) }()
 
-	baseURL := <-started
+	var baseURL string
+	select {
+	case baseURL = <-started:
+	case err := <-done:
+		t.Fatalf("Run returned before the listener started: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the listener to start")
+	}
+
 	requestDone := make(chan error, 1)
 	go func() {
 		response, err := http.Get(baseURL)
@@ -53,7 +67,15 @@ func TestActorServesAndShutsDownGracefully(t *testing.T) {
 		}
 		requestDone <- err
 	}()
-	<-requestStarted
+	select {
+	case <-requestStarted:
+	case err := <-requestDone:
+		t.Fatalf("request finished before reaching the handler: %v", err)
+	case err := <-done:
+		t.Fatalf("Run returned before the request reached the handler: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the request to reach the handler")
+	}
 
 	cancel()
 	select {
@@ -62,12 +84,85 @@ func TestActorServesAndShutsDownGracefully(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	close(releaseRequest)
+	release()
 	if err := <-requestDone; err != nil {
 		t.Fatalf("request failed: %v", err)
 	}
 	if err := <-done; err != nil {
 		t.Fatalf("Run returned error: %v", err)
+	}
+}
+
+func TestActorForciblyClosesServerAfterShutdownTimeout(t *testing.T) {
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	defer close(releaseRequest)
+	testServer := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(requestStarted)
+		<-releaseRequest
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	serveStarted := make(chan struct{})
+	shutdownStarted := make(chan struct{})
+	actor := httpserver.NewActor("server", func(context.Context) (*http.Server, error) {
+		return testServer.Config, nil
+	}).
+		SetShutdownTimeout(10 * time.Millisecond).
+		SetServeFunc(func(_ context.Context, server *http.Server) error {
+			server.RegisterOnShutdown(func() { close(shutdownStarted) })
+			close(serveStarted)
+			<-shutdownStarted
+			return http.ErrServerClosed
+		})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- actor.Run(ctx) }()
+	select {
+	case <-serveStarted:
+	case err := <-done:
+		t.Fatalf("Run returned before serving started: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for serving to start")
+	}
+
+	requestDone := make(chan error, 1)
+	go func() {
+		response, err := testServer.Client().Get(testServer.URL)
+		if err == nil {
+			response.Body.Close()
+		}
+		requestDone <- err
+	}()
+	select {
+	case <-requestStarted:
+	case err := <-requestDone:
+		t.Fatalf("request finished before reaching the handler: %v", err)
+	case err := <-done:
+		t.Fatalf("Run returned before the request reached the handler: %v", err)
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the request to reach the handler")
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run did not return after the shutdown timeout")
+	}
+
+	select {
+	case err := <-requestDone:
+		if err == nil {
+			t.Fatal("expected the active request connection to be forcibly closed")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("active request connection was not forcibly closed")
 	}
 }
 
@@ -107,16 +202,6 @@ func TestActorReturnsFactoryError(t *testing.T) {
 	}
 }
 
-func TestActorRejectsNilServer(t *testing.T) {
-	actor := httpserver.NewActor("server", func(context.Context) (*http.Server, error) {
-		return nil, nil
-	})
-
-	if err := actor.Run(t.Context()); !errors.Is(err, httpserver.ErrNilServer) {
-		t.Fatalf("expected ErrNilServer, got %v", err)
-	}
-}
-
 func TestActorCreatesFreshServerForEveryRun(t *testing.T) {
 	var factories atomic.Int32
 	actor := httpserver.NewActor("server", func(context.Context) (*http.Server, error) {
@@ -133,31 +218,6 @@ func TestActorCreatesFreshServerForEveryRun(t *testing.T) {
 	}
 	if got := factories.Load(); got != 2 {
 		t.Fatalf("expected two server factories, got %d", got)
-	}
-}
-
-func TestActorRejectsConcurrentRun(t *testing.T) {
-	started := make(chan struct{})
-	actor := httpserver.NewActor("server", func(context.Context) (*http.Server, error) {
-		return &http.Server{}, nil
-	}).SetServeFunc(func(ctx context.Context, _ *http.Server) error {
-		close(started)
-		<-ctx.Done()
-		return nil
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- actor.Run(ctx) }()
-	<-started
-
-	if err := actor.Run(t.Context()); !errors.Is(err, httpserver.ErrActorRunning) {
-		t.Fatalf("expected ErrActorRunning, got %v", err)
-	}
-
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatalf("Run returned error: %v", err)
 	}
 }
 
@@ -181,38 +241,7 @@ func TestActorCanceledContextDoesNotCreateServer(t *testing.T) {
 func TestActorValidation(t *testing.T) {
 	server := func(context.Context) (*http.Server, error) { return &http.Server{}, nil }
 	requirePanic(t, func() { httpserver.NewActor("", server) })
-	requirePanic(t, func() { httpserver.NewActor("server", nil) })
-	requirePanic(t, func() { httpserver.NewActor("server", server).SetServeFunc(nil) })
 	requirePanic(t, func() { httpserver.NewActor("server", server).SetShutdownTimeout(0) })
-}
-
-func TestActorConfigurationFreezesAfterFirstRun(t *testing.T) {
-	actor := httpserver.NewActor("server", func(context.Context) (*http.Server, error) {
-		return &http.Server{}, nil
-	}).SetServeFunc(func(context.Context, *http.Server) error {
-		return http.ErrServerClosed
-	})
-
-	if err := actor.Run(t.Context()); err != nil {
-		t.Fatalf("Run returned error: %v", err)
-	}
-
-	requirePanic(t, func() { actor.SetServeFunc(func(context.Context, *http.Server) error { return nil }) })
-	requirePanic(t, func() { actor.SetShutdownTimeout(time.Second) })
-}
-
-func TestActorInspect(t *testing.T) {
-	actor := httpserver.NewActor("server", func(context.Context) (*http.Server, error) {
-		return &http.Server{}, nil
-	}).SetShutdownTimeout(2 * time.Second)
-
-	spec := actor.Inspect()
-	if spec.Kind != "http_server" {
-		t.Fatalf("expected http_server kind, got %q", spec.Kind)
-	}
-	if got := spec.Metadata["shutdown_timeout"]; got != 2*time.Second {
-		t.Fatalf("expected shutdown timeout, got %v", got)
-	}
 }
 
 func requirePanic(t *testing.T, fn func()) {

@@ -48,8 +48,3 @@ func TestDistinctFuncUsesLastEmittedValue(t *testing.T) {
 	}
 	close(input)
 }
-
-func TestDistinctFuncRejectsNilEquality(t *testing.T) {
-	defer expectPanic(t)
-	rx.DistinctFunc[int](make(chan int), nil)
-}

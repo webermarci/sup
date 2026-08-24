@@ -35,13 +35,3 @@ func TestMapAndFilterNest(t *testing.T) {
 		t.Fatalf("expected nested result 2, got %q", got)
 	}
 }
-
-func TestMapRejectsNilFunction(t *testing.T) {
-	defer expectPanic(t)
-	rx.Map[int, int](make(chan int), nil)
-}
-
-func TestMapRejectsNilInput(t *testing.T) {
-	defer expectPanic(t)
-	rx.Map((<-chan int)(nil), func(value int) int { return value })
-}

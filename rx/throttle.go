@@ -8,10 +8,6 @@ func ThrottleFirst[V any](
 	input <-chan V,
 	interval time.Duration,
 ) <-chan V {
-	if input == nil {
-		panic("rx: throttle input cannot be nil")
-	}
-
 	if interval <= 0 {
 		panic("rx: throttle interval must be positive")
 	}
@@ -65,10 +61,6 @@ func ThrottleLatest[V any](
 	input <-chan V,
 	interval time.Duration,
 ) <-chan V {
-	if input == nil {
-		panic("rx: throttle input cannot be nil")
-	}
-
 	if interval <= 0 {
 		panic("rx: throttle interval must be positive")
 	}

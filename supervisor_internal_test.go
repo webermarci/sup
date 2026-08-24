@@ -14,35 +14,11 @@ func TestSupervisor_EmptyRunReturns(t *testing.T) {
 	}
 }
 
-func TestSupervisor_RejectsConcurrentRun(t *testing.T) {
-	started := make(chan struct{})
-	ctx, cancel := context.WithCancel(t.Context())
-	supervisor := NewSupervisor("sup", Transient).
-		AddActor(ActorFunc("worker", func(ctx context.Context) error {
-			close(started)
-			<-ctx.Done()
-			return nil
-		}))
-
-	done := make(chan error, 1)
-	go func() { done <- supervisor.Run(ctx) }()
-	<-started
-
-	if err := supervisor.Run(t.Context()); !errors.Is(err, ErrSupervisorRunning) {
-		t.Fatalf("expected ErrSupervisorRunning, got %v", err)
-	}
-
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatalf("expected clean shutdown, got %v", err)
-	}
-}
-
 func TestSupervisor_SequentialRuns(t *testing.T) {
 	var runs atomic.Int32
 	started := make(chan struct{}, 2)
 	supervisor := NewSupervisor("sup", Temporary).
-		AddActor(ActorFunc("worker", func(ctx context.Context) error {
+		AddActors(ActorFunc("worker", func(ctx context.Context) error {
 			runs.Add(1)
 			started <- struct{}{}
 			<-ctx.Done()
@@ -87,7 +63,7 @@ func TestSupervisor_CancelsAttemptContextBeforeRestart(t *testing.T) {
 	})
 
 	supervisor := NewSupervisor("sup", Transient).
-		AddActor(actor).
+		AddActors(actor).
 		SetRestartDelay(0)
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -104,7 +80,7 @@ func TestSupervisor_CancellationNormalizesChildError(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		release := make(chan struct{})
 		supervisor := NewSupervisor("sup", Temporary).
-			AddActor(ActorFunc("worker", func(context.Context) error {
+			AddActors(ActorFunc("worker", func(context.Context) error {
 				<-release
 				return errors.New("failure during shutdown")
 			}))

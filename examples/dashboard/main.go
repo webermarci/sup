@@ -47,14 +47,6 @@ func (l *TrafficLight) ID() string {
 	return "traffic_light_controller"
 }
 
-func (l *TrafficLight) Inspect() sup.Spec {
-	return sup.Spec{
-		Kind:         "state machine",
-		Dependencies: []string{l.cycleLengthSeconds.ID(), l.paused.ID()},
-		Metadata:     map[string]any{"phases": []string{"green", "yellow", "red"}},
-	}
-}
-
 func (l *TrafficLight) Tick(ctx context.Context) error {
 	return l.ticks.Cast(ctx, Tick{})
 }
@@ -151,11 +143,7 @@ func main() {
 				}
 			}
 		}
-	}, sup.WithSpec(sup.Spec{
-		Kind:         "ticker",
-		Dependencies: []string{paused.ID(), light.ID()},
-		Metadata:     map[string]any{"interval": "1s"},
-	}))
+	})
 
 	pedestrianSignal := rx.NewDerived("pedestrian_signal", func() string {
 		if paused.Value() {
@@ -172,25 +160,22 @@ func main() {
 		SetRestartLimit(5, time.Minute).
 		AddActors(clock, light)
 
-	dashboard := hub.New("dashboard",
-		hub.WithActor(clock),
-		hub.WithActor(light),
-		hub.WithWritableSignal(cycleLengthSeconds),
-		hub.WithWritableSignal(paused),
-		hub.WithSignal(light.light),
-		hub.WithSignal(light.secondsRemaining),
-		hub.WithSignal(light.cyclesCompleted),
-		hub.WithSignal(pedestrianSignal),
-	)
+	dashboard := hub.New("dashboard").
+		RegisterActors(clock, light).
+		RegisterWritableSignal(cycleLengthSeconds).
+		RegisterWritableSignal(paused).
+		RegisterSignal(light.light).
+		RegisterSignal(light.secondsRemaining).
+		RegisterSignal(light.cyclesCompleted).
+		RegisterSignal(pedestrianSignal)
 
 	serverActor := httpserver.NewActor("dashboard.http",
 		func(context.Context) (*http.Server, error) {
-			return &http.Server{Addr: ":8080", Handler: dashboard.Handler()}, nil
+			return &http.Server{Addr: ":8080", Handler: dashboard}, nil
 		},
 	).SetShutdownTimeout(2 * time.Second)
 
 	root := sup.NewSupervisor("root", sup.Transient).
-		AddEventSink(dashboard).
 		AddActors(intersection, pedestrianSignal, dashboard, serverActor)
 
 	go func() {
