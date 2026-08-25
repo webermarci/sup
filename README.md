@@ -71,7 +71,7 @@ The most important design rules are:
 | `github.com/webermarci/sup/process` | Running `os/exec.Cmd` values as supervised actors |
 | `github.com/webermarci/sup/resource` | Supervised, serialized access to acquired resources |
 
-For the API reference, see the [core package documentation](https://pkg.go.dev/github.com/webermarci/sup), [`rx`](https://pkg.go.dev/github.com/webermarci/sup/rx), [`hub`](https://pkg.go.dev/github.com/webermarci/sup/hub), [`httpserver`](https://pkg.go.dev/github.com/webermarci/sup/httpserver), [`process`](https://pkg.go.dev/github.com/webermarci/sup/process), and [`resource`](https://pkg.go.dev/github.com/webermarci/sup/resource) package pages. The repository also contains a minimal [simple example](examples/simple) and a complete [dashboard example](examples/dashboard).
+For the API reference, see the [core package documentation](https://pkg.go.dev/github.com/webermarci/sup), [`rx`](https://pkg.go.dev/github.com/webermarci/sup/rx), [`hub`](https://pkg.go.dev/github.com/webermarci/sup/hub), [`httpserver`](https://pkg.go.dev/github.com/webermarci/sup/httpserver), [`process`](https://pkg.go.dev/github.com/webermarci/sup/process), and [`resource`](https://pkg.go.dev/github.com/webermarci/sup/resource) package pages. The repository also contains [standalone runnable examples](examples), from focused signal programs to a complete dashboard.
 
 ## Quick start
 
@@ -551,17 +551,6 @@ Endpoints include:
 - `GET /graph`
 - `GET /events`
 - `GET /events/stream`
-
-Run the traffic-light example for a compact tour of the whole stack:
-
-```bash
-go run ./examples/dashboard
-```
-
-It combines a typed inbox, nested supervision, writable controls, derived
-state, and live SSE updates. Change `cycle_length_seconds` to speed up or slow
-down the intersection. Set `paused` to `true` to put the traffic light into a
-stationary yellow state and turn the pedestrian signal off.
 
 ## Packages
 
