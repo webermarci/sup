@@ -22,6 +22,13 @@
 //	status.Set("ready")
 //	value := <-values
 //
+// WaitFor blocks until a readable's current or future value matches a condition.
+// Its context can provide cancellation or a timeout:
+//
+//	ready, err := rx.WaitFor(ctx, status, func(value string) bool {
+//		return value == "ready"
+//	})
+//
 // Update performs an atomic read-modify-write and publishes the result:
 //
 //	count.Update(func(current int) int {
@@ -103,6 +110,10 @@
 // input closes, so canceling the context used to create the first subscription
 // cancels an entire nested helper pipeline. Debounce and throttle intervals
 // must be positive.
+//
+// WaitFor owns and cancels its subscription. It returns ErrReadableClosed if a
+// custom Readable closes the subscription before a value matches while the
+// context remains active.
 //
 // Transitions and Edges use the first input value as their baseline without
 // emitting it. Repeated equal values do not produce transitions or edges.

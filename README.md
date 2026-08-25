@@ -424,6 +424,14 @@ processed := rx.Map(
 )
 ```
 
+Wait for a readable's current or future value to satisfy a condition:
+
+```go
+ready, err := rx.WaitFor(ctx, status, func(value string) bool {
+	return value == "ready"
+})
+```
+
 Available helpers:
 
 - `Map` transforms values and may change their type.
@@ -433,6 +441,7 @@ Available helpers:
 - `Transitions` emits the previous and current values for each distinct change.
 - `TransitionsFunc` detects transitions with a custom equality function.
 - `Edges` emits rising and falling boolean transitions.
+- `WaitFor` waits for a readable value that satisfies a condition.
 - `Debounce` emits after a quiet period.
 - `ThrottleFirst` immediately emits the first value in each interval.
 - `ThrottleLatest` emits the latest value at the end of each interval.
