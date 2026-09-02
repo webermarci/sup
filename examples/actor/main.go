@@ -37,7 +37,7 @@ func (c *Counter) ID() string {
 }
 
 func (c *Counter) Get() int {
-	state, _ := c.GetInbox.Call(context.Background(), GetMessage{})
+	state, _ := c.GetInbox.Call[int](context.Background(), GetMessage{})
 	return state
 }
 

@@ -100,7 +100,7 @@ func ExampleCallInbox() {
 	done := make(chan error, 1)
 	go func() { done <- supervisor.Run(ctx) }()
 
-	result, err := inbox.Call(ctx, multiply{Left: 6, Right: 7})
+	result, err := inbox.Call[int](ctx, multiply{Left: 6, Right: 7})
 	if err != nil {
 		panic(err)
 	}

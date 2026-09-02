@@ -117,7 +117,7 @@ func (c *Counter) ID() string {
 }
 
 func (c *Counter) Get(ctx context.Context) (int, error) {
-	return c.GetInbox.Call(ctx, GetMessage{})
+	return c.GetInbox.Call[int](ctx, GetMessage{})
 }
 
 func (c *Counter) Increment(ctx context.Context, amount int) error {
@@ -302,7 +302,10 @@ aggregate, or forward the same authoritative runtime event.
 
 ## Typed inboxes
 
-`CastInbox[T]` is for asynchronous messages. `CallInbox[T, R]` is for request/reply interactions.
+`CastInbox[T]` is for asynchronous messages. `CallInbox[T, R]` is for
+request/reply interactions. A call specifies the concrete response type it
+expects, while `R` defines the response type or family that handlers may
+return.
 
 ### Cast inbox
 
@@ -326,7 +329,7 @@ for {
 ```go
 inbox := sup.NewCallInbox[GetMessage, int]()
 
-value, err := inbox.Call(ctx, GetMessage{})
+value, err := inbox.Call[int](ctx, GetMessage{})
 
 for {
 	select {
@@ -339,6 +342,61 @@ for {
 	}
 }
 ```
+
+Inboxes can use interfaces to carry a heterogeneous actor protocol. The actor
+receives from one cast channel and one call channel, then uses type switches as
+pattern matching:
+
+```go
+type Message interface {
+	message()
+}
+
+type Response interface {
+	response()
+}
+
+casts := sup.NewCastInbox[Message]()
+calls := sup.NewCallInbox[Message, Response]()
+
+for {
+	select {
+	case <-ctx.Done():
+		return
+	case message := <-casts.Receive():
+		switch message := message.(type) {
+		case Start:
+			start()
+		case SetSpeed:
+			setSpeed(message.Speed)
+		}
+	case req := <-calls.Receive():
+		switch message := req.Payload().(type) {
+		case GetStatus:
+			req.Reply(currentStatus(), nil)
+		case GetConfig:
+			req.Reply(currentConfig(), nil)
+		default:
+			req.Reply(nil, fmt.Errorf("unsupported request %T", message))
+		}
+	}
+}
+```
+
+Senders use the ordinary `Cast` method. Each call specifies the concrete
+response type it expects:
+
+```go
+err := casts.Cast(ctx, SetSpeed{Speed: 42})
+status, err := calls.Call[Status](ctx, GetStatus{})
+config, err := calls.Call[Config](ctx, GetConfig{})
+```
+
+`Call[S]` returns `ErrUnexpectedResponseType` when a successful reply is not
+assignable to the response type `S` requested by the caller. With a broad
+inbox, the relationship between a request and its response is an application
+protocol checked at runtime. Separate concrete `CallInbox[T, R]` values retain
+the strongest compile-time restrictions.
 
 `CallRequest.Context` exposes the caller's context so work can stop after the
 caller leaves. `Reply` never blocks and returns whether the reply was accepted.

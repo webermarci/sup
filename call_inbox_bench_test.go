@@ -20,7 +20,24 @@ func BenchmarkCallInbox_SingleWorker(b *testing.B) {
 	}()
 
 	for i := 0; b.Loop(); i++ {
-		_, _ = inbox.Call(ctx, i)
+		_, _ = inbox.Call[int](ctx, i)
+	}
+}
+
+// BenchmarkCallInbox_HeterogeneousResponse measures a call through an inbox
+// whose permitted response type is broad while the caller requests int.
+func BenchmarkCallInbox_HeterogeneousResponse(b *testing.B) {
+	ctx := b.Context()
+	inbox := sup.NewCallInbox[int, any]()
+
+	go func() {
+		for req := range inbox.Receive() {
+			req.Reply(req.Payload()+1, nil)
+		}
+	}()
+
+	for i := 0; b.Loop(); i++ {
+		_, _ = inbox.Call[int](ctx, i)
 	}
 }
 
@@ -41,7 +58,7 @@ func BenchmarkCallInbox_Contention(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
 		for pb.Next() {
-			_, _ = inbox.Call(ctx, i)
+			_, _ = inbox.Call[int](ctx, i)
 			i++
 		}
 	})

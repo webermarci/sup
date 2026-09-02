@@ -17,7 +17,7 @@ func TestCallInbox(t *testing.T) {
 		req.Reply(len(req.Payload()), nil)
 	}()
 
-	got, err := inbox.Call(t.Context(), "calculate_length")
+	got, err := inbox.Call[int](t.Context(), "calculate_length")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,8 +33,87 @@ func TestCallInboxReplyError(t *testing.T) {
 		(<-inbox.Receive()).Reply("", expectedErr)
 	}()
 
-	if _, err := inbox.Call(t.Context(), "ping"); !errors.Is(err, expectedErr) {
+	if _, err := inbox.Call[string](t.Context(), "ping"); !errors.Is(err, expectedErr) {
 		t.Fatalf("expected %v, got %v", expectedErr, err)
+	}
+}
+
+func TestCallInboxSupportsHeterogeneousResponses(t *testing.T) {
+	inbox := sup.NewCallInbox[testCallMessage, testCallResponse]()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 2 {
+			request := <-inbox.Receive()
+			switch message := request.Payload().(type) {
+			case getTestStatus:
+				request.Reply(testStatus{running: true}, nil)
+			case getTestConfig:
+				request.Reply(testConfig{speed: message.defaultSpeed}, nil)
+			}
+		}
+	}()
+
+	status, err := inbox.Call[testStatus](t.Context(), getTestStatus{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.running {
+		t.Fatal("expected running status")
+	}
+
+	config, err := inbox.Call[testConfig](t.Context(), getTestConfig{defaultSpeed: 42})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.speed != 42 {
+		t.Fatalf("expected speed 42, got %d", config.speed)
+	}
+	<-done
+}
+
+func TestCallInboxRejectsUnexpectedResponseType(t *testing.T) {
+	inbox := sup.NewCallInbox[testCallMessage, testCallResponse]()
+	go func() {
+		request := <-inbox.Receive()
+		if !request.Reply(testConfig{speed: 42}, nil) {
+			t.Error("expected mismatched response to reach the caller")
+		}
+	}()
+
+	_, err := inbox.Call[testStatus](t.Context(), getTestStatus{})
+	if !errors.Is(err, sup.ErrUnexpectedResponseType) {
+		t.Fatalf("expected unexpected response type, got %v", err)
+	}
+}
+
+func TestCallInboxReplyErrorDoesNotRequireExpectedResponseType(t *testing.T) {
+	expectedErr := errors.New("request failed")
+	inbox := sup.NewCallInbox[testCallMessage, testCallResponse]()
+	go func() {
+		request := <-inbox.Receive()
+		request.Reply(nil, expectedErr)
+	}()
+
+	_, err := inbox.Call[testStatus](t.Context(), getTestStatus{})
+	if !errors.Is(err, expectedErr) {
+		t.Fatalf("expected reply error, got %v", err)
+	}
+}
+
+func TestCallInboxAllowsNilInterfaceResponse(t *testing.T) {
+	inbox := sup.NewCallInbox[string, any]()
+	go func() {
+		request := <-inbox.Receive()
+		request.Reply(nil, nil)
+	}()
+
+	response, err := inbox.Call[any](t.Context(), "request")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response != nil {
+		t.Fatalf("expected nil response, got %v", response)
 	}
 }
 
@@ -51,7 +130,7 @@ func TestCallInboxWaitingForReplyCanBeCanceled(t *testing.T) {
 		cancel()
 	}()
 
-	if _, err := inbox.Call(ctx, "no reply"); !errors.Is(err, context.Canceled) {
+	if _, err := inbox.Call[int](ctx, "no reply"); !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context cancellation, got %v", err)
 	}
 }
@@ -71,7 +150,7 @@ func TestCallRequestExposesCallerContext(t *testing.T) {
 		req.Reply("ok", nil)
 	}()
 
-	if got, err := inbox.Call(ctx, "request"); err != nil || got != "ok" {
+	if got, err := inbox.Call[string](ctx, "request"); err != nil || got != "ok" {
 		t.Fatalf("expected reply ok, got %q, %v", got, err)
 	}
 	<-done
@@ -91,7 +170,7 @@ func TestCallRequestReplyOnlySucceedsOnce(t *testing.T) {
 		close(received)
 	}()
 
-	if got, err := inbox.Call(t.Context(), "request"); err != nil || got != "first" {
+	if got, err := inbox.Call[string](t.Context(), "request"); err != nil || got != "first" {
 		t.Fatalf("expected first reply, got %q, %v", got, err)
 	}
 	<-received
@@ -104,7 +183,7 @@ func TestCallRequestReplyHasOneConcurrentWinner(t *testing.T) {
 
 	callDone := make(chan error, 1)
 	go func() {
-		_, err := inbox.Call(t.Context(), "request")
+		_, err := inbox.Call[int](t.Context(), "request")
 		callDone <- err
 	}()
 
@@ -144,7 +223,7 @@ func TestCallRequestReplyFailsAfterCancellation(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := inbox.Call(ctx, "request")
+		_, err := inbox.Call[string](ctx, "request")
 		done <- err
 	}()
 	req := <-reqCh
@@ -166,7 +245,7 @@ func TestCallInboxCallCanBeCanceledWhileAdmissionIsBlocked(t *testing.T) {
 	}
 	done := make(chan error, 1)
 	go func() {
-		_, err := inbox.Call(ctx, "blocked")
+		_, err := inbox.Call[int](ctx, "blocked")
 		done <- err
 	}()
 
@@ -190,6 +269,36 @@ type doneObservedContext struct {
 	observed chan struct{}
 	sync.Once
 }
+
+type testCallMessage interface {
+	testCallMessage()
+}
+
+type getTestStatus struct{}
+
+func (getTestStatus) testCallMessage() {}
+
+type getTestConfig struct {
+	defaultSpeed int
+}
+
+func (getTestConfig) testCallMessage() {}
+
+type testCallResponse interface {
+	testCallResponse()
+}
+
+type testStatus struct {
+	running bool
+}
+
+func (testStatus) testCallResponse() {}
+
+type testConfig struct {
+	speed int
+}
+
+func (testConfig) testCallResponse() {}
 
 func (c *doneObservedContext) Done() <-chan struct{} {
 	c.Once.Do(func() { close(c.observed) })

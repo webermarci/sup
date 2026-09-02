@@ -30,8 +30,10 @@
 // Use CastInbox[T] for fire-and-forget messages and CallInbox[T, R] for
 // request/reply operations. Inboxes are unbuffered, so Cast and Call block
 // until the actor receives the message or the context is canceled. Call
-// handlers should reply at most once and should tolerate a caller that has
-// already canceled its context.
+// callers specify their expected response type with Call[S]. The inbox's R
+// type parameter defines the response type or interface that handlers may
+// return. Handlers should reply at most once and should tolerate a caller that
+// has already canceled its context.
 //
 // # Reactive state
 //
