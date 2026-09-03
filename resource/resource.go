@@ -11,38 +11,19 @@ import (
 
 const defaultReleaseTimeout = 5 * time.Second
 
-// ErrExecutionStopped is returned when an accepted Call cannot complete
+// ErrExecutionStopped is returned when an accepted [Actor.Call] cannot complete
 // because its resource execution stopped before producing a reply. The
 // operation is not retried because it may already have produced side effects.
 var ErrExecutionStopped = errors.New("resource: execution stopped before call completed")
 
-// AcquireFunc creates a resource for one execution attempt. It should honor
-// ctx and return a fresh resource for every attempt because the previous
-// resource is released when its actor stops.
-type AcquireFunc[T any] func(context.Context) (T, error)
-
-// ReleaseFunc releases a resource after its execution attempt ends. The
-// context preserves the actor context's values, ignores its cancellation, and
-// has a fresh ReleaseTimeout deadline.
-type ReleaseFunc[T any] func(context.Context, T) error
-
-// CallFunc performs a serialized request/reply operation on a resource. Its
-// context is canceled when either the caller or the resource actor stops. An
-// operation error is returned to the caller and terminates the resource actor.
-type CallFunc[T any, R any] func(context.Context, T) (R, error)
-
-// CastFunc performs a serialized fire-and-forget operation on a resource. Its
-// context is the resource actor's execution context. An operation error
-// terminates the resource actor and is handled by supervision.
-type CastFunc[T any] func(context.Context, T) error
-
-// Actor acquires a resource for each execution attempt and serializes Call and
-// Cast operations against it until its context is canceled or an operation
-// fails. A supervisor can restart it to acquire a fresh resource.
+// Actor acquires a resource for each execution attempt and serializes
+// [Actor.Call] and [Actor.Cast] operations against it until its context is
+// canceled or an operation fails. A supervisor can restart it to acquire a
+// fresh resource.
 type Actor[T any] struct {
 	id             string
-	acquire        AcquireFunc[T]
-	release        ReleaseFunc[T]
+	acquire        func(context.Context) (T, error)
+	release        func(context.Context, T) error
 	releaseTimeout time.Duration
 	mu             sync.Mutex
 	current        *execution[T]
@@ -69,17 +50,21 @@ type callResult struct {
 var _ sup.Actor = (*Actor[any])(nil)
 
 // NewActor creates a resource actor. The acquire function is called once per
-// execution attempt, and the release function is called exactly once after a
-// successful acquisition, including when the resource actor fails. Operations
-// made before the first Run and between execution attempts wait for the actor
-// to become ready. A request that has not been accepted carries over to the
-// next execution attempt. Release defaults to a five-second timeout.
+// execution attempt. It should honor its context and return a fresh resource
+// because the previous resource is released when its actor stops. The release
+// function is called exactly once after a successful acquisition, including
+// when the resource actor fails. Its context preserves the actor context's
+// values, ignores its cancellation, and has a fresh release timeout deadline.
+// Operations made before the first Run and between execution attempts wait for
+// the actor to become ready. A request that has not been accepted carries over
+// to the next execution attempt. The release timeout defaults to five seconds.
 //
-// Optional configuration is added with methods before the first Run call.
+// Optional configuration is added with methods before the first [Actor.Run]
+// call.
 func NewActor[T any](
 	id string,
-	acquire AcquireFunc[T],
-	release ReleaseFunc[T],
+	acquire func(context.Context) (T, error),
+	release func(context.Context, T) error,
 ) *Actor[T] {
 	if id == "" {
 		panic("resource: actor id cannot be empty")
@@ -108,10 +93,11 @@ func (a *Actor[T]) ID() string {
 	return a.id
 }
 
-// Run acquires one resource and processes serialized operations until the actor
-// context is canceled or an operation returns an error. Cancellation is a clean
-// shutdown and returns nil. Call errors are returned to their callers, and both
-// Call and Cast errors are returned from Run for supervision.
+// Run acquires one resource and processes serialized operations until the
+// actor context is canceled or an operation returns an error. Cancellation is
+// a clean shutdown and returns nil. [Actor.Call] errors are returned to their
+// callers, and both [Actor.Call] and [Actor.Cast] errors are returned from Run
+// for supervision.
 func (a *Actor[T]) Run(ctx context.Context) (runErr error) {
 	var current *execution[T]
 	defer func() {
@@ -205,10 +191,9 @@ func (a *Actor[T]) Run(ctx context.Context) (runErr error) {
 // caller's context controls both handoff and execution. Operation errors are
 // returned to the caller and stop the resource actor so supervision can decide
 // whether to restart it.
-func Call[T any, R any](
+func (a *Actor[T]) Call[R any](
 	ctx context.Context,
-	actor *Actor[T],
-	operation CallFunc[T, R],
+	operation func(context.Context, T) (R, error),
 ) (R, error) {
 	var zero R
 	reply := make(chan callResult, 1)
@@ -219,7 +204,7 @@ func Call[T any, R any](
 			return operation(operationCtx, value)
 		},
 	}
-	current, err := actor.enqueue(ctx, req)
+	current, err := a.enqueue(ctx, req)
 	if err != nil {
 		return zero, err
 	}
@@ -262,12 +247,11 @@ func unpackCallResult[R any](result callResult) (R, error) {
 // context passed to operation is the actor's execution context; ctx controls
 // handoff. If the operation returns an error, the resource actor stops and
 // supervision decides whether to restart it.
-func Cast[T any](
+func (a *Actor[T]) Cast(
 	ctx context.Context,
-	actor *Actor[T],
-	operation CastFunc[T],
+	operation func(context.Context, T) error,
 ) error {
-	_, err := actor.enqueue(ctx, request[T]{
+	_, err := a.enqueue(ctx, request[T]{
 		cast: operation,
 	})
 	return err

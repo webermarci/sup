@@ -44,7 +44,7 @@ func TestCallAndCast(t *testing.T) {
 	}
 
 	cancel, done := startActor(t, actor)
-	value, err := resource.Call(t.Context(), actor, func(ctx context.Context, value testResource) (int, error) {
+	value, err := actor.Call(t.Context(), func(ctx context.Context, value testResource) (int, error) {
 		if err := ctx.Err(); err != nil {
 			return 0, err
 		}
@@ -55,7 +55,7 @@ func TestCallAndCast(t *testing.T) {
 	}
 
 	castRan := make(chan struct{})
-	if err := resource.Cast(t.Context(), actor, func(context.Context, testResource) error {
+	if err := actor.Cast(t.Context(), func(context.Context, testResource) error {
 		close(castRan)
 		return nil
 	}); err != nil {
@@ -103,7 +103,7 @@ func TestCallFailureReleasesAndReacquires(t *testing.T) {
 		t.Fatalf("first acquired resource = %d, want 1", got)
 	}
 	wantErr := errors.New("read failed")
-	value, err := resource.Call(t.Context(), actor, func(context.Context, int) (int, error) {
+	value, err := actor.Call(t.Context(), func(context.Context, int) (int, error) {
 		return 0, wantErr
 	})
 	if value != 0 || !errors.Is(err, wantErr) {
@@ -120,7 +120,7 @@ func TestCallFailureReleasesAndReacquires(t *testing.T) {
 	if got := awaitInt(t, acquired); got != 2 {
 		t.Fatalf("second acquired resource = %d, want 2", got)
 	}
-	value, err = resource.Call(t.Context(), actor, func(context.Context, int) (int, error) {
+	value, err = actor.Call(t.Context(), func(context.Context, int) (int, error) {
 		return 7, nil
 	})
 	if err != nil || value != 7 {
@@ -161,7 +161,7 @@ func TestCallReturnsExecutionStoppedWhenOperationPanics(t *testing.T) {
 		t.Fatal("resource was not acquired")
 	}
 
-	_, err := resource.Call(t.Context(), actor, func(context.Context, int) (int, error) {
+	_, err := actor.Call(t.Context(), func(context.Context, int) (int, error) {
 		panic("operation panicked")
 	})
 	if !errors.Is(err, resource.ErrExecutionStopped) {
@@ -201,7 +201,7 @@ func TestOperationsWaitBetweenExecutions(t *testing.T) {
 			t.Fatalf("first acquired resource = %d, want 1", got)
 		}
 		wantErr := errors.New("connection lost")
-		if _, err := resource.Call(t.Context(), actor, func(context.Context, int) (int, error) {
+		if _, err := actor.Call(t.Context(), func(context.Context, int) (int, error) {
 			return 0, wantErr
 		}); !errors.Is(err, wantErr) {
 			t.Fatalf("failing Call() = %v, want connection lost", err)
@@ -218,13 +218,13 @@ func TestOperationsWaitBetweenExecutions(t *testing.T) {
 		castDone := make(chan error, 1)
 		castRan := make(chan struct{})
 		go func() {
-			value, err := resource.Call(t.Context(), actor, func(_ context.Context, value int) (int, error) {
+			value, err := actor.Call(t.Context(), func(_ context.Context, value int) (int, error) {
 				return value, nil
 			})
 			callDone <- callResult{value: value, err: err}
 		}()
 		go func() {
-			castDone <- resource.Cast(t.Context(), actor, func(context.Context, int) error {
+			castDone <- actor.Cast(t.Context(), func(context.Context, int) error {
 				close(castRan)
 				return nil
 			})
@@ -286,7 +286,7 @@ func TestCallWaitsAcrossAcquisitionFailure(t *testing.T) {
 
 		result := make(chan error, 1)
 		go func() {
-			value, err := resource.Call(t.Context(), actor, func(_ context.Context, value int) (int, error) {
+			value, err := actor.Call(t.Context(), func(_ context.Context, value int) (int, error) {
 				return value, nil
 			})
 			if err == nil && value != 42 {
@@ -341,7 +341,7 @@ func TestOperationsAreSerialized(t *testing.T) {
 	results := make(chan error, 3)
 	for i := range 3 {
 		go func(index int) {
-			_, err := resource.Call(t.Context(), actor, func(context.Context, testResource) (int, error) {
+			_, err := actor.Call(t.Context(), func(context.Context, testResource) (int, error) {
 				current := active.Add(1)
 				updateMaximum(current)
 				if index == 0 {
@@ -387,7 +387,7 @@ func TestOperationHandoffHonorsCancellation(t *testing.T) {
 
 		activeStarted := make(chan struct{})
 		releaseActive := make(chan struct{})
-		if err := resource.Cast(t.Context(), actor, func(context.Context, testResource) error {
+		if err := actor.Cast(t.Context(), func(context.Context, testResource) error {
 			close(activeStarted)
 			<-releaseActive
 			return nil
@@ -403,7 +403,7 @@ func TestOperationHandoffHonorsCancellation(t *testing.T) {
 		callCtx, cancelCall := context.WithCancel(t.Context())
 		blocked := make(chan error, 1)
 		go func() {
-			blocked <- resource.Cast(callCtx, actor, func(context.Context, testResource) error { return nil })
+			blocked <- actor.Cast(callCtx, func(context.Context, testResource) error { return nil })
 		}()
 		synctest.Wait()
 		cancelCall()
@@ -444,7 +444,7 @@ func TestCastFailureReleasesAndReacquires(t *testing.T) {
 		t.Fatalf("first acquired resource = %d, want 1", got)
 	}
 	wantErr := errors.New("connection lost")
-	if err := resource.Cast(t.Context(), actor, func(context.Context, int) error { return wantErr }); err != nil {
+	if err := actor.Cast(t.Context(), func(context.Context, int) error { return wantErr }); err != nil {
 		t.Fatalf("failing Cast() = %v, want nil handoff result", err)
 	}
 	if err := awaitRun(t, firstDone); !errors.Is(err, wantErr) {
